@@ -1,4 +1,5 @@
 import { SipFaxServer } from './server.js';
+import { OperatorHttpServer } from './operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, parseList, parseUsers } from './ppp.js';
 
 const config = {
@@ -6,6 +7,9 @@ const config = {
   publicHost: process.env.SIPFAX_PUBLIC_HOST ?? '127.0.0.1',
   sipPort: Number.parseInt(process.env.SIPFAX_SIP_PORT ?? '5060', 10),
   rtpPort: Number.parseInt(process.env.SIPFAX_RTP_PORT ?? '40000', 10),
+  operatorHost: process.env.SIPFAX_OPERATOR_HOST ?? '127.0.0.1',
+  operatorPort: Number.parseInt(process.env.SIPFAX_OPERATOR_PORT ?? '8080', 10),
+  freepbxExtension: process.env.SIPFAX_FREEPBX_EXTENSION ?? 'faxmodem',
   ppp: new PppSessionController({
     credentials: new PppCredentialStore(parseUsers(process.env.SIPFAX_PPP_USERS)),
     addressPool: new AddressPool({
@@ -24,16 +28,28 @@ const config = {
 };
 
 const server = new SipFaxServer(config);
+const operator = new OperatorHttpServer({
+  host: config.operatorHost,
+  port: config.operatorPort,
+  diagnostics: () => server.diagnostics(),
+  freepbx: {
+    serverHost: config.publicHost,
+    sipPort: config.sipPort,
+    extension: config.freepbxExtension
+  }
+});
 
 await server.start();
+await operator.start();
 
 console.log(
   `SIPfax listening on udp://${config.host}:${config.sipPort}, RTP udp://${config.host}:${config.rtpPort}`
 );
+console.log(`SIPfax operator HTTP listening on http://${config.operatorHost}:${config.operatorPort}`);
 console.log(`PPP users configured: ${config.ppp.diagnostics().configuredUsers}`);
 
 const shutdown = async () => {
-  await server.stop();
+  await Promise.all([operator.stop(), server.stop()]);
   process.exit(0);
 };
 

@@ -96,6 +96,8 @@ export class SingleSessionManager {
 
   diagnostics() {
     return {
+      active: this.activeSession ? 1 : 0,
+      limit: 1,
       activeCallId: this.activeSession?.callId ?? null,
       activeSessionState: this.activeSession?.state ?? null,
       ppp: this.ppp.diagnostics()

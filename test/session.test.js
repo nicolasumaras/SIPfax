@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseRtpPacket } from '../src/media.js';
+import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { SingleSessionManager } from '../src/session.js';
 import { parseSdpOffer } from '../src/sdp.js';
@@ -125,6 +126,77 @@ test('RTP parser extracts static payload type and payload bytes', () => {
   assert.equal(parsed.timestamp, 1000);
   assert.deepEqual([...parsed.payload], [0xff, 0xfe, 0xfd]);
 });
+
+test('operator health reports degraded when PPP users are missing', () => {
+  const health = buildHealth(makeDiagnostics({ configuredUsers: 0 }));
+
+  assert.equal(health.status, 'degraded');
+  assert.equal(health.checks.sipListening, true);
+  assert.equal(health.checks.rtpListening, true);
+  assert.equal(health.checks.pppUsersConfigured, false);
+  assert.equal(health.checks.sessionCapacityAvailable, true);
+});
+
+test('operator metrics expose session, SIP, RTP, and PPP counters', () => {
+  const metrics = renderMetrics(makeDiagnostics({
+    activeSessions: 1,
+    invitesAccepted: 2,
+    invitesRejected: 1,
+    rtpFramesAccepted: 12,
+    rtpFramesDropped: 3,
+    activeLeases: 1
+  }));
+
+  assert.match(metrics, /sipfax_active_sessions 1/);
+  assert.match(metrics, /sipfax_session_limit 1/);
+  assert.match(metrics, /sipfax_invites_total\{outcome="accepted"\} 2/);
+  assert.match(metrics, /sipfax_invites_total\{outcome="rejected"\} 1/);
+  assert.match(metrics, /sipfax_rtp_frames_total 12/);
+  assert.match(metrics, /sipfax_rtp_dropped_total 3/);
+  assert.match(metrics, /sipfax_ppp_active_leases 1/);
+});
+
+test('FreePBX PJSIP snippet keeps Asterisk out of the media feature path', () => {
+  const config = renderFreePbxPjsip({
+    serverHost: '198.51.100.5',
+    sipPort: 5060,
+    extension: '4900'
+  });
+
+  assert.match(config, /Route extension 4900/);
+  assert.match(config, /allow=ulaw,alaw/);
+  assert.match(config, /t38_udptl=no/);
+  assert.match(config, /direct_media=no/);
+  assert.match(config, /contact=sip:198\.51\.100\.5:5060/);
+  assert.match(config, /max_contacts=1/);
+});
+
+function makeDiagnostics({
+  activeSessions = 0,
+  configuredUsers = 1,
+  invitesAccepted = 0,
+  invitesRejected = 0,
+  rtpFramesAccepted = 0,
+  rtpFramesDropped = 0,
+  activeLeases = 0
+} = {}) {
+  return {
+    sip: { listening: true },
+    rtp: { listening: true },
+    sessions: { active: activeSessions, limit: 1 },
+    ppp: {
+      configuredUsers,
+      addressPool: { activeLeases },
+      egress: {}
+    },
+    metrics: {
+      invitesAccepted,
+      invitesRejected,
+      rtpFramesAccepted,
+      rtpFramesDropped
+    }
+  };
+}
 
 function makeInvite({ callId, payloads }) {
   return [

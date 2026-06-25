@@ -1,8 +1,11 @@
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
 
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
+const MODEM_FRAME_HEADER_BYTES = 2;
+const MAX_MODEM_FRAME_BYTES = 0xffff;
 
 export const G711_CODECS = new Map([
   [0, { payloadType: 0, name: 'PCMU', clockRate: 8000 }],
@@ -229,6 +232,7 @@ export class ModemBridge extends EventEmitter {
     return {
       codec: this.codec?.name ?? null,
       modemAttached: Boolean(this.modem),
+      modem: this.modem?.diagnostics ? this.modem.diagnostics() : null,
       framesIn: this.framesIn,
       framesOut: this.framesOut,
       audioBytesIn: this.audioBytesIn,
@@ -302,6 +306,146 @@ export class ModemAnswerToneSource extends EventEmitter {
     }
     this.sampleOffset += this.frameSamples;
     return payload;
+  }
+}
+
+export class ExternalModemProcessBackend extends EventEmitter {
+  constructor({
+    command,
+    args = [],
+    env = {},
+    restartOnCodecChange = true,
+    frameHeaderBytes = MODEM_FRAME_HEADER_BYTES
+  } = {}) {
+    super();
+    if (!command) {
+      throw new Error('External modem backend command is required');
+    }
+
+    this.command = command;
+    this.args = [...args];
+    this.env = { ...env };
+    this.restartOnCodecChange = restartOnCodecChange;
+    this.frameHeaderBytes = frameHeaderBytes;
+    this.codec = null;
+    this.child = null;
+    this.stdoutBuffer = Buffer.alloc(0);
+    this.framesIn = 0;
+    this.framesOut = 0;
+    this.lastExit = null;
+  }
+
+  setSessionCodec(codec) {
+    const nextCodec = codec ?? null;
+    const codecChanged = this.codec?.payloadType !== nextCodec?.payloadType;
+    this.codec = nextCodec;
+
+    if (!this.codec) {
+      this.stop();
+      return;
+    }
+
+    if (!this.child || (codecChanged && this.restartOnCodecChange)) {
+      this.start();
+    }
+  }
+
+  start() {
+    this.stop();
+    this.stdoutBuffer = Buffer.alloc(0);
+    this.lastExit = null;
+
+    const child = spawn(this.command, this.args, {
+      env: {
+        ...process.env,
+        ...this.env,
+        SIPFAX_MODEM_CODEC: this.codec?.name ?? '',
+        SIPFAX_MODEM_PAYLOAD_TYPE: String(this.codec?.payloadType ?? ''),
+        SIPFAX_MODEM_CLOCK_RATE: String(this.codec?.clockRate ?? '')
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    this.child = child;
+
+    child.stdout.on('data', (chunk) => {
+      this.acceptProcessOutput(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      this.emit('backend-log', chunk.toString('utf8'));
+    });
+    child.on('error', (error) => {
+      this.emit('backend-error', error);
+    });
+    child.on('exit', (code, signal) => {
+      this.lastExit = { code, signal };
+      if (this.child === child) {
+        this.child = null;
+      }
+      this.emit('backend-exit', this.lastExit);
+    });
+  }
+
+  writeInboundAudio(payload) {
+    if (!this.codec || !this.child) {
+      return false;
+    }
+
+    const frame = Buffer.from(payload);
+    if (frame.length > MAX_MODEM_FRAME_BYTES) {
+      this.emit('backend-error', new Error(`modem frame exceeds ${MAX_MODEM_FRAME_BYTES} bytes`));
+      return false;
+    }
+
+    const encoded = Buffer.alloc(this.frameHeaderBytes + frame.length);
+    encoded.writeUInt16BE(frame.length, 0);
+    frame.copy(encoded, this.frameHeaderBytes);
+    this.framesIn += 1;
+    return this.child.stdin.write(encoded);
+  }
+
+  acceptProcessOutput(chunk) {
+    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
+
+    while (this.stdoutBuffer.length >= this.frameHeaderBytes) {
+      const frameLength = this.stdoutBuffer.readUInt16BE(0);
+      const packetLength = this.frameHeaderBytes + frameLength;
+      if (this.stdoutBuffer.length < packetLength) {
+        return;
+      }
+
+      const frame = this.stdoutBuffer.subarray(this.frameHeaderBytes, packetLength);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(packetLength);
+      this.framesOut += 1;
+      this.emit('outbound-audio', Buffer.from(frame), {
+        codec: this.codec,
+        payloadType: this.codec?.payloadType ?? null,
+        timestampIncrement: frame.length
+      });
+    }
+  }
+
+  stop() {
+    if (!this.child) {
+      return;
+    }
+
+    const child = this.child;
+    this.child = null;
+    child.stdin.end();
+    child.kill('SIGTERM');
+  }
+
+  diagnostics() {
+    return {
+      type: 'external-process',
+      command: this.command,
+      running: Boolean(this.child),
+      codec: this.codec?.name ?? null,
+      framesIn: this.framesIn,
+      framesOut: this.framesOut,
+      lastExit: this.lastExit
+    };
   }
 }
 

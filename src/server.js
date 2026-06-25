@@ -1,10 +1,10 @@
 import dgram from 'node:dgram';
-import { ModemAnswerToneSource, ModemBridge, RtpEndpoint } from './media.js';
+import { ModemBridge, RtpEndpoint } from './media.js';
 import { SingleSessionManager } from './session.js';
 import { buildResponse, parseSipMessage } from './sip.js';
 
 export class SipFaxServer {
-  constructor({ host, publicHost, sipPort, rtpPort, ppp, modem = new ModemAnswerToneSource() }) {
+  constructor({ host, publicHost, sipPort, rtpPort, ppp, modem = null }) {
     this.host = host;
     this.publicHost = publicHost;
     this.sipPort = sipPort;

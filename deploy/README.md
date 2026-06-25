@@ -67,11 +67,19 @@ Required first-deploy values:
 
 - `SIPFAX_PUBLIC_HOST`: the dedicated SIPfax VM IP on `vmbr0`
 - `SIPFAX_FREEPBX_EXTENSION`: `12345678`
+- `SIPFAX_MODEM_COMMAND`: executable for the external modem backend that
+  bridges length-prefixed G.711 frames to the attached hardware modem service
 - `SIPFAX_PPP_USERS`: one or more `username:password` entries
 - `SIPFAX_EGRESS_INTERFACE`: the VM network interface used for outbound traffic
 
 Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management network
 or proxy is added.
+
+The modem backend command is part of the live call path. It must read
+two-byte-length-prefixed G.711 payloads from stdin and write the same framed
+format to stdout after driving the real modem negotiation and PPP data path. A
+deployment that leaves `SIPFAX_MODEM_COMMAND` unset will fail fast at service
+startup instead of answering calls with a synthetic tone loop.
 
 ## systemd Install
 

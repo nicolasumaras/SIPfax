@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
-import { buildRtpPacket, G711_CODECS, ModemAnswerToneSource, ModemBridge, parseRtpPacket } from '../src/media.js';
+import {
+  buildRtpPacket,
+  ExternalModemProcessBackend,
+  G711_CODECS,
+  ModemAnswerToneSource,
+  ModemBridge,
+  parseRtpPacket
+} from '../src/media.js';
 import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { SipFaxServer } from '../src/server.js';
@@ -156,6 +163,7 @@ test('modem bridge hands inbound G.711 payload bytes to the downstream modem pat
   assert.deepEqual(bridge.diagnostics(), {
     codec: 'PCMU',
     modemAttached: true,
+    modem: null,
     framesIn: 1,
     framesOut: 0,
     audioBytesIn: 3,
@@ -196,6 +204,52 @@ test('modem bridge subscribes to outbound audio emitted by the attached modem', 
   assert.equal(emitted[0].timestampIncrement, 160);
   assert.deepEqual([...emitted[0].payload], [0xff, 0xfe]);
   assert.equal(bridge.diagnostics().framesOut, 1);
+});
+
+test('external modem process backend exchanges framed G.711 payloads with a real process', async () => {
+  const backend = new ExternalModemProcessBackend({
+    command: process.execPath,
+    args: [
+      '-e',
+      [
+        'let buffer = Buffer.alloc(0);',
+        'process.stdin.on("data", (chunk) => {',
+        '  buffer = Buffer.concat([buffer, chunk]);',
+        '  while (buffer.length >= 2) {',
+        '    const length = buffer.readUInt16BE(0);',
+        '    if (buffer.length < length + 2) return;',
+        '    const payload = Buffer.from(buffer.subarray(2, length + 2));',
+        '    buffer = buffer.subarray(length + 2);',
+        '    payload[0] = Number(process.env.SIPFAX_MODEM_PAYLOAD_TYPE);',
+        '    const header = Buffer.alloc(2);',
+        '    header.writeUInt16BE(payload.length, 0);',
+        '    process.stdout.write(Buffer.concat([header, payload]));',
+        '  }',
+        '});'
+      ].join('')
+    ]
+  });
+
+  try {
+    const outbound = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timed out waiting for modem process output')), 500);
+      backend.once('outbound-audio', (payload, metadata) => {
+        clearTimeout(timeout);
+        resolve({ payload, metadata });
+      });
+    });
+
+    backend.setSessionCodec(G711_CODECS.get(8));
+    assert.equal(backend.writeInboundAudio(Buffer.from([0xd5, 0x22, 0x33])), true);
+
+    const emitted = await outbound;
+    assert.deepEqual([...emitted.payload], [8, 0x22, 0x33]);
+    assert.equal(emitted.metadata.payloadType, 8);
+    assert.equal(emitted.metadata.timestampIncrement, 3);
+    assert.equal(backend.diagnostics().running, true);
+  } finally {
+    backend.stop();
+  }
 });
 
 test('default modem answer-tone source emits negotiated G.711 handshake frames', () => {

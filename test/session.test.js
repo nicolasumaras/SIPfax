@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseRtpPacket } from '../src/media.js';
+import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { SingleSessionManager } from '../src/session.js';
 import { parseSdpOffer } from '../src/sdp.js';
 import { buildResponse, parseSipMessage } from '../src/sip.js';
@@ -52,8 +53,50 @@ test('ACK establishes and BYE frees the single-session slot', () => {
 
   assert.equal(manager.acknowledge('call-4'), true);
   assert.equal(manager.activeSession.state, 'established');
+  assert.equal(manager.activeSession.ppp.state, 'awaiting-auth');
   assert.equal(manager.terminate('call-4'), true);
   assert.equal(manager.activeSession, null);
+});
+
+test('PPP authentication assigns client address and DNS for an established call', () => {
+  const ppp = new PppSessionController({
+    credentials: new PppCredentialStore([{ username: 'fax', password: 'secret' }]),
+    addressPool: new AddressPool({ cidr: '10.70.0.0/30' }),
+    dnsServers: ['1.1.1.1']
+  });
+  const manager = new SingleSessionManager({
+    publicHost: '198.51.100.5',
+    localRtpPort: 40000,
+    ppp
+  });
+
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-ppp', payloads: '0' })));
+  manager.acknowledge('call-ppp');
+
+  const rejected = manager.authenticatePpp('call-ppp', { username: 'fax', password: 'wrong' });
+  assert.equal(rejected.authenticated, false);
+  assert.equal(rejected.reason, 'invalid-credentials');
+
+  const accepted = manager.authenticatePpp('call-ppp', { username: 'fax', password: 'secret' });
+  assert.equal(accepted.authenticated, true);
+  assert.equal(accepted.session.lease.localAddress, '10.70.0.1');
+  assert.equal(accepted.session.lease.clientAddress, '10.70.0.2');
+  assert.deepEqual(accepted.session.dnsServers, ['1.1.1.1']);
+  assert.equal(manager.diagnostics().ppp.addressPool.activeLeases, 1);
+
+  manager.terminate('call-ppp');
+  assert.equal(ppp.diagnostics().addressPool.activeLeases, 0);
+});
+
+test('egress policy allows public internet and blocks private destinations by default', () => {
+  const policy = new EgressPolicy({ clientCidr: '10.70.0.0/24', outboundInterface: 'eth0' });
+
+  assert.equal(policy.allows({ destination: '8.8.8.8', protocol: 'udp', destinationPort: 53 }), true);
+  assert.equal(policy.allows({ destination: '192.168.1.1', protocol: 'tcp', destinationPort: 443 }), false);
+  assert.equal(policy.allows({ destination: '203.0.113.20', protocol: 'tcp', destinationPort: 443 }), false);
+  assert.match(policy.firewallRules().join('\n'), /MASQUERADE/);
+  assert.match(policy.firewallRules().join('\n'), /-d 0\.0\.0\.0\/0 -o eth0 -j ACCEPT/);
+  assert.match(policy.firewallRules().join('\n'), /-d 192\.168\.0\.0\/16 -j REJECT/);
 });
 
 test('SIP 200 OK answer carries SDP and dialog headers', () => {

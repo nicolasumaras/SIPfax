@@ -9,6 +9,20 @@ test('systemd unit keeps Node 24 compatible executable memory policy', async () 
   assert.doesNotMatch(unit, /MemoryDenyWriteExecute=true/);
 });
 
+test('systemd unit allows SIPfax runtime artifact directories', async () => {
+  const [unit, installer, runbook] = await Promise.all([
+    readFile(new URL('../deploy/sipfax.service', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/install-systemd.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(unit, /ProtectSystem=strict/);
+  assert.match(unit, /ReadWritePaths=.*\/var\/cache\/sipfax.*\/var\/log\/sipfax/);
+  assert.match(installer, /install -d -m 0755 -o sipfax -g sipfax \/var\/cache\/sipfax/);
+  assert.match(installer, /install -d -m 0755 -o sipfax -g sipfax \/var\/log\/sipfax/);
+  assert.match(runbook, /\/var\/log\/sipfax/);
+});
+
 test('deploy runbook documents the Node 24 systemd hardening exception', async () => {
   const runbook = await readFile(new URL('../deploy/README.md', import.meta.url), 'utf8');
 

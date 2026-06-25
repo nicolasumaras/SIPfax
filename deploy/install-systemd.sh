@@ -20,6 +20,7 @@ fi
 
 install -m 0644 "${repo_root}/deploy/sipfax.service" /etc/systemd/system/sipfax.service
 install -d -m 0755 -o sipfax -g sipfax /var/cache/sipfax
+install -d -m 0755 -o sipfax -g sipfax /var/log/sipfax
 systemctl daemon-reload
 
 echo "Installed sipfax.service. Run: systemctl enable --now sipfax.service"

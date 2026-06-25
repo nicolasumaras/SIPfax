@@ -35,6 +35,8 @@ Configuration is environment-driven:
 | `SIPFAX_OPERATOR_HOST` | `127.0.0.1` | HTTP bind host for health, metrics, and FreePBX snippets |
 | `SIPFAX_OPERATOR_PORT` | `8080` | HTTP port for operator endpoints |
 | `SIPFAX_FREEPBX_EXTENSION` | `faxmodem` | FreePBX route/extension label shown in the generated PJSIP snippet |
+| `SIPFAX_MODEM_COMMAND` | required | External modem backend executable; receives and emits length-prefixed G.711 frames on stdin/stdout |
+| `SIPFAX_MODEM_ARGS` | unset | Comma-separated arguments passed to `SIPFAX_MODEM_COMMAND` |
 | `SIPFAX_PPP_USERS` | unset | Comma-separated `username:password` entries accepted by the PPP control path |
 | `SIPFAX_PPP_POOL` | `10.64.0.0/24` | Client address pool; `.1` is reserved as the local peer by default |
 | `SIPFAX_PPP_LOCAL_ADDRESS` | first host in pool | Local peer address advertised to authenticated clients |
@@ -55,9 +57,27 @@ Configuration is environment-driven:
 5. The PPP control path starts in `awaiting-auth`, accepts configured
    credentials, assigns a client address plus DNS, and records egress policy
    diagnostics for the active call.
-6. RTP packets with the negotiated payload type are passed to the modem bridge
-   placeholder without decoding or transcoding.
+6. RTP packets with the negotiated payload type are passed to the configured
+   external modem backend without decoding or transcoding.
 7. `BYE` tears down the PPP lease, RTP codec filter, and single-session slot.
+
+## External Modem Backend
+
+SIPfax requires `SIPFAX_MODEM_COMMAND` at runtime. The command is started when a
+call codec is selected and is stopped when the call is torn down. It owns the
+real modem negotiation and data path, typically by bridging to the attached
+hardware serial modem and PPP stack.
+
+The process contract is intentionally narrow:
+
+- stdin receives one G.711 RTP payload at a time, prefixed by a two-byte
+  big-endian payload length.
+- stdout must write outbound G.711 payloads using the same two-byte length
+  prefix.
+- SIPfax sets `SIPFAX_MODEM_CODEC`, `SIPFAX_MODEM_PAYLOAD_TYPE`, and
+  `SIPFAX_MODEM_CLOCK_RATE` in the child environment for the active call.
+- The backend must emit already-encoded `PCMU` or `PCMA`; SIPfax does not
+  transcode, resample, demodulate, or synthesize modem tones in the live path.
 
 ## PPP and Egress Notes
 
@@ -137,11 +157,14 @@ Supported baseline:
 
 - Cisco ATA 191/192-class analog telephone adapter
 - external hardware serial modem attached to the PPP control path
+- external modem backend process configured with `SIPFAX_MODEM_COMMAND`
 - G.711 `PCMU`/`PCMA` at 8 kHz only
 - one live modem call at a time
 
 Operator hardening checklist:
 
+- Configure and supervise the external modem backend command before routing live
+  calls to SIPfax.
 - Set `SIPFAX_PPP_USERS`; an empty user list intentionally degrades health.
 - Restrict UDP SIP and RTP ingress to the FreePBX/ATA network.
 - Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management

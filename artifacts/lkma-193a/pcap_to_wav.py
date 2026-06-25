@@ -19,6 +19,8 @@ PCAP_MAGIC = {
     b"\x4d\x3c\xb2\xa1": ("<", 1_000_000_000),
     b"\xa1\xb2\x3c\x4d": (">", 1_000_000_000),
 }
+LINKTYPE_ETHERNET = 1
+LINKTYPE_LINUX_SLL = 113
 
 BIAS = 0x84
 CLIP = 32635
@@ -77,6 +79,12 @@ class RtpPacket:
 
 
 @dataclass
+class PcapCapture:
+    link_type: int
+    packets: list[tuple[float, bytes]]
+
+
+@dataclass
 class StreamStats:
     packet_count: int = 0
     expected_packets: int = 0
@@ -110,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_pcap(path: Path) -> list[tuple[float, bytes]]:
+def read_pcap(path: Path) -> PcapCapture:
     with path.open("rb") as handle:
         magic = handle.read(4)
         if magic not in PCAP_MAGIC:
@@ -119,6 +127,9 @@ def read_pcap(path: Path) -> list[tuple[float, bytes]]:
         global_header = handle.read(20)
         if len(global_header) != 20:
             raise ValueError(f"{path} has a truncated pcap global header")
+        _major, _minor, _thiszone, _sigfigs, _snaplen, link_type = struct.unpack(
+            f"{endian}HHIIII", global_header
+        )
 
         packets: list[tuple[float, bytes]] = []
         packet_header = struct.Struct(f"{endian}IIII")
@@ -133,19 +144,39 @@ def read_pcap(path: Path) -> list[tuple[float, bytes]]:
             if len(data) != included_len:
                 raise ValueError(f"{path} has a truncated packet body")
             packets.append((ts_sec + ts_frac / tick_rate, data))
-        return packets
+        return PcapCapture(link_type=link_type, packets=packets)
 
 
-def parse_udp_ipv4(frame: bytes) -> tuple[str, str, int, int, bytes] | None:
-    if len(frame) < 14:
+def ipv4_offset(frame: bytes, link_type: int) -> int | None:
+    if link_type == LINKTYPE_ETHERNET:
+        if len(frame) < 14:
+            return None
+        ether_type = int.from_bytes(frame[12:14], "big")
+        offset = 14
+        if ether_type == 0x8100 and len(frame) >= 18:
+            ether_type = int.from_bytes(frame[16:18], "big")
+            offset = 18
+        if ether_type != 0x0800:
+            return None
+        return offset
+
+    if link_type == LINKTYPE_LINUX_SLL:
+        if len(frame) < 16:
+            return None
+        protocol_type = int.from_bytes(frame[14:16], "big")
+        if protocol_type != 0x0800:
+            return None
+        return 16
+
+    return None
+
+
+def parse_udp_ipv4(frame: bytes, link_type: int = LINKTYPE_ETHERNET) -> tuple[str, str, int, int, bytes] | None:
+    offset = ipv4_offset(frame, link_type)
+    if offset is None:
         return None
 
-    ether_type = int.from_bytes(frame[12:14], "big")
-    offset = 14
-    if ether_type == 0x8100 and len(frame) >= 18:
-        ether_type = int.from_bytes(frame[16:18], "big")
-        offset = 18
-    if ether_type != 0x0800 or len(frame) < offset + 20:
+    if len(frame) < offset + 20:
         return None
 
     ip_header_start = offset
@@ -308,8 +339,9 @@ def main() -> int:
     outbound_stats = StreamStats()
     payload_types: dict[str, int] = {}
 
-    for timestamp_s, frame in read_pcap(args.pcap):
-        udp = parse_udp_ipv4(frame)
+    capture = read_pcap(args.pcap)
+    for timestamp_s, frame in capture.packets:
+        udp = parse_udp_ipv4(frame, capture.link_type)
         if udp is None:
             continue
         src, dst, _src_port, _dst_port, udp_payload = udp

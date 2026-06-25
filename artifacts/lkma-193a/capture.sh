@@ -34,7 +34,7 @@ fi
 echo "Capturing ${DURATION_SECONDS}s of RTP on ${LOCAL_IP}; output: ${OUT_DIR}" >&2
 echo "tcpdump filter: ${FILTER}" >&2
 
-sudo timeout "$DURATION_SECONDS" tcpdump -i any -s 0 -w "$PCAP" "$FILTER"
+sudo timeout "$DURATION_SECONDS" tcpdump -i any -s 0 -w "$PCAP" "$FILTER" || true
 
 PY_ARGS=(
   --pcap "$PCAP"

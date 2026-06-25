@@ -1,17 +1,18 @@
 import dgram from 'node:dgram';
-import { ModemBridge, RtpEndpoint } from './media.js';
+import { ModemAnswerToneSource, ModemBridge, RtpEndpoint } from './media.js';
 import { SingleSessionManager } from './session.js';
 import { buildResponse, parseSipMessage } from './sip.js';
 
 export class SipFaxServer {
-  constructor({ host, publicHost, sipPort, rtpPort, ppp }) {
+  constructor({ host, publicHost, sipPort, rtpPort, ppp, modem = new ModemAnswerToneSource() }) {
     this.host = host;
     this.publicHost = publicHost;
     this.sipPort = sipPort;
     this.rtpPort = rtpPort;
     this.sipSocket = dgram.createSocket('udp4');
     this.rtpEndpoint = new RtpEndpoint({ host, port: rtpPort });
-    this.modemBridge = new ModemBridge();
+    this.modem = modem;
+    this.modemBridge = new ModemBridge({ modem });
     this.sessions = new SingleSessionManager({ publicHost, localRtpPort: rtpPort, ppp });
     this.startedAt = new Date();
     this.metrics = {
@@ -54,6 +55,10 @@ export class SipFaxServer {
   }
 
   async stop() {
+    if (this.modem?.stop) {
+      this.modem.stop();
+    }
+
     await Promise.all([
       new Promise((resolve, reject) => {
         this.sipSocket.close((error) => {
@@ -87,6 +92,9 @@ export class SipFaxServer {
       this.sessions.terminate(request.callId);
       this.rtpEndpoint.setSessionCodec(null);
       this.modemBridge.setSessionCodec(null);
+      if (this.modem?.stop) {
+        this.modem.stop();
+      }
       this.sendSip(remote, buildResponse(request, 200, 'OK'));
       return;
     }

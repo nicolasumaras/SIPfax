@@ -29,7 +29,9 @@ ProtectHome=true
 ReadWritePaths=/var/cache/sipfax
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# Node 24/V8 needs executable anonymous memory for JIT/runtime startup.
+# Keep this disabled in the shipped unit instead of relying on a live override.
+MemoryDenyWriteExecute=false
 SystemCallArchitectures=native
 
 [Install]

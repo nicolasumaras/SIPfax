@@ -83,6 +83,11 @@ sudo systemctl enable --now sipfax.service
 sudo systemctl status sipfax.service
 ```
 
+The shipped unit leaves `MemoryDenyWriteExecute=false` because Node `24.x`/V8
+requires executable anonymous memory during runtime startup. Do not add a live
+drop-in override for this setting; keep the repository unit as the source of
+truth so fresh Debian 12 deployments start cleanly.
+
 Useful service commands:
 
 ```bash

@@ -17,14 +17,15 @@ test('deploy runbook documents the Node 24 systemd hardening exception', async (
   assert.match(runbook, /fresh Debian 12 deployments start cleanly/);
 });
 
-test('deployment assets require an external modem backend', async () => {
+test('deployment assets default to in-process dial-up termination', async () => {
   const [envExample, runbook] = await Promise.all([
     readFile(new URL('../deploy/sipfax.env.example', import.meta.url), 'utf8'),
     readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
   ]);
 
-  assert.match(envExample, /SIPFAX_MODEM_COMMAND=\/usr\/local\/bin\/sipfax-modem-bridge/);
+  assert.match(envExample, /# SIPFAX_MODEM_COMMAND=\/usr\/local\/bin\/sipfax-modem-bridge/);
   assert.match(envExample, /SIPFAX_MODEM_ARGS=/);
-  assert.match(runbook, /length-prefixed G\.711 frames/);
-  assert.match(runbook, /fail fast at service\s+startup/);
+  assert.match(runbook, /in-process dial-up terminator/);
+  assert.match(runbook, /media\.modem\.type/);
+  assert.doesNotMatch(runbook, /fail fast at service\s+startup/);
 });

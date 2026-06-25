@@ -6,6 +6,7 @@ import {
   buildRtpPacket,
   ExternalModemProcessBackend,
   G711_CODECS,
+  InProcessDialupTerminator,
   ModemAnswerToneSource,
   ModemBridge,
   parseRtpPacket
@@ -266,6 +267,44 @@ test('default modem answer-tone source emits negotiated G.711 handshake frames',
   assert.equal(emitted[0].metadata.payloadType, 8);
   assert.equal(emitted[0].metadata.timestampIncrement, 160);
   assert.notEqual(new Set(emitted[0].payload).size, 1);
+});
+
+test('in-process dial-up terminator emits ANSam frames and exposes negotiation state', () => {
+  const terminator = new InProcessDialupTerminator({ trainingFramesRequired: 2 });
+  const emitted = [];
+  const states = [];
+  terminator.on('outbound-audio', (payload, metadata) => emitted.push({ payload, metadata }));
+  terminator.on('protocol-state', (event) => states.push(event));
+
+  terminator.setSessionCodec(G711_CODECS.get(0));
+  assert.equal(terminator.diagnostics().state, 'answer-tone');
+  assert.equal(terminator.writeInboundAudio(Buffer.alloc(160, 0x00)), true);
+  assert.equal(terminator.writeInboundAudio(Buffer.alloc(160, 0x00)), true);
+  terminator.stop();
+
+  assert.equal(emitted.length >= 1, true);
+  assert.equal(emitted[0].payload.length, 160);
+  assert.equal(emitted[0].metadata.payloadType, 0);
+  assert.equal(emitted[0].metadata.timestampIncrement, 160);
+  assert.equal(emitted[0].metadata.dialupState, 'answer-tone');
+  assert.equal(terminator.diagnostics().state, 'v8-training');
+  assert.equal(terminator.diagnostics().framesIn, 2);
+  assert.equal(terminator.diagnostics().lastInboundEnergy >= terminator.diagnostics().inboundEnergyThreshold, true);
+  assert.deepEqual(
+    states.map((event) => event.state),
+    ['answer-tone', 'v8-training']
+  );
+});
+
+test('in-process dial-up terminator clears state when codec is removed', () => {
+  const terminator = new InProcessDialupTerminator();
+
+  terminator.setSessionCodec(G711_CODECS.get(8));
+  terminator.writeInboundAudio(Buffer.alloc(160, 0xd5));
+  terminator.setSessionCodec(null);
+
+  assert.equal(terminator.diagnostics().state, 'idle');
+  assert.equal(terminator.diagnostics().running, false);
 });
 
 test('server runtime modem wiring sends outbound RTP after inbound media discovers the remote endpoint', async () => {

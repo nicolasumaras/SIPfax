@@ -37,6 +37,17 @@ export class SipFaxServer {
         marker: audio.marker
       });
     });
+    if (this.modem?.on) {
+      this.modem.on('protocol-state', (event) => {
+        console.log(
+          `dialup protocol state call=${this.sessions.activeSession?.callId ?? 'none'} ` +
+            `${event.previousState}->${event.state} reason=${event.reason}`
+        );
+      });
+      this.modem.on('backend-log', (line) => {
+        console.log(`modem backend: ${String(line).trim()}`);
+      });
+    }
     this.rtpEndpoint.on('dropped', () => {
       this.metrics.rtpFramesDropped += 1;
     });

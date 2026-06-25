@@ -10,7 +10,9 @@ The first supported baseline follows the LKMA-168 decision:
 - one inbound call session at a time
 - no transcoding, T.38, VAD, comfort noise, conferencing, recording, or Asterisk
   media side-channel in the live modem path
-- Cisco ATA 191/192-class ATA and external hardware serial modem baseline
+- Cisco ATA 191/192-class ATA routed through FreePBX to the SIPfax VM
+- in-process dial-up protocol termination on the SIPfax VM; no physical modem is
+  required on the server
 
 ## Run
 
@@ -35,8 +37,8 @@ Configuration is environment-driven:
 | `SIPFAX_OPERATOR_HOST` | `127.0.0.1` | HTTP bind host for health, metrics, and FreePBX snippets |
 | `SIPFAX_OPERATOR_PORT` | `8080` | HTTP port for operator endpoints |
 | `SIPFAX_FREEPBX_EXTENSION` | `faxmodem` | FreePBX route/extension label shown in the generated PJSIP snippet |
-| `SIPFAX_MODEM_COMMAND` | required | External modem backend executable; receives and emits length-prefixed G.711 frames on stdin/stdout |
-| `SIPFAX_MODEM_ARGS` | unset | Comma-separated arguments passed to `SIPFAX_MODEM_COMMAND` |
+| `SIPFAX_MODEM_COMMAND` | unset | Optional external modem backend executable for lab/debug adapters; when unset SIPfax uses the in-process dial-up terminator |
+| `SIPFAX_MODEM_ARGS` | unset | Comma-separated arguments passed to `SIPFAX_MODEM_COMMAND` when configured |
 | `SIPFAX_PPP_USERS` | unset | Comma-separated `username:password` entries accepted by the PPP control path |
 | `SIPFAX_PPP_POOL` | `10.64.0.0/24` | Client address pool; `.1` is reserved as the local peer by default |
 | `SIPFAX_PPP_LOCAL_ADDRESS` | first host in pool | Local peer address advertised to authenticated clients |
@@ -57,16 +59,30 @@ Configuration is environment-driven:
 5. The PPP control path starts in `awaiting-auth`, accepts configured
    credentials, assigns a client address plus DNS, and records egress policy
    diagnostics for the active call.
-6. RTP packets with the negotiated payload type are passed to the configured
-   external modem backend without decoding or transcoding.
+6. RTP packets with the negotiated payload type are passed to the in-process
+   dial-up terminator, which emits G.711 ANSam answer frames, detects inbound
+   modem energy, and records protocol state transitions in diagnostics/logs.
 7. `BYE` tears down the PPP lease, RTP codec filter, and single-session slot.
 
-## External Modem Backend
+## In-Process Dial-Up Terminator
 
-SIPfax requires `SIPFAX_MODEM_COMMAND` at runtime. The command is started when a
-call codec is selected and is stopped when the call is torn down. It owns the
-real modem negotiation and data path, typically by bridging to the attached
-hardware serial modem and PPP stack.
+SIPfax defaults to a server-local dial-up protocol terminator. It keeps the
+media path constrained to negotiated G.711 payload bytes, emits an ANSam-style
+answer signal with phase reversals, detects inbound modem energy from the remote
+caller, and advances visible negotiation state from `answer-tone` to
+`v8-training`. The current state, inbound energy, frame counters, and thresholds
+are exposed under `media.modem` in operator diagnostics.
+
+This first in-process increment is intended to move live Windows dial-up testing
+past the previous silent answer-tone/error `678` failure point and make the next
+negotiation stop visible. It does not require a modem binary or physical modem
+attached to the SIPfax VM.
+
+## Optional External Modem Backend
+
+`SIPFAX_MODEM_COMMAND` remains available for lab adapters. When configured, the
+command is started when a call codec is selected and is stopped when the call is
+torn down.
 
 The process contract is intentionally narrow:
 
@@ -77,7 +93,7 @@ The process contract is intentionally narrow:
 - SIPfax sets `SIPFAX_MODEM_CODEC`, `SIPFAX_MODEM_PAYLOAD_TYPE`, and
   `SIPFAX_MODEM_CLOCK_RATE` in the child environment for the active call.
 - The backend must emit already-encoded `PCMU` or `PCMA`; SIPfax does not
-  transcode, resample, demodulate, or synthesize modem tones in the live path.
+  transcode or resample external backend frames.
 
 ## PPP and Egress Notes
 
@@ -156,15 +172,16 @@ Minimum alerting expectations:
 Supported baseline:
 
 - Cisco ATA 191/192-class analog telephone adapter
-- external hardware serial modem attached to the PPP control path
-- external modem backend process configured with `SIPFAX_MODEM_COMMAND`
+- in-process dial-up terminator on the SIPfax VM
+- optional external backend process only when explicitly configured with
+  `SIPFAX_MODEM_COMMAND`
 - G.711 `PCMU`/`PCMA` at 8 kHz only
 - one live modem call at a time
 
 Operator hardening checklist:
 
-- Configure and supervise the external modem backend command before routing live
-  calls to SIPfax.
+- Review `media.modem` diagnostics during live test calls; the dial-up state
+  should leave `answer-tone` when inbound modem energy is detected.
 - Set `SIPFAX_PPP_USERS`; an empty user list intentionally degrades health.
 - Restrict UDP SIP and RTP ingress to the FreePBX/ATA network.
 - Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management

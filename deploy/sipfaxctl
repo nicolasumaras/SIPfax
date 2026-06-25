@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: deploy/sipfaxctl <status|start|stop|restart|logs|health|metrics|freepbx>
+USAGE
+}
+
+command="${1:-}"
+
+case "${command}" in
+  status)
+    systemctl status sipfax.service
+    ;;
+  start|stop|restart)
+    systemctl "${command}" sipfax.service
+    ;;
+  logs)
+    journalctl -u sipfax.service -f
+    ;;
+  health)
+    curl -fsS http://127.0.0.1:8080/healthz
+    ;;
+  metrics)
+    curl -fsS http://127.0.0.1:8080/metrics
+    ;;
+  freepbx)
+    curl -fsS http://127.0.0.1:8080/freepbx/pjsip.conf
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac

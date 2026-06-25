@@ -61,7 +61,8 @@ Configuration is environment-driven:
    diagnostics for the active call.
 6. RTP packets with the negotiated payload type are passed to the in-process
    dial-up terminator, which emits G.711 ANSam answer frames, detects inbound
-   modem energy, and records protocol state transitions in diagnostics/logs.
+   modem energy, advances into carrier training and PPP LCP probe audio, and
+   records protocol state transitions in diagnostics/logs.
 7. `BYE` tears down the PPP lease, RTP codec filter, and single-session slot.
 
 ## In-Process Dial-Up Terminator
@@ -70,13 +71,15 @@ SIPfax defaults to a server-local dial-up protocol terminator. It keeps the
 media path constrained to negotiated G.711 payload bytes, emits an ANSam-style
 answer signal with phase reversals, detects inbound modem energy from the remote
 caller, and advances visible negotiation state from `answer-tone` to
-`v8-training`. The current state, inbound energy, frame counters, and thresholds
-are exposed under `media.modem` in operator diagnostics.
+`v8-training`, `carrier-training`, and `ppp-lcp-probe`. The current state,
+inbound energy, frame counters, PPP probe counters, and thresholds are exposed
+under `media.modem` in operator diagnostics.
 
-This first in-process increment is intended to move live Windows dial-up testing
-past the previous silent answer-tone/error `678` failure point and make the next
-negotiation stop visible. It does not require a modem binary or physical modem
-attached to the SIPfax VM.
+The in-process terminator now gives live Windows dial-up testing a concrete
+target beyond the previous `v8-training` plateau: sustained inbound carrier
+energy should move diagnostics and logs to `carrier-training`, then outbound
+G.711 PPP LCP probe frames should move the state to `ppp-lcp-probe`. It does not
+require a modem binary or physical modem attached to the SIPfax VM.
 
 ## Optional External Modem Backend
 

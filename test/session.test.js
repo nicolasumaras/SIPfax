@@ -296,6 +296,41 @@ test('in-process dial-up terminator emits ANSam frames and exposes negotiation s
   );
 });
 
+test('in-process dial-up terminator advances beyond V.8 into PPP LCP probe frames', () => {
+  const terminator = new InProcessDialupTerminator({
+    trainingFramesRequired: 2,
+    carrierFramesRequired: 2,
+    pppProbeFramesRequired: 2
+  });
+  const emitted = [];
+  const states = [];
+  terminator.on('outbound-audio', (payload, metadata) => emitted.push({ payload, metadata }));
+  terminator.on('protocol-state', (event) => states.push(event));
+
+  terminator.setSessionCodec(G711_CODECS.get(0));
+  for (let index = 0; index < 4; index += 1) {
+    assert.equal(terminator.writeInboundAudio(Buffer.alloc(160, 0x00)), true);
+  }
+  assert.equal(terminator.diagnostics().state, 'carrier-training');
+
+  terminator.emitFrame();
+  terminator.emitFrame();
+  terminator.stop();
+
+  assert.deepEqual(
+    states.map((event) => event.state),
+    ['answer-tone', 'v8-training', 'carrier-training', 'ppp-lcp-probe']
+  );
+  assert.equal(terminator.diagnostics().state, 'ppp-lcp-probe');
+  assert.equal(terminator.diagnostics().carrierHits, 2);
+  assert.equal(terminator.diagnostics().pppProbeFramesOut >= 1, true);
+  assert.equal(terminator.diagnostics().pppProbeBytes > 0, true);
+  assert.equal(emitted.some((frame) => frame.metadata.dialupState === 'carrier-training'), true);
+  assert.equal(emitted.some((frame) => frame.metadata.dialupState === 'ppp-lcp-probe'), true);
+  assert.equal(emitted.at(-1).payload.length, 160);
+  assert.notEqual(new Set(emitted.at(-1).payload).size, 1);
+});
+
 test('in-process dial-up terminator clears state when codec is removed', () => {
   const terminator = new InProcessDialupTerminator();
 

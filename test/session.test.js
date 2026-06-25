@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseRtpPacket } from '../src/media.js';
+import { buildRtpPacket, G711_CODECS, ModemBridge, parseRtpPacket } from '../src/media.js';
 import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { SingleSessionManager } from '../src/session.js';
@@ -125,6 +125,76 @@ test('RTP parser extracts static payload type and payload bytes', () => {
   assert.equal(parsed.sequenceNumber, 0x1234);
   assert.equal(parsed.timestamp, 1000);
   assert.deepEqual([...parsed.payload], [0xff, 0xfe, 0xfd]);
+});
+
+test('modem bridge hands inbound G.711 payload bytes to the downstream modem path', () => {
+  const writes = [];
+  const modem = {
+    writeInboundAudio(payload, metadata) {
+      writes.push({ payload, metadata });
+    }
+  };
+  const bridge = new ModemBridge({ modem });
+  bridge.setSessionCodec(G711_CODECS.get(0));
+  const sourcePayload = Buffer.from([0x7f, 0x80, 0x81]);
+
+  bridge.acceptFrame({
+    payloadType: 0,
+    sequenceNumber: 7,
+    timestamp: 160,
+    payload: sourcePayload
+  });
+  sourcePayload[0] = 0x00;
+
+  assert.equal(writes.length, 1);
+  assert.deepEqual([...writes[0].payload], [0x7f, 0x80, 0x81]);
+  assert.equal(writes[0].metadata.codec.name, 'PCMU');
+  assert.equal(writes[0].metadata.sequenceNumber, 7);
+  assert.deepEqual(bridge.diagnostics(), {
+    codec: 'PCMU',
+    framesIn: 1,
+    framesOut: 0,
+    audioBytesIn: 3,
+    audioBytesOut: 0
+  });
+});
+
+test('modem bridge accepts outbound modem audio for RTP send without transcoding', () => {
+  const bridge = new ModemBridge();
+  bridge.setSessionCodec(G711_CODECS.get(8));
+  const emitted = [];
+  bridge.on('outbound-audio', (audio) => emitted.push(audio));
+  const sourcePayload = Buffer.from([0xd5, 0xd4, 0xd3, 0xd2]);
+
+  const audio = bridge.acceptOutboundAudio(sourcePayload, { timestampIncrement: 160, marker: true });
+  sourcePayload[1] = 0x00;
+
+  assert.equal(emitted.length, 1);
+  assert.equal(audio, emitted[0]);
+  assert.equal(audio.payloadType, 8);
+  assert.equal(audio.timestampIncrement, 160);
+  assert.equal(audio.marker, true);
+  assert.deepEqual([...audio.payload], [0xd5, 0xd4, 0xd3, 0xd2]);
+  assert.equal(bridge.diagnostics().audioBytesOut, 4);
+});
+
+test('RTP builder carries outbound modem audio bytes as negotiated G.711 payload', () => {
+  const packet = buildRtpPacket({
+    payloadType: 8,
+    sequenceNumber: 0x20,
+    timestamp: 0x300,
+    ssrc: 0x01020304,
+    marker: true,
+    payload: Buffer.from([0x11, 0x22, 0x33])
+  });
+
+  assert.equal(packet[1] & 0x80, 0x80);
+  const parsed = parseRtpPacket(packet);
+  assert.equal(parsed.payloadType, 8);
+  assert.equal(parsed.sequenceNumber, 0x20);
+  assert.equal(parsed.timestamp, 0x300);
+  assert.equal(parsed.ssrc, 0x01020304);
+  assert.deepEqual([...parsed.payload], [0x11, 0x22, 0x33]);
 });
 
 test('operator health reports degraded when PPP users are missing', () => {

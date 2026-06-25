@@ -4,7 +4,7 @@ import { SingleSessionManager } from './session.js';
 import { buildResponse, parseSipMessage } from './sip.js';
 
 export class SipFaxServer {
-  constructor({ host, publicHost, sipPort, rtpPort }) {
+  constructor({ host, publicHost, sipPort, rtpPort, ppp }) {
     this.host = host;
     this.publicHost = publicHost;
     this.sipPort = sipPort;
@@ -12,7 +12,7 @@ export class SipFaxServer {
     this.sipSocket = dgram.createSocket('udp4');
     this.rtpEndpoint = new RtpEndpoint({ host, port: rtpPort });
     this.modemBridge = new ModemBridge();
-    this.sessions = new SingleSessionManager({ publicHost, localRtpPort: rtpPort });
+    this.sessions = new SingleSessionManager({ publicHost, localRtpPort: rtpPort, ppp });
 
     this.rtpEndpoint.on('frame', (frame) => this.modemBridge.acceptFrame(frame));
     this.sipSocket.on('message', (message, remote) => {

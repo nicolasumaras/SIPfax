@@ -1,4 +1,5 @@
 import { G711_CODECS } from './media.js';
+import { PppSessionController } from './ppp.js';
 import { buildSdpAnswer, parseSdpOffer } from './sdp.js';
 
 export class CallSession {
@@ -11,10 +12,12 @@ export class CallSession {
     this.localRtpPort = localRtpPort;
     this.publicHost = publicHost;
     this.state = 'ringing';
+    this.ppp = null;
   }
 
-  markEstablished() {
+  markEstablished(ppp) {
     this.state = 'established';
+    this.ppp = ppp;
   }
 
   markTerminated() {
@@ -31,9 +34,10 @@ export class CallSession {
 }
 
 export class SingleSessionManager {
-  constructor({ publicHost, localRtpPort }) {
+  constructor({ publicHost, localRtpPort, ppp = new PppSessionController() }) {
     this.publicHost = publicHost;
     this.localRtpPort = localRtpPort;
+    this.ppp = ppp;
     this.activeSession = null;
   }
 
@@ -73,8 +77,29 @@ export class SingleSessionManager {
       return false;
     }
 
-    this.activeSession.markEstablished();
+    this.activeSession.markEstablished(this.ppp.begin(callId));
     return true;
+  }
+
+  authenticatePpp(callId, credentials) {
+    if (this.activeSession?.callId !== callId) {
+      return { authenticated: false, reason: 'unknown-session' };
+    }
+
+    const result = this.ppp.authenticate(callId, credentials);
+    if (result.authenticated) {
+      this.activeSession.ppp = result.session;
+    }
+
+    return result;
+  }
+
+  diagnostics() {
+    return {
+      activeCallId: this.activeSession?.callId ?? null,
+      activeSessionState: this.activeSession?.state ?? null,
+      ppp: this.ppp.diagnostics()
+    };
   }
 
   terminate(callId) {
@@ -83,6 +108,7 @@ export class SingleSessionManager {
     }
 
     this.activeSession.markTerminated();
+    this.ppp.terminate(callId);
     this.activeSession = null;
     return true;
   }

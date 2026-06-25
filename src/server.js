@@ -29,6 +29,13 @@ export class SipFaxServer {
       this.metrics.rtpFramesAccepted += 1;
       this.modemBridge.acceptFrame(frame);
     });
+    this.modemBridge.on('outbound-audio', (audio) => {
+      this.rtpEndpoint.sendPayload(audio.payload, {
+        payloadType: audio.payloadType,
+        timestampIncrement: audio.timestampIncrement,
+        marker: audio.marker
+      });
+    });
     this.rtpEndpoint.on('dropped', () => {
       this.metrics.rtpFramesDropped += 1;
     });
@@ -79,6 +86,7 @@ export class SipFaxServer {
     if (request.method === 'BYE') {
       this.sessions.terminate(request.callId);
       this.rtpEndpoint.setSessionCodec(null);
+      this.modemBridge.setSessionCodec(null);
       this.sendSip(remote, buildResponse(request, 200, 'OK'));
       return;
     }
@@ -98,6 +106,7 @@ export class SipFaxServer {
     this.metrics.invitesAccepted += 1;
     const { session } = result;
     this.rtpEndpoint.setSessionCodec(session.codec);
+    this.modemBridge.setSessionCodec(session.codec);
 
     this.sendSip(remote, buildResponse(request, 100, 'Trying'));
     this.sendSip(remote, buildResponse(request, 180, 'Ringing', { toTag: session.toTag }));
@@ -132,6 +141,7 @@ export class SipFaxServer {
       },
       sessions: this.sessions.diagnostics(),
       ppp: this.sessions.ppp.diagnostics(),
+      media: this.modemBridge.diagnostics(),
       metrics: { ...this.metrics }
     };
   }

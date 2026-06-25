@@ -5,8 +5,19 @@ import { spawn } from 'node:child_process';
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
 const DEFAULT_V8_REVERSAL_HZ = 15;
+const DEFAULT_CARRIER_TONE_HZ = 1800;
+const DEFAULT_PPP_MARK_HZ = 1200;
+const DEFAULT_PPP_SPACE_HZ = 2200;
 const MODEM_FRAME_HEADER_BYTES = 2;
 const MAX_MODEM_FRAME_BYTES = 0xffff;
+const PPP_LCP_CONFIGURE_REQUEST = buildPppFrame([
+  0xc0, 0x21, // LCP
+  0x01, // Configure-Request
+  0x01, // Identifier
+  0x00, 0x0e, // Length
+  0x01, 0x04, 0x05, 0xdc, // MRU 1500
+  0x05, 0x06, 0x53, 0x49, 0x50, 0x46 // Magic-Number "SIPF"
+]);
 
 export const G711_CODECS = new Map([
   [0, { payloadType: 0, name: 'PCMU', clockRate: 8000 }],
@@ -318,7 +329,9 @@ export class InProcessDialupTerminator extends EventEmitter {
     amplitude = 10000,
     intervalMs = 20,
     inboundEnergyThreshold = 400,
-    trainingFramesRequired = 3
+    trainingFramesRequired = 3,
+    carrierFramesRequired = 6,
+    pppProbeFramesRequired = 4
   } = {}) {
     super();
     this.frameSamples = frameSamples;
@@ -328,13 +341,19 @@ export class InProcessDialupTerminator extends EventEmitter {
     this.intervalMs = intervalMs;
     this.inboundEnergyThreshold = inboundEnergyThreshold;
     this.trainingFramesRequired = trainingFramesRequired;
+    this.carrierFramesRequired = carrierFramesRequired;
+    this.pppProbeFramesRequired = pppProbeFramesRequired;
     this.codec = null;
     this.sampleOffset = 0;
+    this.pppSampleOffset = 0;
     this.timer = null;
     this.state = 'idle';
     this.framesIn = 0;
     this.framesOut = 0;
     this.trainingHits = 0;
+    this.carrierHits = 0;
+    this.stateFramesOut = 0;
+    this.pppProbeFramesOut = 0;
     this.lastInboundEnergy = 0;
     this.stateChangedAt = null;
   }
@@ -342,7 +361,11 @@ export class InProcessDialupTerminator extends EventEmitter {
   setSessionCodec(codec) {
     this.codec = codec ?? null;
     this.sampleOffset = 0;
+    this.pppSampleOffset = 0;
     this.trainingHits = 0;
+    this.carrierHits = 0;
+    this.stateFramesOut = 0;
+    this.pppProbeFramesOut = 0;
     this.lastInboundEnergy = 0;
 
     if (!this.codec) {
@@ -370,6 +393,11 @@ export class InProcessDialupTerminator extends EventEmitter {
       this.trainingHits += 1;
       if (this.trainingHits >= this.trainingFramesRequired) {
         this.transition('v8-training', 'inbound-modem-energy-detected');
+      }
+    } else if (this.state === 'v8-training' && this.lastInboundEnergy >= this.inboundEnergyThreshold) {
+      this.carrierHits += 1;
+      if (this.carrierHits >= this.carrierFramesRequired) {
+        this.transition('carrier-training', 'sustained-inbound-carrier-detected');
       }
     }
 
@@ -400,6 +428,14 @@ export class InProcessDialupTerminator extends EventEmitter {
     }
 
     this.framesOut += 1;
+    this.stateFramesOut += 1;
+    if (this.state === 'carrier-training' && this.stateFramesOut >= this.pppProbeFramesRequired) {
+      this.transition('ppp-lcp-probe', 'carrier-training-complete');
+    }
+    if (this.state === 'ppp-lcp-probe') {
+      this.pppProbeFramesOut += 1;
+    }
+
     this.emit('outbound-audio', this.buildNegotiationFrame(), {
       codec: this.codec,
       payloadType: this.codec.payloadType,
@@ -409,6 +445,14 @@ export class InProcessDialupTerminator extends EventEmitter {
   }
 
   buildNegotiationFrame() {
+    if (this.state === 'carrier-training') {
+      return this.buildCarrierTrainingFrame();
+    }
+
+    if (this.state === 'ppp-lcp-probe') {
+      return this.buildPppProbeFrame();
+    }
+
     const payload = Buffer.alloc(this.frameSamples);
     for (let index = 0; index < this.frameSamples; index += 1) {
       const absoluteSample = this.sampleOffset + index;
@@ -420,6 +464,40 @@ export class InProcessDialupTerminator extends EventEmitter {
       payload[index] = this.codec.payloadType === 8 ? encodeALaw(sample) : encodeMuLaw(sample);
     }
     this.sampleOffset += this.frameSamples;
+    return payload;
+  }
+
+  buildCarrierTrainingFrame() {
+    const payload = Buffer.alloc(this.frameSamples);
+    for (let index = 0; index < this.frameSamples; index += 1) {
+      const absoluteSample = this.sampleOffset + index;
+      const sample = Math.round(
+        Math.sin((2 * Math.PI * DEFAULT_CARRIER_TONE_HZ * absoluteSample) / this.codec.clockRate) * this.amplitude
+      );
+      payload[index] = this.codec.payloadType === 8 ? encodeALaw(sample) : encodeMuLaw(sample);
+    }
+    this.sampleOffset += this.frameSamples;
+    return payload;
+  }
+
+  buildPppProbeFrame() {
+    const payload = Buffer.alloc(this.frameSamples);
+    const samplesPerBit = this.codec.clockRate / 1200;
+    const bitCount = PPP_LCP_CONFIGURE_REQUEST.length * 8;
+
+    for (let index = 0; index < this.frameSamples; index += 1) {
+      const absoluteSample = this.pppSampleOffset + index;
+      const bitIndex = Math.floor(absoluteSample / samplesPerBit) % bitCount;
+      const octet = PPP_LCP_CONFIGURE_REQUEST[Math.floor(bitIndex / 8)];
+      const bit = (octet >> (bitIndex % 8)) & 1;
+      const toneHz = bit === 1 ? DEFAULT_PPP_MARK_HZ : DEFAULT_PPP_SPACE_HZ;
+      const sample = Math.round(
+        Math.sin((2 * Math.PI * toneHz * absoluteSample) / this.codec.clockRate) * this.amplitude
+      );
+      payload[index] = this.codec.payloadType === 8 ? encodeALaw(sample) : encodeMuLaw(sample);
+    }
+
+    this.pppSampleOffset += this.frameSamples;
     return payload;
   }
 
@@ -444,6 +522,7 @@ export class InProcessDialupTerminator extends EventEmitter {
 
     const previousState = this.state;
     this.state = nextState;
+    this.stateFramesOut = 0;
     this.stateChangedAt = new Date().toISOString();
     this.emit('protocol-state', {
       previousState,
@@ -466,7 +545,12 @@ export class InProcessDialupTerminator extends EventEmitter {
       lastInboundEnergy: this.lastInboundEnergy,
       inboundEnergyThreshold: this.inboundEnergyThreshold,
       trainingHits: this.trainingHits,
-      trainingFramesRequired: this.trainingFramesRequired
+      trainingFramesRequired: this.trainingFramesRequired,
+      carrierHits: this.carrierHits,
+      carrierFramesRequired: this.carrierFramesRequired,
+      pppProbeFramesRequired: this.pppProbeFramesRequired,
+      pppProbeFramesOut: this.pppProbeFramesOut,
+      pppProbeBytes: PPP_LCP_CONFIGURE_REQUEST.length
     };
   }
 }
@@ -609,6 +693,30 @@ export class ExternalModemProcessBackend extends EventEmitter {
       lastExit: this.lastExit
     };
   }
+}
+
+function buildPppFrame(payload) {
+  const body = Buffer.from([0xff, 0x03, ...payload]);
+  const fcs = pppFcs16(body);
+  return Buffer.from([
+    0x7e,
+    ...body,
+    fcs & 0xff,
+    (fcs >> 8) & 0xff,
+    0x7e
+  ]);
+}
+
+function pppFcs16(payload) {
+  let fcs = 0xffff;
+  for (const octet of payload) {
+    fcs ^= octet;
+    for (let bit = 0; bit < 8; bit += 1) {
+      fcs = (fcs & 1) !== 0 ? (fcs >> 1) ^ 0x8408 : fcs >> 1;
+    }
+  }
+
+  return (~fcs) & 0xffff;
 }
 
 export function encodeMuLaw(sample) {

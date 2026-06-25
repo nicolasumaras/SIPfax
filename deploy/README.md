@@ -79,7 +79,8 @@ intentionally testing an external lab adapter. When it is unset, `/healthz` and
 the operator diagnostics should show `media.modem.type` as
 `in-process-dialup-terminator`; during a live Windows dial-up attempt, watch
 `media.modem.state`, `media.modem.lastInboundEnergy`, and the service log lines
-for the transition from `answer-tone` to `v8-training`.
+for transitions from `answer-tone` to `v8-training`, then `carrier-training`
+and `ppp-lcp-probe`.
 
 If an external lab backend is configured later, it must read
 two-byte-length-prefixed G.711 payloads from stdin and write the same framed
@@ -154,6 +155,11 @@ Expected modem diagnostics for the LKMA-191 path:
 curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem // .ppp'
 journalctl -u sipfax.service -f | grep 'dialup protocol state'
 ```
+
+For the LKMA-192 path, a live Windows dial-up attempt should now have a later
+observable target than `v8-training`: diagnostics should show
+`media.modem.state` reaching `carrier-training` and then `ppp-lcp-probe`, with
+`media.modem.pppProbeFramesOut` increasing after carrier training completes.
 
 From the FreePBX side:
 

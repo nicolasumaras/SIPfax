@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
+const DEFAULT_V8_REVERSAL_HZ = 15;
 const MODEM_FRAME_HEADER_BYTES = 2;
 const MAX_MODEM_FRAME_BYTES = 0xffff;
 
@@ -309,6 +310,167 @@ export class ModemAnswerToneSource extends EventEmitter {
   }
 }
 
+export class InProcessDialupTerminator extends EventEmitter {
+  constructor({
+    frameSamples = DEFAULT_MODEM_FRAME_SAMPLES,
+    answerToneHz = DEFAULT_ANSWER_TONE_HZ,
+    answerReversalHz = DEFAULT_V8_REVERSAL_HZ,
+    amplitude = 10000,
+    intervalMs = 20,
+    inboundEnergyThreshold = 400,
+    trainingFramesRequired = 3
+  } = {}) {
+    super();
+    this.frameSamples = frameSamples;
+    this.answerToneHz = answerToneHz;
+    this.answerReversalHz = answerReversalHz;
+    this.amplitude = amplitude;
+    this.intervalMs = intervalMs;
+    this.inboundEnergyThreshold = inboundEnergyThreshold;
+    this.trainingFramesRequired = trainingFramesRequired;
+    this.codec = null;
+    this.sampleOffset = 0;
+    this.timer = null;
+    this.state = 'idle';
+    this.framesIn = 0;
+    this.framesOut = 0;
+    this.trainingHits = 0;
+    this.lastInboundEnergy = 0;
+    this.stateChangedAt = null;
+  }
+
+  setSessionCodec(codec) {
+    this.codec = codec ?? null;
+    this.sampleOffset = 0;
+    this.trainingHits = 0;
+    this.lastInboundEnergy = 0;
+
+    if (!this.codec) {
+      this.stop();
+      this.transition('idle', 'codec-cleared');
+      return;
+    }
+
+    this.transition('answer-tone', 'codec-selected');
+  }
+
+  writeInboundAudio(payload) {
+    if (!this.codec) {
+      return false;
+    }
+
+    if (!this.timer) {
+      this.start();
+    }
+
+    this.framesIn += 1;
+    this.lastInboundEnergy = this.measureEnergy(payload);
+
+    if (this.state === 'answer-tone' && this.lastInboundEnergy >= this.inboundEnergyThreshold) {
+      this.trainingHits += 1;
+      if (this.trainingHits >= this.trainingFramesRequired) {
+        this.transition('v8-training', 'inbound-modem-energy-detected');
+      }
+    }
+
+    return true;
+  }
+
+  start() {
+    if (!this.codec || this.timer) {
+      return;
+    }
+
+    this.emitFrame();
+    this.timer = setInterval(() => {
+      this.emitFrame();
+    }, this.intervalMs);
+  }
+
+  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  emitFrame() {
+    if (!this.codec || this.state === 'idle') {
+      return;
+    }
+
+    this.framesOut += 1;
+    this.emit('outbound-audio', this.buildNegotiationFrame(), {
+      codec: this.codec,
+      payloadType: this.codec.payloadType,
+      timestampIncrement: this.frameSamples,
+      dialupState: this.state
+    });
+  }
+
+  buildNegotiationFrame() {
+    const payload = Buffer.alloc(this.frameSamples);
+    for (let index = 0; index < this.frameSamples; index += 1) {
+      const absoluteSample = this.sampleOffset + index;
+      const phaseReversal = Math.floor((absoluteSample * this.answerReversalHz * 2) / this.codec.clockRate) % 2 === 1;
+      const phase = phaseReversal ? Math.PI : 0;
+      const sample = Math.round(
+        Math.sin((2 * Math.PI * this.answerToneHz * absoluteSample) / this.codec.clockRate + phase) * this.amplitude
+      );
+      payload[index] = this.codec.payloadType === 8 ? encodeALaw(sample) : encodeMuLaw(sample);
+    }
+    this.sampleOffset += this.frameSamples;
+    return payload;
+  }
+
+  measureEnergy(payload) {
+    if (!payload.length) {
+      return 0;
+    }
+
+    let total = 0;
+    for (const encoded of payload) {
+      const sample = this.codec.payloadType === 8 ? decodeALaw(encoded) : decodeMuLaw(encoded);
+      total += Math.abs(sample);
+    }
+
+    return Math.round(total / payload.length);
+  }
+
+  transition(nextState, reason) {
+    if (this.state === nextState) {
+      return;
+    }
+
+    const previousState = this.state;
+    this.state = nextState;
+    this.stateChangedAt = new Date().toISOString();
+    this.emit('protocol-state', {
+      previousState,
+      state: nextState,
+      reason,
+      at: this.stateChangedAt
+    });
+    this.emit('backend-log', `dialup protocol ${previousState} -> ${nextState}: ${reason}`);
+  }
+
+  diagnostics() {
+    return {
+      type: 'in-process-dialup-terminator',
+      codec: this.codec?.name ?? null,
+      state: this.state,
+      stateChangedAt: this.stateChangedAt,
+      running: Boolean(this.timer),
+      framesIn: this.framesIn,
+      framesOut: this.framesOut,
+      lastInboundEnergy: this.lastInboundEnergy,
+      inboundEnergyThreshold: this.inboundEnergyThreshold,
+      trainingHits: this.trainingHits,
+      trainingFramesRequired: this.trainingFramesRequired
+    };
+  }
+}
+
 export class ExternalModemProcessBackend extends EventEmitter {
   constructor({
     command,
@@ -479,6 +641,27 @@ export function encodeALaw(sample) {
   }
 
   return (sign | magnitude) ^ 0x55;
+}
+
+export function decodeMuLaw(encoded) {
+  const value = (~encoded) & 0xff;
+  const sign = value & 0x80;
+  const exponent = (value >> 4) & 0x07;
+  const mantissa = value & 0x0f;
+  const magnitude = ((mantissa << 3) + 0x84) << exponent;
+  const sample = magnitude - 0x84;
+  return sign ? -sample : sample;
+}
+
+export function decodeALaw(encoded) {
+  const value = encoded ^ 0x55;
+  const sign = value & 0x80;
+  const exponent = (value >> 4) & 0x07;
+  const mantissa = value & 0x0f;
+  const magnitude = exponent === 0
+    ? (mantissa << 4) + 8
+    : ((mantissa << 4) + 0x108) << (exponent - 1);
+  return sign ? magnitude : -magnitude;
 }
 
 function randomUInt32() {

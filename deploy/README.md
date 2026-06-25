@@ -67,19 +67,23 @@ Required first-deploy values:
 
 - `SIPFAX_PUBLIC_HOST`: the dedicated SIPfax VM IP on `vmbr0`
 - `SIPFAX_FREEPBX_EXTENSION`: `12345678`
-- `SIPFAX_MODEM_COMMAND`: executable for the external modem backend that
-  bridges length-prefixed G.711 frames to the attached hardware modem service
 - `SIPFAX_PPP_USERS`: one or more `username:password` entries
 - `SIPFAX_EGRESS_INTERFACE`: the VM network interface used for outbound traffic
 
 Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management network
 or proxy is added.
 
-The modem backend command is part of the live call path. It must read
+The default live call path uses SIPfax's in-process dial-up terminator. Do not
+configure `SIPFAX_MODEM_COMMAND` for the first redeploy unless the CTO is
+intentionally testing an external lab adapter. When it is unset, `/healthz` and
+the operator diagnostics should show `media.modem.type` as
+`in-process-dialup-terminator`; during a live Windows dial-up attempt, watch
+`media.modem.state`, `media.modem.lastInboundEnergy`, and the service log lines
+for the transition from `answer-tone` to `v8-training`.
+
+If an external lab backend is configured later, it must read
 two-byte-length-prefixed G.711 payloads from stdin and write the same framed
-format to stdout after driving the real modem negotiation and PPP data path. A
-deployment that leaves `SIPFAX_MODEM_COMMAND` unset will fail fast at service
-startup instead of answering calls with a synthetic tone loop.
+format to stdout.
 
 ## systemd Install
 
@@ -143,6 +147,13 @@ sudo ss -lunp | grep -E ':(5060|40000) '
 
 Expected `/healthz` result is `status: ok`. If it is `degraded`, confirm
 `SIPFAX_PPP_USERS` is set and restart the service.
+
+Expected modem diagnostics for the LKMA-191 path:
+
+```bash
+curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem // .ppp'
+journalctl -u sipfax.service -f | grep 'dialup protocol state'
+```
 
 From the FreePBX side:
 

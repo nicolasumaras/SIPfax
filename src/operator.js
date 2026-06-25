@@ -67,7 +67,8 @@ export function buildHealth(diagnostics) {
       sessionCapacityAvailable: diagnostics.sessions.active < diagnostics.sessions.limit
     },
     sessions: diagnostics.sessions,
-    ppp: diagnostics.ppp
+    ppp: diagnostics.ppp,
+    media: diagnostics.media
   };
 }
 

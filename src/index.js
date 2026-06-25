@@ -1,6 +1,6 @@
 import { SipFaxServer } from './server.js';
 import { OperatorHttpServer } from './operator.js';
-import { ExternalModemProcessBackend } from './media.js';
+import { ExternalModemProcessBackend, InProcessDialupTerminator } from './media.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, parseList, parseUsers } from './ppp.js';
 
 const modemCommand = process.env.SIPFAX_MODEM_COMMAND;
@@ -13,10 +13,7 @@ const config = {
   operatorHost: process.env.SIPFAX_OPERATOR_HOST ?? '127.0.0.1',
   operatorPort: Number.parseInt(process.env.SIPFAX_OPERATOR_PORT ?? '8080', 10),
   freepbxExtension: process.env.SIPFAX_FREEPBX_EXTENSION ?? 'faxmodem',
-  modem: new ExternalModemProcessBackend({
-    command: requireEnv('SIPFAX_MODEM_COMMAND', modemCommand),
-    args: parseList(process.env.SIPFAX_MODEM_ARGS, [])
-  }),
+  modem: createModemBackend(),
   ppp: new PppSessionController({
     credentials: new PppCredentialStore(parseUsers(process.env.SIPFAX_PPP_USERS)),
     addressPool: new AddressPool({
@@ -54,7 +51,7 @@ console.log(
 );
 console.log(`SIPfax operator HTTP listening on http://${config.operatorHost}:${config.operatorPort}`);
 console.log(`PPP users configured: ${config.ppp.diagnostics().configuredUsers}`);
-console.log(`Modem backend command: ${modemCommand}`);
+console.log(`Modem backend: ${config.modem.diagnostics().type}`);
 
 const shutdown = async () => {
   await Promise.all([operator.stop(), server.stop()]);
@@ -64,10 +61,13 @@ const shutdown = async () => {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-function requireEnv(name, value) {
-  if (!value) {
-    throw new Error(`${name} is required; configure an external modem process backend`);
+function createModemBackend() {
+  if (modemCommand) {
+    return new ExternalModemProcessBackend({
+      command: modemCommand,
+      args: parseList(process.env.SIPFAX_MODEM_ARGS, [])
+    });
   }
 
-  return value;
+  return new InProcessDialupTerminator();
 }

@@ -38,8 +38,14 @@ without adding a SIPfax runtime dependency.
 
 ## Ground-Truth Capture
 
-For the comparison set, run the same Windows dialer against a real Linux
-soft-modem path and capture on the soft-modem host:
+This comparison set is not a SIPfax server dependency. SIPfax remains a
+software-only modem endpoint and must not require a physical modem attached to
+the production server.
+
+For the reference comparison only, run the same Windows dialer against a
+separate lab soft-modem rig, then capture on that lab host. The purpose is to
+record known-good answer spectra for design comparison, not to define the
+SIPfax runtime architecture:
 
 ```bash
 mkdir -p artifacts/lkma-193a/ground-truth
@@ -62,5 +68,6 @@ Expected final ground-truth files:
 - `artifacts/lkma-193a/ground-truth/v22bis/report.json`
 
 The current repository change supplies the capture harness. The actual
-ground-truth recordings require the lab Windows dialer plus the Linux soft-modem
-and USB analog FXO path to be connected during capture.
+ground-truth recordings require a lab Windows dialer and separate known-good
+soft-modem reference path to be connected during capture. They do not imply a
+physical modem on the SIPfax VM.

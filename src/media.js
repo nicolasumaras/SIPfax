@@ -1,6 +1,9 @@
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 
+const DEFAULT_MODEM_FRAME_SAMPLES = 160;
+const DEFAULT_ANSWER_TONE_HZ = 2100;
+
 export const G711_CODECS = new Map([
   [0, { payloadType: 0, name: 'PCMU', clockRate: 8000 }],
   [8, { payloadType: 8, name: 'PCMA', clockRate: 8000 }]
@@ -142,19 +145,44 @@ export class ModemBridge extends EventEmitter {
   constructor({ modem = null } = {}) {
     super();
     this.modem = modem;
+    this.modemOutboundHandler = null;
     this.codec = null;
     this.audioBytesIn = 0;
     this.audioBytesOut = 0;
     this.framesIn = 0;
     this.framesOut = 0;
+    this.attachModem(modem);
   }
 
   setSessionCodec(codec) {
     this.codec = codec ?? null;
+    if (this.modem?.setSessionCodec) {
+      this.modem.setSessionCodec(this.codec);
+    }
   }
 
   attachModem(modem) {
+    if (this.modem?.off && this.modemOutboundHandler) {
+      this.modem.off('outbound-audio', this.modemOutboundHandler);
+    }
+
     this.modem = modem;
+    this.modemOutboundHandler = null;
+
+    if (!modem) {
+      return;
+    }
+
+    if (modem.setSessionCodec) {
+      modem.setSessionCodec(this.codec);
+    }
+
+    if (modem.on) {
+      this.modemOutboundHandler = (payload, metadata = {}) => {
+        this.acceptOutboundAudio(payload, metadata);
+      };
+      modem.on('outbound-audio', this.modemOutboundHandler);
+    }
   }
 
   acceptFrame(frame) {
@@ -200,12 +228,113 @@ export class ModemBridge extends EventEmitter {
   diagnostics() {
     return {
       codec: this.codec?.name ?? null,
+      modemAttached: Boolean(this.modem),
       framesIn: this.framesIn,
       framesOut: this.framesOut,
       audioBytesIn: this.audioBytesIn,
       audioBytesOut: this.audioBytesOut
     };
   }
+}
+
+export class ModemAnswerToneSource extends EventEmitter {
+  constructor({
+    frameSamples = DEFAULT_MODEM_FRAME_SAMPLES,
+    toneHz = DEFAULT_ANSWER_TONE_HZ,
+    amplitude = 10000,
+    intervalMs = 20
+  } = {}) {
+    super();
+    this.frameSamples = frameSamples;
+    this.toneHz = toneHz;
+    this.amplitude = amplitude;
+    this.intervalMs = intervalMs;
+    this.codec = null;
+    this.sampleOffset = 0;
+    this.timer = null;
+  }
+
+  setSessionCodec(codec) {
+    this.codec = codec ?? null;
+    this.sampleOffset = 0;
+    if (!this.codec) {
+      this.stop();
+    }
+  }
+
+  writeInboundAudio() {
+    if (!this.codec || this.timer) {
+      return;
+    }
+
+    this.emitFrame();
+    this.timer = setInterval(() => {
+      this.emitFrame();
+    }, this.intervalMs);
+  }
+
+  stop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  emitFrame() {
+    if (!this.codec) {
+      return;
+    }
+
+    this.emit('outbound-audio', this.buildToneFrame(), {
+      codec: this.codec,
+      payloadType: this.codec.payloadType,
+      timestampIncrement: this.frameSamples
+    });
+  }
+
+  buildToneFrame() {
+    const payload = Buffer.alloc(this.frameSamples);
+    for (let index = 0; index < this.frameSamples; index += 1) {
+      const sample = Math.round(
+        Math.sin((2 * Math.PI * this.toneHz * (this.sampleOffset + index)) / this.codec.clockRate) * this.amplitude
+      );
+      payload[index] = this.codec.payloadType === 8 ? encodeALaw(sample) : encodeMuLaw(sample);
+    }
+    this.sampleOffset += this.frameSamples;
+    return payload;
+  }
+}
+
+export function encodeMuLaw(sample) {
+  const clipped = Math.max(-32635, Math.min(32635, sample));
+  const sign = clipped < 0 ? 0x80 : 0x00;
+  let magnitude = Math.abs(clipped) + 0x84;
+  let exponent = 7;
+
+  for (let mask = 0x4000; exponent > 0 && (magnitude & mask) === 0; mask >>= 1) {
+    exponent -= 1;
+  }
+
+  const mantissa = (magnitude >> (exponent + 3)) & 0x0f;
+  return (~(sign | (exponent << 4) | mantissa)) & 0xff;
+}
+
+export function encodeALaw(sample) {
+  const clipped = Math.max(-32768, Math.min(32767, sample));
+  const sign = clipped < 0 ? 0x00 : 0x80;
+  let magnitude = Math.abs(clipped);
+
+  if (magnitude > 0x7ff) {
+    let exponent = 7;
+    for (let mask = 0x4000; exponent > 0 && (magnitude & mask) === 0; mask >>= 1) {
+      exponent -= 1;
+    }
+    magnitude = ((exponent << 4) | ((magnitude >> (exponent + 3)) & 0x0f)) & 0x7f;
+  } else {
+    magnitude = (magnitude >> 4) & 0x7f;
+  }
+
+  return (sign | magnitude) ^ 0x55;
 }
 
 function randomUInt32() {

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import dgram from 'node:dgram';
+import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
-import { buildRtpPacket, G711_CODECS, ModemBridge, parseRtpPacket } from '../src/media.js';
+import { buildRtpPacket, G711_CODECS, ModemAnswerToneSource, ModemBridge, parseRtpPacket } from '../src/media.js';
 import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
+import { SipFaxServer } from '../src/server.js';
 import { SingleSessionManager } from '../src/session.js';
 import { parseSdpOffer } from '../src/sdp.js';
 import { buildResponse, parseSipMessage } from '../src/sip.js';
@@ -152,6 +155,7 @@ test('modem bridge hands inbound G.711 payload bytes to the downstream modem pat
   assert.equal(writes[0].metadata.sequenceNumber, 7);
   assert.deepEqual(bridge.diagnostics(), {
     codec: 'PCMU',
+    modemAttached: true,
     framesIn: 1,
     framesOut: 0,
     audioBytesIn: 3,
@@ -176,6 +180,91 @@ test('modem bridge accepts outbound modem audio for RTP send without transcoding
   assert.equal(audio.marker, true);
   assert.deepEqual([...audio.payload], [0xd5, 0xd4, 0xd3, 0xd2]);
   assert.equal(bridge.diagnostics().audioBytesOut, 4);
+});
+
+test('modem bridge subscribes to outbound audio emitted by the attached modem', () => {
+  const modem = new EventEmitter();
+  const bridge = new ModemBridge({ modem });
+  bridge.setSessionCodec(G711_CODECS.get(0));
+  const emitted = [];
+  bridge.on('outbound-audio', (audio) => emitted.push(audio));
+
+  modem.emit('outbound-audio', Buffer.from([0xff, 0xfe]), { timestampIncrement: 160 });
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].payloadType, 0);
+  assert.equal(emitted[0].timestampIncrement, 160);
+  assert.deepEqual([...emitted[0].payload], [0xff, 0xfe]);
+  assert.equal(bridge.diagnostics().framesOut, 1);
+});
+
+test('default modem answer-tone source emits negotiated G.711 handshake frames', () => {
+  const source = new ModemAnswerToneSource();
+  const emitted = [];
+  source.on('outbound-audio', (payload, metadata) => emitted.push({ payload, metadata }));
+  source.setSessionCodec(G711_CODECS.get(8));
+
+  source.writeInboundAudio();
+  source.stop();
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].payload.length, 160);
+  assert.equal(emitted[0].metadata.payloadType, 8);
+  assert.equal(emitted[0].metadata.timestampIncrement, 160);
+  assert.notEqual(new Set(emitted[0].payload).size, 1);
+});
+
+test('server runtime modem wiring sends outbound RTP after inbound media discovers the remote endpoint', async () => {
+  const modem = new EventEmitter();
+  modem.setSessionCodec = (codec) => {
+    modem.codec = codec;
+  };
+  modem.writeInboundAudio = () => {
+    modem.emit('outbound-audio', Buffer.from([0x21, 0x22, 0x23]), { timestampIncrement: 160 });
+  };
+
+  const server = new SipFaxServer({
+    host: '127.0.0.1',
+    publicHost: '127.0.0.1',
+    sipPort: 0,
+    rtpPort: 0,
+    modem
+  });
+  const remote = dgram.createSocket('udp4');
+
+  try {
+    await server.start();
+    server.rtpEndpoint.setSessionCodec(G711_CODECS.get(0));
+    server.modemBridge.setSessionCodec(G711_CODECS.get(0));
+    const received = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timed out waiting for outbound RTP')), 500);
+      remote.once('message', (message) => {
+        clearTimeout(timeout);
+        resolve(message);
+      });
+    });
+
+    await new Promise((resolve) => remote.bind(0, '127.0.0.1', resolve));
+    const serverRtpPort = server.rtpEndpoint.socket.address().port;
+    const inbound = buildRtpPacket({
+      payloadType: 0,
+      sequenceNumber: 1,
+      timestamp: 160,
+      ssrc: 0x01020304,
+      payload: Buffer.from([0x7f, 0x80, 0x81])
+    });
+    remote.send(inbound, serverRtpPort, '127.0.0.1');
+
+    const outbound = parseRtpPacket(await received);
+    assert.equal(outbound.payloadType, 0);
+    assert.deepEqual([...outbound.payload], [0x21, 0x22, 0x23]);
+    assert.equal(server.modemBridge.diagnostics().framesOut, 1);
+  } finally {
+    await Promise.all([
+      server.stop(),
+      new Promise((resolve) => remote.close(resolve))
+    ]);
+  }
 });
 
 test('RTP builder carries outbound modem audio bytes as negotiated G.711 payload', () => {

@@ -1,0 +1,36 @@
+[Unit]
+Description=SIPfax SIP/RTP modem pass-through service
+Documentation=https://github.com/nicolasumaras/SIPfax
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sipfax
+Group=sipfax
+WorkingDirectory=/opt/sipfax
+EnvironmentFile=/etc/sipfax/sipfax.env
+Environment=NODE_ENV=production
+Environment=NPM_CONFIG_CACHE=/var/cache/sipfax/npm
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+
+# SIP UDP 5060 is a privileged port when running as the sipfax user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/cache/sipfax
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

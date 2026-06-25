@@ -81,11 +81,19 @@ the modem media path after the call reaches it. Do not enable T.38, transcoding,
 call recording, conferencing, VAD, comfort noise insertion, or other Asterisk
 media features for this route.
 
+For the first dedicated-VM deployment, follow
+[deploy/README.md](deploy/README.md). That runbook covers the Debian VM
+bootstrap, Node `24.x`, `/opt/sipfax`, `/etc/sipfax/sipfax.env`,
+`sipfax.service`, firewall expectations, and verification commands. The LKMA-179
+deployment decision is a new SIPfax VM on Proxmox `vmbr0` with FreePBX dial
+string `12345678` routed to the SIPfax endpoint.
+
 Recommended FreePBX shape:
 
 1. Create or edit a PJSIP trunk that points at `SIPFAX_PUBLIC_HOST:SIPFAX_SIP_PORT`.
 2. Allow only `ulaw` and `alaw`; keep all other codecs disabled.
-3. Route the modem DID or internal extension directly to that trunk.
+3. Route the modem DID or internal extension directly to that trunk. For the
+   first dedicated VM deployment, reserve internal dial string `12345678`.
 4. Keep SIPfax reachable only from the PBX signaling network and the selected
    ATA/modem segment.
 5. Leave SIPfax at one concurrent call. A second `INVITE` receives `486 Busy Here`.

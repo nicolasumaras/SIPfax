@@ -1,0 +1,14 @@
+{
+  "name": "sipfax",
+  "version": "0.1.0",
+  "description": "Direct SIP/RTP skeleton for the SIPfax modem pass-through service.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

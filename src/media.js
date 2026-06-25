@@ -576,6 +576,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
     this.codec = null;
     this.child = null;
     this.stdoutBuffer = Buffer.alloc(0);
+    this.controlBuffer = '';
     this.framesIn = 0;
     this.framesOut = 0;
     this.lastExit = null;
@@ -599,6 +600,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
   start() {
     this.stop();
     this.stdoutBuffer = Buffer.alloc(0);
+    this.controlBuffer = '';
     this.lastExit = null;
 
     const child = spawn(this.command, this.args, {
@@ -609,7 +611,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
         SIPFAX_MODEM_PAYLOAD_TYPE: String(this.codec?.payloadType ?? ''),
         SIPFAX_MODEM_CLOCK_RATE: String(this.codec?.clockRate ?? '')
       },
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe', 'pipe']
     });
 
     this.child = child;
@@ -619,6 +621,9 @@ export class ExternalModemProcessBackend extends EventEmitter {
     });
     child.stderr.on('data', (chunk) => {
       this.emit('backend-log', chunk.toString('utf8'));
+    });
+    child.stdio[3]?.on('data', (chunk) => {
+      this.acceptControlOutput(chunk);
     });
     child.on('error', (error) => {
       this.emit('backend-error', error);
@@ -668,6 +673,29 @@ export class ExternalModemProcessBackend extends EventEmitter {
         payloadType: this.codec?.payloadType ?? null,
         timestampIncrement: frame.length
       });
+    }
+  }
+
+  acceptControlOutput(chunk) {
+    this.controlBuffer += chunk.toString('utf8');
+
+    while (true) {
+      const newlineIndex = this.controlBuffer.indexOf('\n');
+      if (newlineIndex < 0) {
+        return;
+      }
+
+      const line = this.controlBuffer.slice(0, newlineIndex).trim();
+      this.controlBuffer = this.controlBuffer.slice(newlineIndex + 1);
+      if (!line) {
+        continue;
+      }
+
+      try {
+        this.emit('backend-control', JSON.parse(line));
+      } catch (error) {
+        this.emit('backend-error', new Error(`invalid modem control JSON: ${error.message}`));
+      }
     }
   }
 

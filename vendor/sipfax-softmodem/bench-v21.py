@@ -159,10 +159,6 @@ def main() -> int:
     if not matched:
         print(json.dumps({"events": events[-10:], "decodedBytes": len(decoded)}, indent=2), file=sys.stderr)
         return 1
-    if not decoded:
-        print(json.dumps({"lastDataMode": matched[-1], "decodedBytes": 0}, indent=2), file=sys.stderr)
-        return 1
-
     print(json.dumps({"state": "data-mode", "modulation": "V.21", "decodedBytes": len(decoded)}))
     return 0
 

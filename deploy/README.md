@@ -12,6 +12,7 @@ uses FreePBX dial string `12345678`.
 | `/opt/sipfax` | Git checkout of this repository |
 | `/etc/sipfax/sipfax.env` | Runtime environment file |
 | `/etc/systemd/system/sipfax.service` | systemd unit |
+| `/var/log/sipfax` | Writable service log/artifact directory for modem captures |
 | `sipfax` | Dedicated service user and group |
 
 Default listeners:
@@ -84,7 +85,10 @@ and `ppp-lcp-probe`.
 
 If an external lab backend is configured later, it must read
 two-byte-length-prefixed G.711 payloads from stdin and write the same framed
-format to stdout.
+format to stdout. If that backend writes decoded data or capture artifacts under
+`/var/log/sipfax`, keep the shipped unit's `ReadWritePaths=/var/cache/sipfax
+/var/log/sipfax` entry intact so `ProtectSystem=strict` does not make the
+artifact path read-only.
 
 ## systemd Install
 

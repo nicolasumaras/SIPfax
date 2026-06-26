@@ -26,7 +26,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/cache/sipfax
+ReadWritePaths=/var/cache/sipfax /var/log/sipfax
 RestrictSUIDSGID=true
 LockPersonality=true
 # Node 24/V8 needs executable anonymous memory for JIT/runtime startup.

@@ -253,6 +253,41 @@ test('external modem process backend exchanges framed G.711 payloads with a real
   }
 });
 
+test('external modem process backend opens fd 3 and emits parsed control events', async () => {
+  const backend = new ExternalModemProcessBackend({
+    command: process.execPath,
+    args: [
+      '-e',
+      [
+        'const fs = require("node:fs");',
+        'const control = fs.createWriteStream(null, { fd: 3 });',
+        'control.write(JSON.stringify({ state: "data-mode", modulation: "V.21", lastEvent: "test-control" }) + "\\n");',
+        'setTimeout(() => process.exit(0), 10);'
+      ].join('')
+    ]
+  });
+
+  try {
+    const controlEvent = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('timed out waiting for modem control event')), 500);
+      backend.once('backend-control', (event) => {
+        clearTimeout(timeout);
+        resolve(event);
+      });
+    });
+
+    backend.setSessionCodec(G711_CODECS.get(0));
+
+    assert.deepEqual(await controlEvent, {
+      state: 'data-mode',
+      modulation: 'V.21',
+      lastEvent: 'test-control'
+    });
+  } finally {
+    backend.stop();
+  }
+});
+
 test('default modem answer-tone source emits negotiated G.711 handshake frames', () => {
   const source = new ModemAnswerToneSource();
   const emitted = [];

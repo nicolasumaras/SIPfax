@@ -47,6 +47,9 @@ export class SipFaxServer {
       this.modem.on('backend-log', (line) => {
         console.log(`modem backend: ${String(line).trim()}`);
       });
+      this.modem.on('backend-error', (error) => {
+        console.error(`modem backend error: ${error.message}`);
+      });
     }
     this.rtpEndpoint.on('dropped', () => {
       this.metrics.rtpFramesDropped += 1;

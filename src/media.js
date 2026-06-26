@@ -580,6 +580,17 @@ export class ExternalModemProcessBackend extends EventEmitter {
     this.framesIn = 0;
     this.framesOut = 0;
     this.lastExit = null;
+    this.lastError = null;
+    this.lastControl = {
+      modulation: null,
+      baud: null,
+      state: 'idle',
+      ber: null,
+      framesIn: 0,
+      framesOut: 0,
+      lastEvent: null,
+      lastEventAt: null
+    };
   }
 
   setSessionCodec(codec) {
@@ -622,10 +633,19 @@ export class ExternalModemProcessBackend extends EventEmitter {
     child.stderr.on('data', (chunk) => {
       this.emit('backend-log', chunk.toString('utf8'));
     });
+    child.stdin.on('error', (error) => {
+      this.lastError = error.message;
+      this.emit('backend-error', error);
+    });
     child.stdio[3]?.on('data', (chunk) => {
       this.acceptControlOutput(chunk);
     });
+    child.stdio[3]?.on('error', (error) => {
+      this.lastError = error.message;
+      this.emit('backend-error', error);
+    });
     child.on('error', (error) => {
+      this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.on('exit', (code, signal) => {
@@ -638,7 +658,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
   }
 
   writeInboundAudio(payload) {
-    if (!this.codec || !this.child) {
+    if (!this.codec || !this.child || this.child.stdin.destroyed || !this.child.stdin.writable) {
       return false;
     }
 
@@ -692,7 +712,13 @@ export class ExternalModemProcessBackend extends EventEmitter {
       }
 
       try {
-        this.emit('backend-control', JSON.parse(line));
+        const event = JSON.parse(line);
+        this.lastControl = {
+          ...this.lastControl,
+          ...event,
+          lastEventAt: new Date().toISOString()
+        };
+        this.emit('backend-control', event);
       } catch (error) {
         this.emit('backend-error', new Error(`invalid modem control JSON: ${error.message}`));
       }
@@ -718,7 +744,14 @@ export class ExternalModemProcessBackend extends EventEmitter {
       codec: this.codec?.name ?? null,
       framesIn: this.framesIn,
       framesOut: this.framesOut,
-      lastExit: this.lastExit
+      lastExit: this.lastExit,
+      lastError: this.lastError,
+      modulation: this.lastControl.modulation,
+      baud: this.lastControl.baud,
+      state: this.lastControl.state,
+      ber: this.lastControl.ber,
+      lastEvent: this.lastControl.lastEvent,
+      lastEventAt: this.lastControl.lastEventAt
     };
   }
 }

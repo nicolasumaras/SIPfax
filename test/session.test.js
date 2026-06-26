@@ -283,6 +283,11 @@ test('external modem process backend opens fd 3 and emits parsed control events'
       modulation: 'V.21',
       lastEvent: 'test-control'
     });
+    const diagnostics = backend.diagnostics();
+    assert.equal(diagnostics.state, 'data-mode');
+    assert.equal(diagnostics.modulation, 'V.21');
+    assert.equal(diagnostics.lastEvent, 'test-control');
+    assert.match(diagnostics.lastEventAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     backend.stop();
   }
@@ -422,6 +427,56 @@ test('server runtime modem wiring sends outbound RTP after inbound media discove
     assert.equal(outbound.payloadType, 0);
     assert.deepEqual([...outbound.payload], [0x21, 0x22, 0x23]);
     assert.equal(server.modemBridge.diagnostics().framesOut, 1);
+  } finally {
+    await Promise.all([
+      server.stop(),
+      new Promise((resolve) => remote.close(resolve))
+    ]);
+  }
+});
+
+test('server with unavailable softmodem worker emits no synthetic outbound RTP', async () => {
+  const modem = new ExternalModemProcessBackend({ command: '/definitely/not-installed/sipfax-softmodem' });
+  const backendError = new Promise((resolve) => {
+    modem.once('backend-error', resolve);
+  });
+  const server = new SipFaxServer({
+    host: '127.0.0.1',
+    publicHost: '127.0.0.1',
+    sipPort: 0,
+    rtpPort: 0,
+    modem
+  });
+  const remote = dgram.createSocket('udp4');
+
+  try {
+    await server.start();
+    server.rtpEndpoint.setSessionCodec(G711_CODECS.get(0));
+    server.modemBridge.setSessionCodec(G711_CODECS.get(0));
+    await backendError;
+
+    const received = new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 150);
+      remote.once('message', (message) => {
+        clearTimeout(timeout);
+        resolve(message);
+      });
+    });
+
+    await new Promise((resolve) => remote.bind(0, '127.0.0.1', resolve));
+    const serverRtpPort = server.rtpEndpoint.socket.address().port;
+    remote.send(buildRtpPacket({
+      payloadType: 0,
+      sequenceNumber: 1,
+      timestamp: 160,
+      ssrc: 0x01020304,
+      payload: Buffer.alloc(160, 0x7f)
+    }), serverRtpPort, '127.0.0.1');
+
+    assert.equal(await received, null);
+    assert.equal(server.modemBridge.diagnostics().framesOut, 0);
+    assert.equal(server.modemBridge.diagnostics().modem.type, 'external-process');
+    assert.match(server.modemBridge.diagnostics().modem.lastError, /ENOENT/);
   } finally {
     await Promise.all([
       server.stop(),

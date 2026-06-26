@@ -88,6 +88,11 @@ diagnostics should show `media.modem.type` as `external-process` and expose
 `lastEvent`, and `lastEventAt`. The live path should report real worker state,
 not synthetic `answer-tone` or `v8-training` diagnostics.
 
+For Phase 5a, the default worker advertises both `V.21` and `V.22bis` in V.8.
+Windows callers that offer V.22/V.22bis should drive
+`media.modem.modulation: "V.22bis"` and `media.modem.baud: 2400`. If V.8 is not
+offered or fails, the worker falls back to `V.21` at 300 bit/s.
+
 If the worker writes decoded data or capture artifacts under `/var/log/sipfax`,
 keep the shipped unit's `ReadWritePaths=/var/cache/sipfax /var/log/sipfax`
 entry intact so `ProtectSystem=strict` does not make the artifact path
@@ -202,6 +207,85 @@ journalctl -u sipfax.service -f | grep 'modem backend'
 For the LKMA-196 path, a live Windows dial-up attempt should show real worker
 modulation, for example `media.modem.modulation` as `V.21`, and frame counters
 increasing from the worker control stream.
+
+## Real Windows Lab Run
+
+Use this path for the Phase 5a lab validation. The target is a real Windows
+computer using its Windows dial-up networking stack, not a Windows VM demo.
+
+Prerequisites:
+
+- SIPfax VM `192.168.1.31` has this repository deployed, `npm ci --omit=dev`
+  completed, and `vendor/sipfax-softmodem/sipfax-softmodem` built with
+  `libspandsp-dev`.
+- `/etc/sipfax/sipfax.env` sets `SIPFAX_PUBLIC_HOST=192.168.1.31`,
+  `SIPFAX_MODEM_COMMAND=/opt/sipfax/vendor/sipfax-softmodem/sipfax-softmodem`,
+  `SIPFAX_PPPD_COMMAND=/usr/sbin/pppd`, `SIPFAX_PPP_USERS`, and
+  `SIPFAX_EGRESS_INTERFACE`.
+- FreePBX routes dial string `12345678` directly to `192.168.1.31:5060` with
+  only PCMU/PCMA enabled and media features such as T.38, VAD, recording, and
+  transcoding disabled.
+- The real Windows computer is connected through the lab analog path into the
+  ATA/FreePBX route and has a dial-up profile that dials `12345678` with the
+  SIPfax PPP username and password.
+
+Wiring:
+
+```text
+Windows computer modem -> analog line/ATA -> FreePBX route 12345678
+FreePBX SIP/RTP -> SIPfax VM 192.168.1.31 UDP 5060/40000
+SIPfax soft-modem pty -> pppd -> ppp0 -> egress interface
+```
+
+Before dialing, watch the service and operator state:
+
+```bash
+sudo journalctl -u sipfax.service -f
+watch -n1 "curl -fsS http://127.0.0.1:8080/healthz | jq '{modem: .media.modem, ppp: .ppp}'"
+```
+
+Start the Windows dial-up connection. A successful modem and PPP attach should
+show all of the following on `192.168.1.31`:
+
+```bash
+curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem.modulation, .media.modem.state, .ppp.state, .ppp.interfaceName'
+journalctl -u sipfax.service --since "5 minutes ago" | grep -E 'pty-opened|IPCP-open|ppp0'
+ip addr show ppp0
+```
+
+Expected results:
+
+- `media.modem.state` becomes `data-mode`.
+- `media.modem.modulation` is `V.22bis` when Windows offers V.22/V.22bis, or
+  `V.21` only when the call falls back.
+- `ppp.state` becomes `ipcp-open`.
+- `ppp.interfaceName` is `ppp0` and `ip addr show ppp0` shows the leased local
+  and Windows peer addresses.
+
+Verify IP traffic from the Windows side by opening Command Prompt after the
+dial-up connection reports connected:
+
+```cmd
+ipconfig
+ping <sipfax-ppp-local-address>
+ping 8.8.8.8
+```
+
+If public ping is disabled by the remote network, verify egress from the SIPfax
+VM while the call is connected:
+
+```bash
+sudo tcpdump -ni ppp0 icmp
+sudo nft list ruleset | grep sipfax_
+```
+
+After disconnect, confirm cleanup:
+
+```bash
+ip link show ppp0
+sudo nft list ruleset | grep sipfax_ || true
+curl -fsS http://127.0.0.1:8080/healthz | jq '.ppp'
+```
 
 For PPP egress, an authenticated Linux client should be able to reach a public
 HTTP destination with `curl --interface ppp0 <url>`. After disconnect, confirm

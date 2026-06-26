@@ -9,15 +9,13 @@ import selectors
 import struct
 import subprocess
 import sys
-import tempfile
 import time
 import wave
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WAV = REPO_ROOT / "artifacts" / "lkma-193a" / "groundtruth-v21.wav"
-FALLBACK_WAV = REPO_ROOT / "artifacts" / "lkma-193a" / "ground-truth" / "v21" / "inbound.wav"
+DEFAULT_WAV = REPO_ROOT / "artifacts" / "lkma-193a" / "ground-truth" / "v22bis" / "inbound.wav"
 FRAME_SAMPLES = 160
 
 
@@ -82,52 +80,50 @@ def read_available_lines(fd: int, timeout_seconds: float) -> list[dict]:
     return events
 
 
-def run_replay(worker: Path, wav_path: Path, timeout_seconds: float) -> tuple[list[dict], bytes]:
+def run_replay(worker: Path, wav_path: Path, timeout_seconds: float) -> list[dict]:
     worker = worker.resolve()
     frames = pcm16_wav_to_ulaw_frames(wav_path)
     control_r, control_w = os.pipe()
     os.set_inheritable(control_w, True)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        data_path = Path(tmp) / "decoded-v21.bin"
+    proc = subprocess.Popen(
+        [str(worker)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        close_fds=True,
+        pass_fds=(control_w,),
+        env={
+            **os.environ,
+            "SIPFAX_MODEM_CODEC": "PCMU",
+            "SIPFAX_MODEM_PAYLOAD_TYPE": "0",
+            "SIPFAX_MODEM_CLOCK_RATE": "8000",
+            "SIPFAX_MODEM_CONTROL_FD": str(control_w),
+            "SIPFAX_MODEM_FORCE_DATA_MODE": "1",
+            "SIPFAX_MODEM_FORCE_MODULATION": "V.22bis",
+        },
+    )
+    os.close(control_w)
 
-        proc = subprocess.Popen(
-            [str(worker)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            close_fds=True,
-            pass_fds=(control_w,),
-            env={
-                **os.environ,
-                "SIPFAX_MODEM_CODEC": "PCMU",
-                "SIPFAX_MODEM_PAYLOAD_TYPE": "0",
-                "SIPFAX_MODEM_CLOCK_RATE": "8000",
-                "SIPFAX_MODEM_CONTROL_FD": str(control_w),
-                "SIPFAX_MODEM_DATA_OUT": str(data_path),
-            },
-        )
-        os.close(control_w)
+    assert proc.stdin is not None
+    for frame in frames:
+        proc.stdin.write(struct.pack(">H", len(frame)))
+        proc.stdin.write(frame)
+    proc.stdin.close()
 
-        assert proc.stdin is not None
-        for frame in frames:
-            proc.stdin.write(struct.pack(">H", len(frame)))
-            proc.stdin.write(frame)
-        proc.stdin.close()
+    events = read_available_lines(control_r, timeout_seconds)
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
 
-        events = read_available_lines(control_r, timeout_seconds)
-        try:
-            proc.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise
+    stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+    if proc.returncode != 0:
+        raise RuntimeError(f"worker exited {proc.returncode}: {stderr}")
 
-        stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
-        if proc.returncode != 0:
-            raise RuntimeError(f"worker exited {proc.returncode}: {stderr}")
-
-        return events, data_path.read_bytes() if data_path.exists() else b""
+    return events
 
 
 def main() -> int:
@@ -138,26 +134,27 @@ def main() -> int:
     parser.add_argument("--allow-missing", action="store_true")
     args = parser.parse_args()
 
-    wav_path = args.wav
-    if not wav_path.exists() and args.wav == DEFAULT_WAV and FALLBACK_WAV.exists():
-        wav_path = FALLBACK_WAV
-
-    if not wav_path.exists():
+    if not args.wav.exists():
         if args.allow_missing:
-            print(json.dumps({"skipped": True, "reason": f"missing {wav_path}"}))
+            print(json.dumps({"skipped": True, "reason": f"missing {args.wav}"}))
             return 0
-        print(f"missing V.21 ground-truth WAV: {wav_path}", file=sys.stderr)
+        print(f"missing V.22bis ground-truth WAV: {args.wav}", file=sys.stderr)
         return 2
 
-    events, decoded = run_replay(args.worker, wav_path, args.timeout)
+    events = run_replay(args.worker, args.wav, args.timeout)
     matched = [
         event for event in events
-        if event.get("state") == "data-mode" and event.get("modulation") == "V.21"
+        if event.get("state") == "data-mode" and event.get("modulation") == "V.22bis"
     ]
     if not matched:
-        print(json.dumps({"events": events[-10:], "decodedBytes": len(decoded)}, indent=2), file=sys.stderr)
+        print(json.dumps({"events": events[-10:]}, indent=2), file=sys.stderr)
         return 1
-    print(json.dumps({"state": "data-mode", "modulation": "V.21", "decodedBytes": len(decoded)}))
+
+    selected = next(
+        (event for event in matched if event.get("lastEvent") == "forced-data-mode"),
+        matched[-1]
+    )
+    print(json.dumps({"state": "data-mode", "modulation": "V.22bis", "lastEvent": selected.get("lastEvent")}))
     return 0
 
 

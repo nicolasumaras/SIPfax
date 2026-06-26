@@ -71,7 +71,7 @@ def main() -> int:
         print(f"usage: {sys.argv[0]} /path/to/sipfax-softmodem", file=sys.stderr)
         return 2
 
-    worker = Path(sys.argv[1])
+    worker = Path(sys.argv[1]).resolve()
     control_r, control_w = os.pipe()
     os.set_inheritable(control_w, True)
 

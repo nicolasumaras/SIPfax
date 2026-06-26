@@ -24,6 +24,14 @@ Default listeners:
 Keep operator HTTP bound to loopback for the first deploy. Reach it over SSH
 port forwarding when needed.
 
+## Lab Access
+
+Manage the live SIPfax VM through Proxmox host `root@192.168.1.20` using the
+shared `PROXMOX` runtime secret. Do not store the secret value in this repo.
+The SIPfax guest is Proxmox VM `133` and has service IP `192.168.1.31`.
+Direct SSH to `192.168.1.31` may reject the Paperclip environment's keys; use
+the Proxmox host and guest agent when direct guest SSH is unavailable.
+
 ## Prerequisites
 
 Start from a Debian 12 VM on `vmbr0` with a fixed LAN address reserved for

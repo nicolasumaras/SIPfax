@@ -19,6 +19,13 @@ The worker advertises V.21 and V.22/V.22bis in the V.8 answer menu. When the
 caller offers V.22/V.22bis, SIPfax selects V.22bis at 2400 bit/s; otherwise it
 falls back to V.21 at 300 bit/s for non-V.8 or failed V.8 calls.
 
+Set `SIPFAX_MODEM_START_MODE=v22bis` only for a controlled live diagnostic run
+after normal V.8 negotiation reports `v8Status: "failed"` and
+`lastEvent: "v8-failed-v21-fallback"`. This bypasses V.8 and starts the worker
+directly in V.22bis answer mode so the lab can distinguish V.8 negotiation
+failure from a lower RTP/analog carrier or PPP issue. Restore the default
+`SIPFAX_MODEM_START_MODE=v8` after the fallback run.
+
 ## Debian Bookworm Build
 
 Install the SIPfax runtime plus the native build dependencies:

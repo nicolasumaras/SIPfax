@@ -34,6 +34,12 @@ typedef enum {
     MODULATION_V22BIS
 } modulation_kind_t;
 
+typedef enum {
+    START_MODE_V8,
+    START_MODE_V21,
+    START_MODE_V22BIS
+} start_mode_t;
+
 typedef struct {
     uint8_t buffer[HDLC_MAX_FRAME_BYTES];
     size_t length;
@@ -65,6 +71,7 @@ typedef struct {
     hdlc_rx_t hdlc_rx;
     hdlc_tx_t hdlc_tx;
     modulation_kind_t modulation;
+    start_mode_t start_mode;
     bool data_mode;
     unsigned int bit_accumulator;
     int bit_count;
@@ -75,6 +82,8 @@ typedef struct {
     uint64_t hdlc_frames_out;
     uint64_t pty_bytes_in;
     uint64_t pty_bytes_out;
+    int v8_status;
+    int v8_modulations;
     const char *last_event;
 } worker_t;
 
@@ -94,7 +103,10 @@ static void encode_g711(worker_t *worker, uint8_t *payload, const int16_t *pcm, 
 static void emit_control(worker_t *worker, const char *event);
 static const char *modulation_name(modulation_kind_t modulation);
 static int modulation_baud(modulation_kind_t modulation);
+static start_mode_t parse_start_mode(void);
+static const char *start_mode_name(start_mode_t start_mode);
 static modulation_kind_t parse_force_modulation(void);
+static const char *v8_status_name(int status);
 static uint16_t hdlc_fcs_update(uint16_t fcs, uint8_t byte);
 static void hdlc_rx_byte(worker_t *worker, uint8_t byte);
 static int hdlc_tx_enqueue_frame(worker_t *worker, const uint8_t *payload, size_t length);
@@ -123,6 +135,9 @@ int main(void) {
         .control_fd = parse_int_env("SIPFAX_MODEM_CONTROL_FD", DEFAULT_CONTROL_FD),
         .pty_master_fd = -1,
         .modulation = MODULATION_V21,
+        .start_mode = parse_start_mode(),
+        .v8_status = -1,
+        .v8_modulations = 0,
         .last_event = "starting"
     };
 
@@ -142,7 +157,7 @@ int main(void) {
         return 1;
     }
 
-    if (init_spandsp(&worker) != 0) {
+    if (worker.start_mode == START_MODE_V8 && init_spandsp(&worker) != 0) {
         fclose(worker.data_out);
         return 1;
     }
@@ -150,6 +165,10 @@ int main(void) {
     emit_control(&worker, "started");
     if (parse_int_env("SIPFAX_MODEM_FORCE_DATA_MODE", 0) != 0) {
         enter_data_mode(&worker, parse_force_modulation(), "forced-data-mode");
+    } else if (worker.start_mode == START_MODE_V22BIS) {
+        enter_data_mode(&worker, MODULATION_V22BIS, "start-mode-v22bis");
+    } else if (worker.start_mode == START_MODE_V21) {
+        enter_data_mode(&worker, MODULATION_V21, "start-mode-v21");
     }
 
     for (;;) {
@@ -326,7 +345,8 @@ static void emit_control(worker_t *worker, const char *event) {
             "{\"state\":\"%s\",\"modulation\":\"%s\",\"baud\":%d,"
             "\"ber\":null,\"framesIn\":%llu,\"framesOut\":%llu,"
             "\"decodedBytes\":%llu,\"hdlcFramesIn\":%llu,\"hdlcFramesOut\":%llu,"
-            "\"ptyBytesIn\":%llu,\"ptyBytesOut\":%llu,\"ptySlavePath\":",
+            "\"ptyBytesIn\":%llu,\"ptyBytesOut\":%llu,"
+            "\"startMode\":\"%s\",\"v8Status\":",
             worker->data_mode ? "data-mode" : "negotiating",
             modulation_name(worker->modulation),
             modulation_baud(worker->modulation),
@@ -336,7 +356,16 @@ static void emit_control(worker_t *worker, const char *event) {
             (unsigned long long) worker->hdlc_frames_in,
             (unsigned long long) worker->hdlc_frames_out,
             (unsigned long long) worker->pty_bytes_in,
-            (unsigned long long) worker->pty_bytes_out);
+            (unsigned long long) worker->pty_bytes_out,
+            start_mode_name(worker->start_mode));
+    if (worker->v8_status >= 0) {
+        dprintf(worker->control_fd, "\"%s\"", v8_status_name(worker->v8_status));
+    } else {
+        dprintf(worker->control_fd, "null");
+    }
+    dprintf(worker->control_fd, ",\"v8StatusCode\":%d,\"v8Modulations\":%d,\"ptySlavePath\":",
+            worker->v8_status,
+            worker->v8_modulations);
     if (worker->pty_slave_path[0] != '\0') {
         dprintf(worker->control_fd, "\"%s\"", worker->pty_slave_path);
     } else {
@@ -353,12 +382,49 @@ static int modulation_baud(modulation_kind_t modulation) {
     return modulation == MODULATION_V22BIS ? 2400 : 300;
 }
 
+static start_mode_t parse_start_mode(void) {
+    const char *value = getenv("SIPFAX_MODEM_START_MODE");
+    if (!value || value[0] == '\0' || strcmp(value, "v8") == 0 || strcmp(value, "V.8") == 0 || strcmp(value, "V8") == 0) {
+        return START_MODE_V8;
+    }
+    if (strcmp(value, "v22bis") == 0 || strcmp(value, "V.22bis") == 0 || strcmp(value, "V22bis") == 0) {
+        return START_MODE_V22BIS;
+    }
+    if (strcmp(value, "v21") == 0 || strcmp(value, "V.21") == 0 || strcmp(value, "V21") == 0) {
+        return START_MODE_V21;
+    }
+    return START_MODE_V8;
+}
+
+static const char *start_mode_name(start_mode_t start_mode) {
+    if (start_mode == START_MODE_V22BIS) {
+        return "v22bis";
+    }
+    if (start_mode == START_MODE_V21) {
+        return "v21";
+    }
+    return "v8";
+}
+
 static modulation_kind_t parse_force_modulation(void) {
     const char *value = getenv("SIPFAX_MODEM_FORCE_MODULATION");
     if (value && (strcmp(value, "V.22bis") == 0 || strcmp(value, "V22bis") == 0 || strcmp(value, "v22bis") == 0)) {
         return MODULATION_V22BIS;
     }
     return MODULATION_V21;
+}
+
+static const char *v8_status_name(int status) {
+    switch (status) {
+    case V8_STATUS_V8_CALL:
+        return "v8-call";
+    case V8_STATUS_NON_V8_CALL:
+        return "non-v8-call";
+    case V8_STATUS_FAILED:
+        return "failed";
+    default:
+        return "unknown";
+    }
 }
 
 static uint16_t hdlc_fcs_update(uint16_t fcs, uint8_t byte) {
@@ -649,6 +715,8 @@ static void enter_data_mode(worker_t *worker, modulation_kind_t modulation, cons
 
 static void v8_result(void *user_data, v8_parms_t *result) {
     worker_t *worker = (worker_t *) user_data;
+    worker->v8_status = result->status;
+    worker->v8_modulations = result->modulations;
     if (result->status == V8_STATUS_V8_CALL) {
         if ((result->modulations & V8_MOD_V22) != 0) {
             enter_data_mode(worker, MODULATION_V22BIS, "v8-v22bis-selected");

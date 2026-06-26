@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   buildRtpPacket,
@@ -13,6 +16,7 @@ import {
 } from '../src/media.js';
 import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
+import { buildPppdArgs, PppdSupervisor, renderChapSecrets } from '../src/pppd-supervisor.js';
 import { SipFaxServer } from '../src/server.js';
 import { SingleSessionManager } from '../src/session.js';
 import { parseSdpOffer } from '../src/sdp.js';
@@ -97,6 +101,50 @@ test('PPP authentication assigns client address and DNS for an established call'
   assert.equal(manager.diagnostics().ppp.addressPool.activeLeases, 1);
 
   manager.terminate('call-ppp');
+  assert.equal(ppp.diagnostics().addressPool.activeLeases, 0);
+});
+
+test('PPP controller starts and stops pppd supervisor from leased session state', () => {
+  const starts = [];
+  const stops = [];
+  const supervisor = {
+    start(options) {
+      starts.push(options);
+      return {
+        state: 'starting',
+        localAddress: options.lease.localAddress,
+        clientAddress: options.lease.clientAddress,
+        dnsServers: options.dnsServers,
+        interfaceName: null
+      };
+    },
+    stop(callId) {
+      stops.push(callId);
+      return true;
+    },
+    diagnostics() {
+      return { activeSessions: starts.length - stops.length };
+    }
+  };
+  const ppp = new PppSessionController({
+    credentials: new PppCredentialStore([{ username: 'fax', password: 'secret' }]),
+    addressPool: new AddressPool({ cidr: '10.80.0.0/30' }),
+    dnsServers: ['9.9.9.9'],
+    pppdSupervisor: supervisor
+  });
+
+  ppp.begin('call-pty');
+  assert.equal(ppp.startPppd('call-pty', { slavePath: '/dev/pts/7' }), true);
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].slavePath, '/dev/pts/7');
+  assert.equal(starts[0].lease.localAddress, '10.80.0.1');
+  assert.equal(starts[0].lease.clientAddress, '10.80.0.2');
+  assert.deepEqual(starts[0].dnsServers, ['9.9.9.9']);
+  assert.equal(ppp.snapshot('call-pty').state, 'pppd-starting');
+  assert.equal(ppp.diagnostics().addressPool.activeLeases, 1);
+
+  ppp.terminate('call-pty');
+  assert.deepEqual(stops, ['call-pty']);
   assert.equal(ppp.diagnostics().addressPool.activeLeases, 0);
 });
 
@@ -336,11 +384,10 @@ test('in-process dial-up terminator emits ANSam frames and exposes negotiation s
   );
 });
 
-test('in-process dial-up terminator advances beyond V.8 into PPP LCP probe frames', () => {
+test('in-process dial-up terminator stops at carrier training without synthetic PPP frames', () => {
   const terminator = new InProcessDialupTerminator({
     trainingFramesRequired: 2,
-    carrierFramesRequired: 2,
-    pppProbeFramesRequired: 2
+    carrierFramesRequired: 2
   });
   const emitted = [];
   const states = [];
@@ -359,16 +406,115 @@ test('in-process dial-up terminator advances beyond V.8 into PPP LCP probe frame
 
   assert.deepEqual(
     states.map((event) => event.state),
-    ['answer-tone', 'v8-training', 'carrier-training', 'ppp-lcp-probe']
+    ['answer-tone', 'v8-training', 'carrier-training']
   );
-  assert.equal(terminator.diagnostics().state, 'ppp-lcp-probe');
+  assert.equal(terminator.diagnostics().state, 'carrier-training');
   assert.equal(terminator.diagnostics().carrierHits, 2);
-  assert.equal(terminator.diagnostics().pppProbeFramesOut >= 1, true);
-  assert.equal(terminator.diagnostics().pppProbeBytes > 0, true);
+  assert.equal('pppProbeFramesOut' in terminator.diagnostics(), false);
+  assert.equal('pppProbeBytes' in terminator.diagnostics(), false);
   assert.equal(emitted.some((frame) => frame.metadata.dialupState === 'carrier-training'), true);
-  assert.equal(emitted.some((frame) => frame.metadata.dialupState === 'ppp-lcp-probe'), true);
+  assert.equal(emitted.some((frame) => frame.metadata.dialupState === 'ppp-lcp-probe'), false);
   assert.equal(emitted.at(-1).payload.length, 160);
   assert.notEqual(new Set(emitted.at(-1).payload).size, 1);
+});
+
+test('pppd supervisor renders chap-secrets with restrictive permissions', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sipfax-pppd-test-'));
+  const secretsPath = join(dir, 'chap-secrets-123');
+  const credentials = new PppCredentialStore([
+    { username: 'fax', password: 'secret' },
+    { username: 'quote"user', password: 'slash\\secret' }
+  ]);
+
+  renderChapSecrets(credentials, secretsPath);
+
+  assert.equal(readFileSync(secretsPath, 'utf8'), [
+    '"fax" * "secret" *',
+    '"quote\\"user" * "slash\\\\secret" *',
+    ''
+  ].join('\n'));
+  assert.equal(statSync(secretsPath).mode & 0o777, 0o600);
+});
+
+test('pppd supervisor builds required daemon options', () => {
+  const args = buildPppdArgs({
+    slavePath: '/dev/pts/9',
+    lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' },
+    dnsServers: ['1.1.1.1', '9.9.9.9'],
+    authProtocol: 'chap',
+    secretsPath: '/tmp/chap-secrets-111',
+    notifyScript: '/usr/lib/sipfax/ppp-notify',
+    callId: 'call-pppd'
+  });
+
+  assert.deepEqual(args.slice(0, 6), [
+    '/dev/pts/9',
+    'nodetach',
+    'nodefaultroute',
+    'noccp',
+    'require-chap',
+    '10.64.0.1:10.64.0.2'
+  ]);
+  assert.equal(args.includes('ms-dns'), true);
+  assert.equal(args.includes('chap-secrets'), true);
+  assert.equal(args.includes('/tmp/chap-secrets-111'), true);
+  assert.equal(args.includes('ip-up-script'), true);
+  assert.equal(args.includes('ip-down-script'), true);
+  assert.equal(args.includes('lcp-echo-interval'), true);
+  assert.equal(args.includes('lcp-max-configure'), true);
+  assert.equal(args.includes('ipcp-max-configure'), true);
+});
+
+test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans shutdown', () => {
+  const child = new EventEmitter();
+  child.pid = 4242;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.killed = false;
+  child.kill = (signal) => {
+    child.killed = signal;
+  };
+  const spawns = [];
+  const removed = [];
+  const supervisor = new PppdSupervisor({
+    command: '/usr/sbin/pppd',
+    tempDir: tmpdir(),
+    spawnProcess(command, args, options) {
+      spawns.push({ command, args, options });
+      return child;
+    },
+    cleanup(path) {
+      removed.push(path);
+    }
+  });
+  const credentials = new PppCredentialStore([{ username: 'fax', password: 'secret' }]);
+
+  const started = supervisor.start({
+    callId: 'call-supervisor',
+    slavePath: '/dev/pts/3',
+    lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' },
+    dnsServers: ['1.1.1.1'],
+    credentials
+  });
+
+  assert.equal(spawns[0].command, '/bin/sh');
+  assert.equal(spawns[0].args.includes('/usr/sbin/pppd'), true);
+  assert.equal(started.pid, 4242);
+  const sessionDir = spawns[0].args[3];
+  const secretsPath = join(sessionDir, 'chap-secrets-4242');
+  assert.equal(existsSync(secretsPath), true);
+  assert.match(readFileSync(secretsPath, 'utf8'), /"fax" \* "secret" \*/);
+
+  child.stdout.emit('data', Buffer.from('{"state":"IPCP-open","interfaceName":"ppp0"}\n'));
+  const snapshot = supervisor.snapshot('call-supervisor');
+  assert.equal(snapshot.state, 'ipcp-open');
+  assert.equal(snapshot.interfaceName, 'ppp0');
+  assert.equal(snapshot.localAddress, '10.64.0.1');
+  assert.equal(snapshot.clientAddress, '10.64.0.2');
+
+  assert.equal(supervisor.stop('call-supervisor'), true);
+  assert.equal(child.killed, 'SIGTERM');
+  assert.deepEqual(removed, [sessionDir]);
 });
 
 test('in-process dial-up terminator clears state when codec is removed', () => {
@@ -433,6 +579,44 @@ test('server runtime modem wiring sends outbound RTP after inbound media discove
       new Promise((resolve) => remote.close(resolve))
     ]);
   }
+});
+
+test('server modem control pty events start and stop pppd for the active call', () => {
+  const starts = [];
+  const stops = [];
+  const ppp = new PppSessionController({
+    credentials: new PppCredentialStore([{ username: 'fax', password: 'secret' }]),
+    addressPool: new AddressPool({ cidr: '10.90.0.0/30' }),
+    pppdSupervisor: {
+      start(options) {
+        starts.push(options);
+        return { state: 'starting' };
+      },
+      stop(callId) {
+        stops.push(callId);
+        return true;
+      },
+      diagnostics() {
+        return {};
+      }
+    }
+  });
+  const server = new SipFaxServer({
+    host: '127.0.0.1',
+    publicHost: '127.0.0.1',
+    sipPort: 0,
+    rtpPort: 0,
+    ppp
+  });
+
+  server.sessions.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-control', payloads: '0' })));
+  server.sessions.acknowledge('call-control');
+  server.handleModemControl({ event: 'pty-opened', slavePath: '/dev/pts/11' });
+  server.handleModemControl({ event: 'pty-closed' });
+
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].slavePath, '/dev/pts/11');
+  assert.deepEqual(stops, ['call-control']);
 });
 
 test('server with unavailable softmodem worker emits no synthetic outbound RTP', async () => {

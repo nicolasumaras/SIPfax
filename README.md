@@ -44,6 +44,9 @@ Configuration is environment-driven:
 | `SIPFAX_PPP_POOL` | `10.64.0.0/24` | Client address pool; `.1` is reserved as the local peer by default |
 | `SIPFAX_PPP_LOCAL_ADDRESS` | first host in pool | Local peer address advertised to authenticated clients |
 | `SIPFAX_PPP_DNS` | `1.1.1.1,9.9.9.9` | DNS servers assigned to authenticated PPP clients |
+| `SIPFAX_PPPD_COMMAND` | `/usr/sbin/pppd` | `pppd` binary from the Debian `ppp` package |
+| `SIPFAX_PPP_AUTH` | `chap` | `chap` by default; set `pap` only for legacy clients |
+| `SIPFAX_PPP_NOTIFY_SCRIPT` | unset | Optional pppd ip-up/ip-down notifier that emits JSON IPCP events |
 | `SIPFAX_EGRESS_INTERFACE` | `wan0` | Outbound interface used when rendering NAT/firewall rules |
 | `SIPFAX_EGRESS_ENABLED` | `true` | Set to `false` to disable internet forwarding |
 | `SIPFAX_EGRESS_DNS` | `true` | Set to `false` to block client DNS egress |

@@ -94,6 +94,26 @@ export class SingleSessionManager {
     return result;
   }
 
+  openPty(callId, { slavePath }) {
+    if (this.activeSession?.callId !== callId || !slavePath) {
+      return false;
+    }
+
+    const started = this.ppp.startPppd(callId, { slavePath });
+    if (started) {
+      this.activeSession.ppp = this.ppp.snapshot(callId);
+    }
+    return started;
+  }
+
+  closePty(callId) {
+    if (this.activeSession?.callId !== callId) {
+      return false;
+    }
+
+    return this.ppp.stopPppd(callId);
+  }
+
   diagnostics() {
     return {
       active: this.activeSession ? 1 : 0,

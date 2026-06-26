@@ -20,6 +20,7 @@ const DEFAULT_BLOCKED_DESTINATIONS = [
 export class PppCredentialStore {
   constructor(users = []) {
     this.users = new Map();
+    this.secrets = new Map();
 
     for (const user of users) {
       this.addUser(user);
@@ -36,6 +37,9 @@ export class PppCredentialStore {
     }
 
     this.users.set(username, passwordHash ?? hashPassword(password));
+    if (password) {
+      this.secrets.set(username, password);
+    }
   }
 
   verify({ username, password }) {
@@ -50,6 +54,17 @@ export class PppCredentialStore {
 
   get size() {
     return this.users.size;
+  }
+
+  chapSecrets() {
+    return [...this.users.keys()].map((username) => {
+      const password = this.secrets.get(username);
+      if (!password) {
+        throw new Error(`PPP secret for ${username} is not renderable from a passwordHash-only credential`);
+      }
+
+      return { username, password };
+    });
   }
 }
 
@@ -189,12 +204,14 @@ export class PppSessionController {
     credentials,
     addressPool = new AddressPool(),
     dnsServers = DEFAULT_DNS_SERVERS,
-    egressPolicy = new EgressPolicy({ clientCidr: addressPool.cidr })
+    egressPolicy = new EgressPolicy({ clientCidr: addressPool.cidr }),
+    pppdSupervisor = null
   } = {}) {
     this.credentials = credentials ?? new PppCredentialStore();
     this.addressPool = addressPool;
     this.dnsServers = dnsServers;
     this.egressPolicy = egressPolicy;
+    this.pppdSupervisor = pppdSupervisor;
     this.sessions = new Map();
   }
 
@@ -206,6 +223,7 @@ export class PppSessionController {
       username: null,
       lease: null,
       dnsServers: [],
+      pppd: null,
       egress: this.egressPolicy.diagnostics()
     };
 
@@ -239,9 +257,57 @@ export class PppSessionController {
       return false;
     }
 
+    this.stopPppd(callId);
     this.addressPool.release(callId);
     this.sessions.delete(callId);
     return true;
+  }
+
+  startPppd(callId, { slavePath }) {
+    const session = this.sessions.get(callId);
+    if (!session || !this.pppdSupervisor) {
+      return false;
+    }
+
+    session.lease = session.lease ?? this.addressPool.lease(callId);
+    session.dnsServers = [...this.dnsServers];
+    session.state = 'pppd-starting';
+    session.pppd = this.pppdSupervisor.start({
+      callId,
+      slavePath,
+      lease: session.lease,
+      dnsServers: this.dnsServers,
+      credentials: this.credentials,
+      onEvent: (event) => {
+        this.acceptPppdEvent(callId, event);
+      }
+    });
+    return true;
+  }
+
+  stopPppd(callId) {
+    if (!this.pppdSupervisor) {
+      return false;
+    }
+
+    return this.pppdSupervisor.stop(callId);
+  }
+
+  acceptPppdEvent(callId, event) {
+    const session = this.sessions.get(callId);
+    if (!session) {
+      return;
+    }
+
+    if (event.state) {
+      session.state = event.state;
+    }
+
+    session.pppd = {
+      ...(session.pppd ?? {}),
+      ...event,
+      dnsServers: [...(event.dnsServers ?? session.dnsServers)]
+    };
   }
 
   snapshot(callId) {
@@ -257,6 +323,7 @@ export class PppSessionController {
       username: session.username,
       lease: session.lease ? { ...session.lease } : null,
       dnsServers: [...session.dnsServers],
+      pppd: session.pppd ? { ...session.pppd } : null,
       egress: { ...session.egress }
     };
   }
@@ -269,6 +336,7 @@ export class PppSessionController {
         localAddress: this.addressPool.localAddress,
         activeLeases: this.addressPool.leases.size
       },
+      pppd: this.pppdSupervisor?.diagnostics ? this.pppdSupervisor.diagnostics() : null,
       egress: this.egressPolicy.diagnostics(),
       sessions: [...this.sessions.keys()].map((callId) => this.snapshot(callId))
     };

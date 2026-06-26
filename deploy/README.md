@@ -30,16 +30,25 @@ Start from a Debian 12 VM on `vmbr0` with a fixed LAN address reserved for
 SIPfax. The FreePBX VM should be able to reach that IP on UDP `5060` and
 `40000`.
 
-Install base packages, Node `24.x`, PPP, and nftables:
+Install base packages, Node `24.x`, PPP, nftables, and the SpanDSP worker
+runtime/build dependencies on Debian Bookworm:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg git ufw ppp nftables
+sudo apt-get install -y ca-certificates curl gnupg git jq ufw \
+  build-essential pkg-config python3 libspandsp-dev libspandsp2 \
+  ppp nftables iptables
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 node --version
 npm --version
+pppd --version
 ```
+
+`libspandsp2` is the runtime shared library for the soft-modem worker.
+`libspandsp-dev`, `build-essential`, `pkg-config`, and `python3` are needed
+when building the vendored worker on the VM. `iptables` provides the
+`iptables-nft` fallback used only when `nft` is unavailable.
 
 Create the service user and checkout path:
 
@@ -53,6 +62,22 @@ sudo -u sipfax npm ci --omit=dev
 
 For the first live deploy, use the commit or release branch selected by the CTO
 rather than an unreviewed local working tree.
+
+Build the bundled SpanDSP worker and install it into SIPfax's default handoff
+path:
+
+```bash
+sudo -u sipfax make -C vendor/sipfax-softmodem
+sudo install -d -m 0755 -o root -g sipfax /opt/sipfax/bin
+sudo install -m 0755 -o root -g sipfax \
+  vendor/sipfax-softmodem/sipfax-softmodem \
+  /opt/sipfax/bin/sipfax-softmodem
+test -x /opt/sipfax/bin/sipfax-softmodem
+```
+
+The service user only needs execute access to
+`/opt/sipfax/bin/sipfax-softmodem`; keep the installed binary owned by root so
+normal service runtime cannot replace it.
 
 ## Runtime Environment
 
@@ -112,6 +137,14 @@ not write firewall state. The root-side pppd hooks installed by
 NAT/MASQUERADE, rolls rules back on `ip-down`, and posts best-effort loopback
 diagnostics to operator HTTP.
 
+For each PPP session, SIPfax renders the configured `SIPFAX_PPP_USERS` into a
+private temporary `chap-secrets` file, or `pap-secrets` when
+`SIPFAX_PPP_AUTH=pap`. The file is created with `0600` permissions, passed to
+`pppd` with the matching `chap-secrets`/`pap-secrets` option, and removed when
+the pppd session exits. Do not create persistent entries in `/etc/ppp/chap-secrets`
+for SIPfax users unless an Operator explicitly chooses to replace this per-call
+secret lifecycle.
+
 ## systemd Install
 
 Install the unit and start the service:
@@ -124,9 +157,10 @@ sudo systemctl status sipfax.service
 
 `deploy/install-systemd.sh` also installs:
 
+- `/opt/sipfax/bin/sipfax-softmodem`
 - `/usr/lib/sipfax/sipfax-egress-apply`
-- `/etc/ppp/ip-up.d/sipfax-egress`
-- `/etc/ppp/ip-down.d/sipfax-egress`
+- `/etc/ppp/ip-up.d/sipfax`
+- `/etc/ppp/ip-down.d/sipfax`
 
 Operator review is required before enabling the hooks on a production VM,
 because they write nftables/iptables state and toggle IPv4 forwarding while a
@@ -182,8 +216,10 @@ forwarding after the last active SIPfax PPP lease is gone.
 On the SIPfax VM:
 
 ```bash
-systemctl is-active sipfax.service
+systemctl status sipfax.service
 curl -fsS http://127.0.0.1:8080/healthz
+pppd --version
+sudo nft list ruleset | head
 curl -fsS http://127.0.0.1:8080/metrics
 curl -fsS http://127.0.0.1:8080/freepbx/pjsip.conf
 sudo ss -lunp | grep -E ':(5060|40000) '
@@ -192,10 +228,11 @@ sudo ss -lunp | grep -E ':(5060|40000) '
 Expected `/healthz` result is `status: ok`. If it is `degraded`, confirm
 `SIPFAX_PPP_USERS` is set and restart the service.
 
-Expected modem diagnostics for the soft-modem worker path:
+Expected modem diagnostics for the soft-modem worker path, including the
+control-fd snapshot exposed under `media.modem`:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem // .ppp'
+curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem'
 journalctl -u sipfax.service -f | grep 'modem backend'
 ```
 

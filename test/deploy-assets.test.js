@@ -32,16 +32,40 @@ test('deploy runbook documents the Node 24 systemd hardening exception', async (
 });
 
 test('deployment assets default to the spandsp soft-modem worker', async () => {
-  const [envExample, runbook] = await Promise.all([
+  const [envExample, installer, runbook] = await Promise.all([
     readFile(new URL('../deploy/sipfax.env.example', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/install-systemd.sh', import.meta.url), 'utf8'),
     readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
   ]);
 
   assert.match(envExample, /# SIPFAX_SOFTMODEM_BINARY=\/opt\/sipfax\/bin\/sipfax-softmodem/);
   assert.match(envExample, /# SIPFAX_MODEM_COMMAND=\/usr\/local\/bin\/sipfax-modem-bridge/);
   assert.match(envExample, /SIPFAX_MODEM_ARGS=/);
+  assert.match(installer, /vendor\/sipfax-softmodem\/sipfax-softmodem/);
+  assert.match(installer, /\/opt\/sipfax\/bin\/sipfax-softmodem/);
+  assert.match(installer, /\/etc\/ppp\/ip-up\.d\/sipfax/);
+  assert.match(installer, /\/etc\/ppp\/ip-down\.d\/sipfax/);
   assert.match(runbook, /spandsp soft-modem worker/);
+  assert.match(runbook, /libspandsp2/);
+  assert.match(runbook, /\/opt\/sipfax\/bin\/sipfax-softmodem/);
   assert.match(runbook, /media\.modem\.type/);
   assert.match(runbook, /media\.modem\.modulation/);
   assert.doesNotMatch(runbook, /default live call path uses SIPfax's in-process/);
+});
+
+test('deploy runbook documents pppd hooks, nftables checks, and per-call ppp secrets', async () => {
+  const [envExample, runbook] = await Promise.all([
+    readFile(new URL('../deploy/sipfax.env.example', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(envExample, /per-call[\s\S]*chap-secrets\/pap-secrets/);
+  assert.match(runbook, /\/etc\/ppp\/ip-up\.d\/sipfax/);
+  assert.match(runbook, /\/etc\/ppp\/ip-down\.d\/sipfax/);
+  assert.match(runbook, /Operator review is required/);
+  assert.match(runbook, /chap-secrets/);
+  assert.match(runbook, /0600/);
+  assert.match(runbook, /pppd --version/);
+  assert.match(runbook, /nft list ruleset \| head/);
+  assert.match(runbook, /jq '\.media\.modem'/);
 });

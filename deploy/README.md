@@ -118,13 +118,32 @@ and write the same framed format to stdout. fd 3 may write JSON-line control
 snapshots. During a live Windows dial-up attempt, `/healthz` and operator
 diagnostics should show `media.modem.type` as `external-process` and expose
 `media.modem.modulation`, `baud`, `state`, `ber`, `framesIn`, `framesOut`,
-`lastEvent`, and `lastEventAt`. The live path should report real worker state,
-not synthetic `answer-tone` or `v8-training` diagnostics.
+`startMode`, `v8Status`, `v8Modulations`, `lastEvent`, and `lastEventAt`. The
+live path should report real worker state, not synthetic `answer-tone` or
+`v8-training` diagnostics.
 
 For Phase 5a, the default worker advertises both `V.21` and `V.22bis` in V.8.
 Windows callers that offer V.22/V.22bis should drive
 `media.modem.modulation: "V.22bis"` and `media.modem.baud: 2400`. If V.8 is not
 offered or fails, the worker falls back to `V.21` at 300 bit/s.
+
+Leave `SIPFAX_MODEM_START_MODE` unset or set to `v8` for normal calls. If a live
+Windows call repeatedly ends at `media.modem.lastEvent:
+"v8-failed-v21-fallback"` with `media.modem.v8Status: "failed"`, use a controlled
+fallback run to bypass V.8 and start the worker directly in V.22bis answer mode:
+
+```bash
+sudo sed -i '/^SIPFAX_MODEM_START_MODE=/d' /etc/sipfax/sipfax.env
+echo 'SIPFAX_MODEM_START_MODE=v22bis' | sudo tee -a /etc/sipfax/sipfax.env
+sudo systemctl restart sipfax.service
+curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem.startMode'
+```
+
+After the fallback run, restore `SIPFAX_MODEM_START_MODE=v8` or remove the line
+so the next validation uses standards negotiation again. If `v22bis` progresses
+to `v22bis-carrier-up` or `IPCP-open`, the remaining stop-point is V.8
+negotiation. If it still cannot train, the next owner should inspect the live
+analog/RTP audio path before PPP.
 
 If the worker writes decoded data or capture artifacts under `/var/log/sipfax`,
 keep the shipped unit's `ReadWritePaths=/var/cache/sipfax /var/log/sipfax`
@@ -303,6 +322,9 @@ Expected results:
 - `media.modem.state` becomes `data-mode`.
 - `media.modem.modulation` is `V.22bis` when Windows offers V.22/V.22bis, or
   `V.21` only when the call falls back.
+- `media.modem.v8Status` remains `null` only for a deliberate
+  `SIPFAX_MODEM_START_MODE=v22bis` fallback run; otherwise it records the V.8
+  result that selected or rejected V.22bis.
 - `ppp.state` becomes `ipcp-open`.
 - `ppp.interfaceName` is `ppp0` and `ip addr show ppp0` shows the leased local
   and Windows peer addresses.

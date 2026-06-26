@@ -538,6 +538,10 @@ export class ExternalModemProcessBackend extends EventEmitter {
       ber: null,
       framesIn: 0,
       framesOut: 0,
+      startMode: null,
+      v8Status: null,
+      v8StatusCode: null,
+      v8Modulations: null,
       lastEvent: null,
       lastEventAt: null
     };
@@ -700,6 +704,10 @@ export class ExternalModemProcessBackend extends EventEmitter {
       baud: this.lastControl.baud,
       state: this.lastControl.state,
       ber: this.lastControl.ber,
+      startMode: this.lastControl.startMode,
+      v8Status: this.lastControl.v8Status,
+      v8StatusCode: this.lastControl.v8StatusCode,
+      v8Modulations: this.lastControl.v8Modulations,
       lastEvent: this.lastControl.lastEvent,
       lastEventAt: this.lastControl.lastEventAt
     };

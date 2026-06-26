@@ -364,7 +364,7 @@ test('external modem process backend opens fd 3 and emits parsed control events'
       [
         'const fs = require("node:fs");',
         'const control = fs.createWriteStream(null, { fd: 3 });',
-        'control.write(JSON.stringify({ state: "data-mode", modulation: "V.21", lastEvent: "test-control" }) + "\\n");',
+        'control.write(JSON.stringify({ state: "data-mode", modulation: "V.21", startMode: "v8", v8Status: "failed", v8StatusCode: 2, v8Modulations: 0, lastEvent: "test-control" }) + "\\n");',
         'setTimeout(() => process.exit(0), 10);'
       ].join('')
     ]
@@ -384,11 +384,19 @@ test('external modem process backend opens fd 3 and emits parsed control events'
     assert.deepEqual(await controlEvent, {
       state: 'data-mode',
       modulation: 'V.21',
+      startMode: 'v8',
+      v8Status: 'failed',
+      v8StatusCode: 2,
+      v8Modulations: 0,
       lastEvent: 'test-control'
     });
     const diagnostics = backend.diagnostics();
     assert.equal(diagnostics.state, 'data-mode');
     assert.equal(diagnostics.modulation, 'V.21');
+    assert.equal(diagnostics.startMode, 'v8');
+    assert.equal(diagnostics.v8Status, 'failed');
+    assert.equal(diagnostics.v8StatusCode, 2);
+    assert.equal(diagnostics.v8Modulations, 0);
     assert.equal(diagnostics.lastEvent, 'test-control');
     assert.match(diagnostics.lastEventAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {

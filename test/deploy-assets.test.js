@@ -50,7 +50,21 @@ test('deployment assets default to the spandsp soft-modem worker', async () => {
   assert.match(runbook, /\/opt\/sipfax\/bin\/sipfax-softmodem/);
   assert.match(runbook, /media\.modem\.type/);
   assert.match(runbook, /media\.modem\.modulation/);
+  assert.match(runbook, /media\.modem\.v8Status/);
+  assert.match(runbook, /SIPFAX_MODEM_START_MODE=v22bis/);
   assert.doesNotMatch(runbook, /default live call path uses SIPfax's in-process/);
+});
+
+test('deployment assets document controlled V.22bis start-mode fallback', async () => {
+  const [envExample, runbook] = await Promise.all([
+    readFile(new URL('../deploy/sipfax.env.example', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(envExample, /SIPFAX_MODEM_START_MODE=v8/);
+  assert.match(runbook, /v8-failed-v21-fallback/);
+  assert.match(runbook, /SIPFAX_MODEM_START_MODE=v22bis/);
+  assert.match(runbook, /restore `SIPFAX_MODEM_START_MODE=v8`/);
 });
 
 test('deploy runbook documents pppd hooks, nftables checks, and per-call ppp secrets', async () => {

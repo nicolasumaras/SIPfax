@@ -121,9 +121,11 @@ int main(void) {
 
         if (!worker.data_mode && worker.v8) {
             v8_rx(worker.v8, pcm, (int) frame_len);
-            int generated = v8_tx(worker.v8, pcm, (int) frame_len);
-            if (generated > 0) {
-                encode_g711(&worker, outbound, pcm, (size_t) generated);
+            if (!worker.data_mode && worker.v8) {
+                int generated = v8_tx(worker.v8, pcm, (int) frame_len);
+                if (generated > 0) {
+                    encode_g711(&worker, outbound, pcm, (size_t) generated);
+                }
             }
         } else if (worker.v21_rx) {
             fsk_rx(worker.v21_rx, pcm, (int) frame_len);
@@ -135,7 +137,6 @@ int main(void) {
             return 1;
         }
 
-        emit_control(&worker, worker.last_event);
     }
 
     emit_control(&worker, "eof");

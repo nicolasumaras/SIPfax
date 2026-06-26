@@ -66,6 +66,8 @@ typedef struct {
     fsk_rx_state_t *v21_rx;
     fsk_tx_state_t *v21_tx;
     v22bis_state_t *v22bis;
+    async_rx_state_t *async_rx;
+    async_tx_state_t *async_tx;
     int pty_master_fd;
     char pty_slave_path[128];
     hdlc_rx_t hdlc_rx;
@@ -122,6 +124,8 @@ static void v8_result(void *user_data, v8_parms_t *result);
 static void put_v21_bit(void *user_data, int bit);
 static void put_hdlc_bit(void *user_data, int bit);
 static void v22bis_status(void *user_data, int status);
+static void async_put_byte(void *user_data, int byte);
+static int async_get_byte(void *user_data);
 static int init_spandsp(worker_t *worker);
 static void release_spandsp(worker_t *worker);
 
@@ -681,15 +685,29 @@ static void enter_data_mode(worker_t *worker, modulation_kind_t modulation, cons
         worker->v8 = NULL;
     }
     if (worker->modulation == MODULATION_V22BIS) {
+        /* V.22bis is a synchronous modem, but Windows dial-up carries
+         * asynchronous PPP (8N1 characters). Insert a V.14 async-to-sync
+         * layer between the V.22bis bit stream and the HDLC byte framing:
+         *   rx: v22bis bits -> async_rx (strip start/stop) -> hdlc bytes
+         *   tx: hdlc bytes  -> async_tx (add start/stop)   -> v22bis bits
+         */
+        worker->async_tx = async_tx_init(
+            NULL, 8, ASYNC_PARITY_NONE, 1, TRUE, async_get_byte, worker);
+        worker->async_rx = async_rx_init(
+            NULL, 8, ASYNC_PARITY_NONE, 1, TRUE, async_put_byte, worker);
+        if (!worker->async_tx || !worker->async_rx) {
+            fprintf(stderr, "sipfax-softmodem: async (V.14) init failed\n");
+            return;
+        }
         worker->v22bis = v22bis_init(
             NULL,
             2400,
             V22BIS_GUARD_TONE_NONE,
             false,
-            hdlc_tx_next_bit,
-            worker,
-            put_hdlc_bit,
-            worker
+            async_tx_get_bit,
+            worker->async_tx,
+            async_rx_put_bit,
+            worker->async_rx
         );
         if (!worker->v22bis) {
             fprintf(stderr, "sipfax-softmodem: v22bis_init failed\n");
@@ -754,11 +772,47 @@ static void put_hdlc_bit(void *user_data, int bit) {
 
 static void v22bis_status(void *user_data, int status) {
     worker_t *worker = (worker_t *) user_data;
-    if (status < 0) {
-        worker->last_event = "v22bis-carrier-down";
-    } else {
+    /* spandsp SIG_STATUS_* codes are all negative; the previous
+     * `status < 0` test could never report carrier-up or training. */
+    switch (status) {
+    case SIG_STATUS_CARRIER_UP:
         worker->last_event = "v22bis-carrier-up";
+        break;
+    case SIG_STATUS_CARRIER_DOWN:
+        worker->last_event = "v22bis-carrier-down";
+        break;
+    case SIG_STATUS_TRAINING_IN_PROGRESS:
+        worker->last_event = "v22bis-training";
+        break;
+    case SIG_STATUS_TRAINING_SUCCEEDED:
+        worker->last_event = "v22bis-trained";
+        break;
+    case SIG_STATUS_TRAINING_FAILED:
+        worker->last_event = "v22bis-training-failed";
+        break;
+    default:
+        worker->last_event = "v22bis-status";
+        break;
     }
+}
+
+/* V.14 async-to-sync glue for the V.22bis path. async_rx hands us each
+ * decoded character, which feeds the existing HDLC (PPP) byte framer;
+ * async_tx pulls the next HDLC byte to send, or -1 to transmit idle. */
+static void async_put_byte(void *user_data, int byte) {
+    worker_t *worker = (worker_t *) user_data;
+    if (byte >= 0) {
+        hdlc_rx_byte(worker, (uint8_t) byte);
+    }
+}
+
+static int async_get_byte(void *user_data) {
+    worker_t *worker = (worker_t *) user_data;
+    uint8_t byte;
+    if (hdlc_tx_pop_byte(worker, &byte)) {
+        return byte;
+    }
+    return -1;
 }
 
 static int init_spandsp(worker_t *worker) {
@@ -794,6 +848,14 @@ static void release_spandsp(worker_t *worker) {
     if (worker->v22bis) {
         v22bis_free(worker->v22bis);
         worker->v22bis = NULL;
+    }
+    if (worker->async_rx) {
+        async_rx_free(worker->async_rx);
+        worker->async_rx = NULL;
+    }
+    if (worker->async_tx) {
+        async_tx_free(worker->async_tx);
+        worker->async_tx = NULL;
     }
     close_pty(worker);
 }

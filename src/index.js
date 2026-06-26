@@ -2,6 +2,7 @@ import { SipFaxServer } from './server.js';
 import { OperatorHttpServer } from './operator.js';
 import { ExternalModemProcessBackend } from './media.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, parseList, parseUsers } from './ppp.js';
+import { PppdSupervisor } from './pppd-supervisor.js';
 
 export const DEFAULT_SOFTMODEM_BINARY = '/opt/sipfax/bin/sipfax-softmodem';
 
@@ -24,6 +25,12 @@ const config = {
       localAddress: process.env.SIPFAX_PPP_LOCAL_ADDRESS
     }),
     dnsServers: parseList(process.env.SIPFAX_PPP_DNS, ['1.1.1.1', '9.9.9.9']),
+    pppdSupervisor: new PppdSupervisor({
+      command: process.env.SIPFAX_PPPD_COMMAND ?? '/usr/sbin/pppd',
+      authProtocol: process.env.SIPFAX_PPP_AUTH ?? 'chap',
+      dnsServers: parseList(process.env.SIPFAX_PPP_DNS, ['1.1.1.1', '9.9.9.9']),
+      notifyScript: process.env.SIPFAX_PPP_NOTIFY_SCRIPT || null
+    }),
     egressPolicy: new EgressPolicy({
       clientCidr: process.env.SIPFAX_PPP_POOL ?? '10.64.0.0/24',
       outboundInterface: process.env.SIPFAX_EGRESS_INTERFACE ?? 'wan0',
@@ -54,6 +61,7 @@ console.log(
 );
 console.log(`SIPfax operator HTTP listening on http://${config.operatorHost}:${config.operatorPort}`);
 console.log(`PPP users configured: ${config.ppp.diagnostics().configuredUsers}`);
+console.log(`PPP daemon: ${config.ppp.diagnostics().pppd.command}`);
 console.log(`Modem backend: ${config.modem.diagnostics().type}`);
 
 const shutdown = async () => {

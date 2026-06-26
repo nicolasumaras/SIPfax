@@ -69,6 +69,7 @@ Required first-deploy values:
 - `SIPFAX_PUBLIC_HOST`: the dedicated SIPfax VM IP on `vmbr0`
 - `SIPFAX_FREEPBX_EXTENSION`: `12345678`
 - `SIPFAX_PPP_USERS`: one or more `username:password` entries
+- `SIPFAX_PPPD_COMMAND`: path to `pppd` from the Debian `ppp` package
 - `SIPFAX_EGRESS_INTERFACE`: the VM network interface used for outbound traffic
 
 Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management network
@@ -91,6 +92,16 @@ If the worker writes decoded data or capture artifacts under `/var/log/sipfax`,
 keep the shipped unit's `ReadWritePaths=/var/cache/sipfax /var/log/sipfax`
 entry intact so `ProtectSystem=strict` does not make the artifact path
 read-only.
+
+Install `ppp` on the SIPfax VM. When the modem worker emits a `pty-opened`
+control event with `slavePath`, SIPfax starts `pppd` on that pty with
+`nodetach`, `nodefaultroute`, `noccp`, `require-chap` by default, the leased
+local/client address pair, configured `ms-dns` values, MTU 1500, and high-latency
+LCP/IPCP retry settings. `SIPFAX_PPP_AUTH=pap` switches the required auth mode
+for legacy clients. If `SIPFAX_PPP_NOTIFY_SCRIPT` is set, the script is used for
+pppd `ip-up-script` and `ip-down-script`; emit JSON lines such as
+`{"state":"IPCP-open","interfaceName":"ppp0"}` so operator diagnostics can show
+`ppp.state`, peer addresses, DNS servers, interface, and session duration.
 
 ## systemd Install
 

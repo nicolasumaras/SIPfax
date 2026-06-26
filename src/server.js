@@ -50,6 +50,9 @@ export class SipFaxServer {
       this.modem.on('backend-error', (error) => {
         console.error(`modem backend error: ${error.message}`);
       });
+      this.modem.on('backend-control', (event) => {
+        this.handleModemControl(event);
+      });
     }
     this.rtpEndpoint.on('dropped', () => {
       this.metrics.rtpFramesDropped += 1;
@@ -140,6 +143,24 @@ export class SipFaxServer {
         headers: { 'Content-Type': 'application/sdp' }
       })
     );
+  }
+
+  handleModemControl(event) {
+    const callId = this.sessions.activeSession?.callId;
+    if (!callId) {
+      return;
+    }
+
+    const eventName = event.event ?? event.lastEvent ?? event.state;
+    if (eventName === 'pty-opened') {
+      const slavePath = event.slavePath ?? event.ptySlavePath ?? event.ptyPath;
+      this.sessions.openPty(callId, { slavePath });
+      return;
+    }
+
+    if (eventName === 'pty-closed') {
+      this.sessions.closePty(callId);
+    }
   }
 
   sendSip(remote, message) {

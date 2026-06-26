@@ -86,6 +86,9 @@ typedef struct {
     uint64_t pty_bytes_out;
     int v8_status;
     int v8_modulations;
+    int advertised_modulations;
+    modulation_kind_t pending_modulation;
+    const char *pending_event;
     const char *last_event;
 } worker_t;
 
@@ -167,12 +170,18 @@ int main(void) {
     }
 
     emit_control(&worker, "started");
+    /* Defer entry into data mode until the first input frame arrives, so the
+     * operator side is fully wired and cannot miss the pty-opened control event
+     * (a start-up race when forcing a modulation). */
     if (parse_int_env("SIPFAX_MODEM_FORCE_DATA_MODE", 0) != 0) {
-        enter_data_mode(&worker, parse_force_modulation(), "forced-data-mode");
+        worker.pending_modulation = parse_force_modulation();
+        worker.pending_event = "forced-data-mode";
     } else if (worker.start_mode == START_MODE_V22BIS) {
-        enter_data_mode(&worker, MODULATION_V22BIS, "start-mode-v22bis");
+        worker.pending_modulation = MODULATION_V22BIS;
+        worker.pending_event = "start-mode-v22bis";
     } else if (worker.start_mode == START_MODE_V21) {
-        enter_data_mode(&worker, MODULATION_V21, "start-mode-v21");
+        worker.pending_modulation = MODULATION_V21;
+        worker.pending_event = "start-mode-v21";
     }
 
     for (;;) {
@@ -204,13 +213,26 @@ int main(void) {
         decode_g711(&worker, pcm, payload, frame_len);
         worker.frames_in++;
 
+        /* Perform a deferred forced-mode handoff now that input is flowing
+         * (and thus the operator side is listening for pty-opened). */
+        if (worker.pending_event != NULL && !worker.data_mode) {
+            enter_data_mode(&worker, worker.pending_modulation, worker.pending_event);
+            worker.pending_event = NULL;
+        }
+
         if (!worker.data_mode && worker.v8) {
             v8_rx(worker.v8, pcm, (int) frame_len);
-            if (!worker.data_mode && worker.v8) {
+            if (!worker.data_mode && worker.v8 && worker.pending_event == NULL) {
                 int generated = v8_tx(worker.v8, pcm, (int) frame_len);
                 if (generated > 0) {
                     encode_g711(&worker, outbound, pcm, (size_t) generated);
                 }
+            }
+            /* v8_rx/v8_tx have fully returned now; safe to free v8 and start
+             * the negotiated data modem. */
+            if (worker.pending_event != NULL && !worker.data_mode) {
+                enter_data_mode(&worker, worker.pending_modulation, worker.pending_event);
+                worker.pending_event = NULL;
             }
         } else if (worker.modulation == MODULATION_V21 && worker.v21_rx) {
             poll_pty(&worker);
@@ -613,9 +635,13 @@ static void poll_pty(worker_t *worker) {
             return;
         }
         worker->pty_bytes_in += (uint64_t) count;
-        if (hdlc_tx_enqueue_frame(worker, buffer, (size_t) count) != 0) {
-            emit_control(worker, "hdlc-tx-queue-full");
-            return;
+        /* Transparent modem: pppd already framed this as async HDLC; queue the
+         * raw octets for V.14 transmission instead of re-framing them. */
+        for (ssize_t i = 0; i < count; i++) {
+            if (hdlc_tx_enqueue_byte(worker, buffer[i]) != 0) {
+                emit_control(worker, "hdlc-tx-queue-full");
+                return;
+            }
         }
     }
 }
@@ -735,16 +761,30 @@ static void v8_result(void *user_data, v8_parms_t *result) {
     worker_t *worker = (worker_t *) user_data;
     worker->v8_status = result->status;
     worker->v8_modulations = result->modulations;
+    /* This callback runs synchronously inside v8_rx(), which keeps using the
+     * v8 context after we return. Do NOT free v8 or start a data modem here:
+     * enter_data_mode() would v8_free() this very context and then malloc the
+     * v22bis/async state (often reusing the freed block), which v8_rx then
+     * corrupts on the way out. Just record the decision; main() performs the
+     * handoff once v8_rx/v8_tx have fully returned (see tests/v8_tests.c). */
     if (result->status == V8_STATUS_V8_CALL) {
-        if ((result->modulations & V8_MOD_V22) != 0) {
-            enter_data_mode(worker, MODULATION_V22BIS, "v8-v22bis-selected");
+        /* Pick the best modulation common to the caller's offer AND what we
+         * advertised, not just the caller's offer. Otherwise a V.22-capable
+         * caller forces V.22bis even when we only offered V.21. */
+        int common = result->modulations & worker->advertised_modulations;
+        if ((common & V8_MOD_V22) != 0) {
+            worker->pending_modulation = MODULATION_V22BIS;
+            worker->pending_event = "v8-v22bis-selected";
         } else {
-            enter_data_mode(worker, MODULATION_V21, "v8-v21-selected");
+            worker->pending_modulation = MODULATION_V21;
+            worker->pending_event = "v8-v21-selected";
         }
     } else if (result->status == V8_STATUS_NON_V8_CALL) {
-        enter_data_mode(worker, MODULATION_V21, "non-v8-v21-fallback");
+        worker->pending_modulation = MODULATION_V21;
+        worker->pending_event = "non-v8-v21-fallback";
     } else if (result->status == V8_STATUS_FAILED) {
-        enter_data_mode(worker, MODULATION_V21, "v8-failed-v21-fallback");
+        worker->pending_modulation = MODULATION_V21;
+        worker->pending_event = "v8-failed-v21-fallback";
     }
 }
 
@@ -801,9 +841,17 @@ static void v22bis_status(void *user_data, int status) {
  * async_tx pulls the next HDLC byte to send, or -1 to transmit idle. */
 static void async_put_byte(void *user_data, int byte) {
     worker_t *worker = (worker_t *) user_data;
-    if (byte >= 0) {
-        hdlc_rx_byte(worker, (uint8_t) byte);
+    if (byte < 0) {
+        return;
     }
+    /* Transparent modem: pppd runs async HDLC itself, so pass the recovered
+     * octet stream (0x7E flags, byte-stuffing and FCS intact) straight to the
+     * pty rather than de-framing it here. */
+    uint8_t octet = (uint8_t) byte;
+    if (worker->pty_master_fd >= 0 && write_all(worker->pty_master_fd, &octet, 1) == 0) {
+        worker->pty_bytes_out++;
+    }
+    worker->decoded_bytes++;
 }
 
 static int async_get_byte(void *user_data) {
@@ -821,7 +869,8 @@ static int init_spandsp(worker_t *worker) {
     parms.modem_connect_tone = MODEM_CONNECT_TONES_ANSAM_PR;
     parms.send_ci = false;
     parms.call_function = V8_CALL_V_SERIES;
-    parms.modulations = V8_MOD_V21 | V8_MOD_V22;
+    worker->advertised_modulations = V8_MOD_V21 | V8_MOD_V22;
+    parms.modulations = worker->advertised_modulations;
     parms.protocol = V8_PROTOCOL_NONE;
 
     worker->v8 = v8_init(NULL, false, &parms, v8_result, worker);

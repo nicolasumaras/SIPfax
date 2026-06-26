@@ -133,20 +133,19 @@ export class PppdSupervisor extends EventEmitter {
       callId
     });
 
-    const secretOption = this.authProtocol === 'pap' ? 'pap-secrets' : 'chap-secrets';
-    const wrapper = [
-      'secrets="$1/' + secretOption + '-$$"',
-      'shift',
-      'while [ ! -f "$secrets" ]; do sleep 0.02; done',
-      `exec "$@" ${secretOption} "$secrets"`
-    ].join('; ');
-    const child = this.spawnProcess('/bin/sh', ['-c', wrapper, 'sipfax-pppd', sessionDir, this.command, ...args], {
+    // pppd has no command-line option to select a secrets file; it always
+    // reads /etc/ppp/{chap,pap}-secrets. Render the per-call credentials there
+    // before launch (single active call) and remove the file on teardown.
+    const secretsFile = this.authProtocol === 'pap'
+      ? '/etc/ppp/pap-secrets'
+      : '/etc/ppp/chap-secrets';
+    renderChapSecrets(credentials, secretsFile);
+    const child = this.spawnProcess(this.command, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     session.process = child;
     session.startedAt = new Date();
-    session.secretsPath = join(sessionDir, `${secretOption}-${child.pid ?? 'unknown'}`);
-    renderChapSecrets(credentials, session.secretsPath);
+    session.secretsPath = secretsFile;
     session.args = args;
 
     child.stdout?.on('data', (chunk) => {
@@ -287,6 +286,15 @@ export class PppdSupervisor extends EventEmitter {
       this.cleanup(session.sessionDir, { recursive: true, force: true });
     } catch (error) {
       session.lastError = error.message;
+    }
+    if (session.secretsPath) {
+      // The secrets file lives in root-owned /etc/ppp; we own the file but
+      // not the directory, so clear it in place rather than unlinking it.
+      try {
+        writeFileSync(session.secretsPath, '', { mode: 0o600 });
+      } catch (error) {
+        session.lastError = error.message;
+      }
     }
   }
 

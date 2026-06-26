@@ -212,6 +212,58 @@ sudo deploy/sipfaxctl status
 sudo deploy/sipfaxctl logs
 ```
 
+## PPP Runtime Requirements
+
+PPP only works once the host can actually run `pppd` and create a `ppp0`
+interface. Three things the base VM does not provide by default:
+
+1. **The `ppp` package and a kernel with PPP support.** `apt-get install -y ppp`
+   provides `/usr/sbin/pppd` (setuid-root, group `dip`). The Debian **cloud**
+   kernel ships **no PPP modules** — `/dev/ppp` will be missing. Install the
+   generic kernel and boot it:
+
+   ```bash
+   sudo apt-get install -y ppp linux-image-amd64
+   echo ppp_generic | sudo tee /etc/modules-load.d/ppp.conf
+   # ensure GRUB boots the generic (non-cloud) kernel, then reboot
+   uname -r            # expect e.g. 6.1.0-NN-amd64 (not -cloud-amd64)
+   ls -l /dev/ppp      # must exist
+   ```
+
+2. **A systemd drop-in so the unprivileged service can run setuid pppd.** The
+   shipped unit's hardening blocks it. Install
+   [`sipfax.service.d/ppp.conf`](sipfax.service.d/ppp.conf):
+
+   ```bash
+   sudo install -D -m 0644 deploy/sipfax.service.d/ppp.conf \
+     /etc/systemd/system/sipfax.service.d/ppp.conf
+   sudo systemctl daemon-reload && sudo systemctl restart sipfax.service
+   # verify: NoNewPrivs must be 0 on the running process
+   grep NoNewPrivs /proc/$(systemctl show -p MainPID --value sipfax.service)/status
+   ```
+
+3. **Secrets files the service can rewrite.** `pppd` always reads
+   `/etc/ppp/chap-secrets`; the service renders per-call credentials there and
+   clears them on teardown, so pre-create them owned by `sipfax`:
+
+   ```bash
+   sudo touch /etc/ppp/chap-secrets /etc/ppp/pap-secrets
+   sudo chown sipfax:sipfax /etc/ppp/chap-secrets /etc/ppp/pap-secrets
+   sudo chmod 600 /etc/ppp/chap-secrets /etc/ppp/pap-secrets
+   ```
+
+## Modulation Note (V.8 vs forced V.22bis)
+
+Set `SIPFAX_MODEM_START_MODE=v22bis` for the live service. With real Windows
+dial-up modems, standards **V.8 negotiation selects V.22bis but the modem then
+fails to complete V.22bis training** (it sits on an unscrambled carrier while
+the answerer trains) — a timing/interop quirk that does not reproduce in a
+spandsp-to-spandsp loopback (see
+[`tests/v8handoff_test.c`](../vendor/sipfax-softmodem/tests/v8handoff_test.c)).
+**Forcing V.22bis** presents a continuous answer carrier the modem locks onto
+and trains reliably. The V.8 handoff code itself is correct (the loopback test
+passes); fixing the real-modem path needs lab tuning against the physical modem.
+
 ## Firewall Expectations
 
 Restrict SIP and RTP ingress to the FreePBX IP. Replace `<freepbx-ip>` with the

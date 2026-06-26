@@ -764,7 +764,7 @@ static void v22bis_status(void *user_data, int status) {
 static int init_spandsp(worker_t *worker) {
     v8_parms_t parms;
     memset(&parms, 0, sizeof(parms));
-    parms.modem_connect_tone = true;
+    parms.modem_connect_tone = MODEM_CONNECT_TONES_ANSAM_PR;
     parms.send_ci = false;
     parms.call_function = V8_CALL_V_SERIES;
     parms.modulations = V8_MOD_V21 | V8_MOD_V22;

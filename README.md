@@ -11,8 +11,8 @@ The first supported baseline follows the LKMA-168 decision:
 - no transcoding, T.38, VAD, comfort noise, conferencing, recording, or Asterisk
   media side-channel in the live modem path
 - Cisco ATA 191/192-class ATA routed through FreePBX to the SIPfax VM
-- in-process dial-up protocol termination on the SIPfax VM; no physical modem is
-  required on the server
+- spandsp soft-modem worker on the SIPfax VM; no physical modem is required on
+  the server
 
 ## Run
 
@@ -37,8 +37,9 @@ Configuration is environment-driven:
 | `SIPFAX_OPERATOR_HOST` | `127.0.0.1` | HTTP bind host for health, metrics, and FreePBX snippets |
 | `SIPFAX_OPERATOR_PORT` | `8080` | HTTP port for operator endpoints |
 | `SIPFAX_FREEPBX_EXTENSION` | `faxmodem` | FreePBX route/extension label shown in the generated PJSIP snippet |
-| `SIPFAX_MODEM_COMMAND` | unset | Optional external modem backend executable for lab/debug adapters; when unset SIPfax uses the in-process dial-up terminator |
-| `SIPFAX_MODEM_ARGS` | unset | Comma-separated arguments passed to `SIPFAX_MODEM_COMMAND` when configured |
+| `SIPFAX_SOFTMODEM_BINARY` | `/opt/sipfax/bin/sipfax-softmodem` | Default spandsp soft-modem worker executable |
+| `SIPFAX_MODEM_COMMAND` | unset | Optional external modem backend executable; when set it overrides `SIPFAX_SOFTMODEM_BINARY` |
+| `SIPFAX_MODEM_ARGS` | unset | Comma-separated arguments passed to the selected modem command |
 | `SIPFAX_PPP_USERS` | unset | Comma-separated `username:password` entries accepted by the PPP control path |
 | `SIPFAX_PPP_POOL` | `10.64.0.0/24` | Client address pool; `.1` is reserved as the local peer by default |
 | `SIPFAX_PPP_LOCAL_ADDRESS` | first host in pool | Local peer address advertised to authenticated clients |
@@ -59,33 +60,22 @@ Configuration is environment-driven:
 5. The PPP control path starts in `awaiting-auth`, accepts configured
    credentials, assigns a client address plus DNS, and records egress policy
    diagnostics for the active call.
-6. RTP packets with the negotiated payload type are passed to the in-process
-   dial-up terminator, which emits G.711 ANSam answer frames, detects inbound
-   modem energy, advances into carrier training and PPP LCP probe audio, and
-   records protocol state transitions in diagnostics/logs.
+6. RTP packets with the negotiated payload type are passed to the spandsp
+   soft-modem worker, which emits already-encoded G.711 modem audio and reports
+   modulation state through the control fd.
 7. `BYE` tears down the PPP lease, RTP codec filter, and single-session slot.
 
-## In-Process Dial-Up Terminator
+## Soft-Modem Worker
 
-SIPfax defaults to a server-local dial-up protocol terminator. It keeps the
-media path constrained to negotiated G.711 payload bytes, emits an ANSam-style
-answer signal with phase reversals, detects inbound modem energy from the remote
-caller, and advances visible negotiation state from `answer-tone` to
-`v8-training`, `carrier-training`, and `ppp-lcp-probe`. The current state,
-inbound energy, frame counters, PPP probe counters, and thresholds are exposed
-under `media.modem` in operator diagnostics.
+SIPfax defaults to an external spandsp soft-modem worker at
+`/opt/sipfax/bin/sipfax-softmodem`. Override the default path with
+`SIPFAX_SOFTMODEM_BINARY`, or set `SIPFAX_MODEM_COMMAND` to replace it with a
+different external adapter. The worker is started when a call codec is selected
+and is stopped when the call is torn down. If the binary is unavailable, SIPfax
+logs the backend error and emits no synthetic modem audio.
 
-The in-process terminator now gives live Windows dial-up testing a concrete
-target beyond the previous `v8-training` plateau: sustained inbound carrier
-energy should move diagnostics and logs to `carrier-training`, then outbound
-G.711 PPP LCP probe frames should move the state to `ppp-lcp-probe`. It does not
-require a modem binary or physical modem attached to the SIPfax VM.
-
-## Optional External Modem Backend
-
-`SIPFAX_MODEM_COMMAND` remains available for lab adapters. When configured, the
-command is started when a call codec is selected and is stopped when the call is
-torn down.
+The old in-process dial-up terminator remains available to tests as a fixture,
+but it is no longer wired into live server startup.
 
 The process contract is intentionally narrow:
 
@@ -95,6 +85,9 @@ The process contract is intentionally narrow:
   prefix.
 - SIPfax sets `SIPFAX_MODEM_CODEC`, `SIPFAX_MODEM_PAYLOAD_TYPE`, and
   `SIPFAX_MODEM_CLOCK_RATE` in the child environment for the active call.
+- fd 3 may emit JSON-line control snapshots. Operator diagnostics expose
+  `media.modem.modulation`, `baud`, `state`, `ber`, `framesIn`, `framesOut`,
+  `lastEvent`, and `lastEventAt`.
 - The backend must emit already-encoded `PCMU` or `PCMA`; SIPfax does not
   transcode or resample external backend frames.
 
@@ -175,16 +168,16 @@ Minimum alerting expectations:
 Supported baseline:
 
 - Cisco ATA 191/192-class analog telephone adapter
-- in-process dial-up terminator on the SIPfax VM
-- optional external backend process only when explicitly configured with
-  `SIPFAX_MODEM_COMMAND`
+- spandsp soft-modem worker on the SIPfax VM
+- optional external backend process override with `SIPFAX_MODEM_COMMAND`
 - G.711 `PCMU`/`PCMA` at 8 kHz only
 - one live modem call at a time
 
 Operator hardening checklist:
 
-- Review `media.modem` diagnostics during live test calls; the dial-up state
-  should leave `answer-tone` when inbound modem energy is detected.
+- Review `media.modem` diagnostics during live test calls; modulation should
+  report the worker-selected mode, for example `V.21`, not synthetic
+  `answer-tone` or `v8-training` states.
 - Set `SIPFAX_PPP_USERS`; an empty user list intentionally degrades health.
 - Restrict UDP SIP and RTP ingress to the FreePBX/ATA network.
 - Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management

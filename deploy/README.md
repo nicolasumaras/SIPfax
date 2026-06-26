@@ -74,21 +74,23 @@ Required first-deploy values:
 Keep `SIPFAX_OPERATOR_HOST=127.0.0.1` unless an authenticated management network
 or proxy is added.
 
-The default live call path uses SIPfax's in-process dial-up terminator. Do not
-configure `SIPFAX_MODEM_COMMAND` for the first redeploy unless the CTO is
-intentionally testing an external lab adapter. When it is unset, `/healthz` and
-the operator diagnostics should show `media.modem.type` as
-`in-process-dialup-terminator`; during a live Windows dial-up attempt, watch
-`media.modem.state`, `media.modem.lastInboundEnergy`, and the service log lines
-for transitions from `answer-tone` to `v8-training`, then `carrier-training`
-and `ppp-lcp-probe`.
+The default live call path uses the spandsp soft-modem worker at
+`/opt/sipfax/bin/sipfax-softmodem`. Set `SIPFAX_SOFTMODEM_BINARY` only when the
+worker is installed somewhere else. Set `SIPFAX_MODEM_COMMAND` only when
+intentionally replacing the default worker with another external adapter.
 
-If an external lab backend is configured later, it must read
-two-byte-length-prefixed G.711 payloads from stdin and write the same framed
-format to stdout. If that backend writes decoded data or capture artifacts under
-`/var/log/sipfax`, keep the shipped unit's `ReadWritePaths=/var/cache/sipfax
-/var/log/sipfax` entry intact so `ProtectSystem=strict` does not make the
-artifact path read-only.
+The selected worker must read two-byte-length-prefixed G.711 payloads from stdin
+and write the same framed format to stdout. fd 3 may write JSON-line control
+snapshots. During a live Windows dial-up attempt, `/healthz` and operator
+diagnostics should show `media.modem.type` as `external-process` and expose
+`media.modem.modulation`, `baud`, `state`, `ber`, `framesIn`, `framesOut`,
+`lastEvent`, and `lastEventAt`. The live path should report real worker state,
+not synthetic `answer-tone` or `v8-training` diagnostics.
+
+If the worker writes decoded data or capture artifacts under `/var/log/sipfax`,
+keep the shipped unit's `ReadWritePaths=/var/cache/sipfax /var/log/sipfax`
+entry intact so `ProtectSystem=strict` does not make the artifact path
+read-only.
 
 ## systemd Install
 
@@ -153,17 +155,16 @@ sudo ss -lunp | grep -E ':(5060|40000) '
 Expected `/healthz` result is `status: ok`. If it is `degraded`, confirm
 `SIPFAX_PPP_USERS` is set and restart the service.
 
-Expected modem diagnostics for the LKMA-191 path:
+Expected modem diagnostics for the soft-modem worker path:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/healthz | jq '.media.modem // .ppp'
-journalctl -u sipfax.service -f | grep 'dialup protocol state'
+journalctl -u sipfax.service -f | grep 'modem backend'
 ```
 
-For the LKMA-192 path, a live Windows dial-up attempt should now have a later
-observable target than `v8-training`: diagnostics should show
-`media.modem.state` reaching `carrier-training` and then `ppp-lcp-probe`, with
-`media.modem.pppProbeFramesOut` increasing after carrier training completes.
+For the LKMA-196 path, a live Windows dial-up attempt should show real worker
+modulation, for example `media.modem.modulation` as `V.21`, and frame counters
+increasing from the worker control stream.
 
 From the FreePBX side:
 

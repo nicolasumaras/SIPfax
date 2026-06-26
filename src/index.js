@@ -1,9 +1,12 @@
 import { SipFaxServer } from './server.js';
 import { OperatorHttpServer } from './operator.js';
-import { ExternalModemProcessBackend, InProcessDialupTerminator } from './media.js';
+import { ExternalModemProcessBackend } from './media.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, parseList, parseUsers } from './ppp.js';
 
+export const DEFAULT_SOFTMODEM_BINARY = '/opt/sipfax/bin/sipfax-softmodem';
+
 const modemCommand = process.env.SIPFAX_MODEM_COMMAND;
+const softmodemBinary = process.env.SIPFAX_SOFTMODEM_BINARY ?? DEFAULT_SOFTMODEM_BINARY;
 
 const config = {
   host: process.env.SIPFAX_HOST ?? '0.0.0.0',
@@ -62,12 +65,8 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 function createModemBackend() {
-  if (modemCommand) {
-    return new ExternalModemProcessBackend({
-      command: modemCommand,
-      args: parseList(process.env.SIPFAX_MODEM_ARGS, [])
-    });
-  }
-
-  return new InProcessDialupTerminator();
+  return new ExternalModemProcessBackend({
+    command: modemCommand ?? softmodemBinary,
+    args: parseList(process.env.SIPFAX_MODEM_ARGS, [])
+  });
 }

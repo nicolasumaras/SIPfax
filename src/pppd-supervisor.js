@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,6 +82,7 @@ export class PppdSupervisor extends EventEmitter {
     authProtocol = 'chap',
     dnsServers = DEFAULT_DNS_SERVERS,
     notifyScript = null,
+    leaseDir = '/run/sipfax/ppp-leases',
     tempDir = tmpdir(),
     spawnProcess = spawn,
     cleanup = rmSync
@@ -91,22 +92,27 @@ export class PppdSupervisor extends EventEmitter {
     this.authProtocol = authProtocol;
     this.dnsServers = [...dnsServers];
     this.notifyScript = notifyScript;
+    this.leaseDir = leaseDir;
     this.tempDir = tempDir;
     this.spawnProcess = spawnProcess;
     this.cleanup = cleanup;
     this.sessions = new Map();
   }
 
-  start({ callId, slavePath, lease, dnsServers = this.dnsServers, credentials, onEvent = null }) {
+  start({ callId, slavePath, lease, dnsServers = this.dnsServers, credentials, egressDescriptor = null, onEvent = null }) {
     this.stop(callId);
 
     const sessionDir = mkdtempSync(join(this.tempDir, `sipfax-pppd-${sanitizePathPart(callId)}-`));
+    const egressDescriptorPath = egressDescriptor
+      ? this.writeEgressDescriptor(callId, egressDescriptor)
+      : null;
     const session = {
       callId,
       slavePath,
       lease: { ...lease },
       dnsServers: [...dnsServers],
       sessionDir,
+      egressDescriptorPath,
       secretsPath: null,
       process: null,
       startedAt: null,
@@ -260,7 +266,8 @@ export class PppdSupervisor extends EventEmitter {
       interfaceName: session.interfaceName,
       sessionDurationSeconds: session.sessionDurationSeconds,
       lastEventAt: session.lastEventAt,
-      lastError: session.lastError
+      lastError: session.lastError,
+      egressDescriptorPath: session.egressDescriptorPath
     };
   }
 
@@ -269,6 +276,7 @@ export class PppdSupervisor extends EventEmitter {
       command: this.command,
       authProtocol: this.authProtocol,
       notifyScript: this.notifyScript,
+      leaseDir: this.leaseDir,
       activeSessions: this.sessions.size,
       sessions: [...this.sessions.keys()].map((callId) => this.snapshot(callId))
     };
@@ -280,6 +288,13 @@ export class PppdSupervisor extends EventEmitter {
     } catch (error) {
       session.lastError = error.message;
     }
+  }
+
+  writeEgressDescriptor(callId, descriptor) {
+    mkdirSync(this.leaseDir, { recursive: true, mode: 0o750 });
+    const descriptorPath = join(this.leaseDir, `${sanitizePathPart(callId)}.json`);
+    writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o640 });
+    return descriptorPath;
   }
 }
 

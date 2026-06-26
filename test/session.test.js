@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -14,7 +15,7 @@ import {
   ModemBridge,
   parseRtpPacket
 } from '../src/media.js';
-import { buildHealth, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
+import { buildHealth, OperatorHttpServer, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { buildPppdArgs, PppdSupervisor, renderChapSecrets } from '../src/pppd-supervisor.js';
 import { SipFaxServer } from '../src/server.js';
@@ -157,6 +158,60 @@ test('egress policy allows public internet and blocks private destinations by de
   assert.match(policy.firewallRules().join('\n'), /MASQUERADE/);
   assert.match(policy.firewallRules().join('\n'), /-d 0\.0\.0\.0\/0 -o eth0 -j ACCEPT/);
   assert.match(policy.firewallRules().join('\n'), /-d 192\.168\.0\.0\/16 -j REJECT/);
+});
+
+test('egress policy renders nftables rules and per-call descriptors', () => {
+  const policy = new EgressPolicy({
+    clientCidr: '10.70.0.0/24',
+    outboundInterface: 'eth0',
+    operatorUrl: ''
+  });
+  const descriptor = policy.leaseDescriptor({
+    callId: 'call:nft',
+    lease: { localAddress: '10.70.0.1', clientAddress: '10.70.0.2' }
+  });
+
+  assert.match(descriptor.nft.up.join('\n'), /add table inet sipfax_call_nft/);
+  assert.match(descriptor.nft.up.join('\n'), /oifname "eth0" masquerade/);
+  assert.deepEqual(descriptor.nft.down, [
+    'delete table ip sipfax_nat_call_nft',
+    'delete table inet sipfax_call_nft'
+  ]);
+  assert.match(descriptor.iptables.down.join('\n'), /iptables -D FORWARD/);
+});
+
+test('operator HTTP accepts PPP egress diagnostics events', async () => {
+  const operator = new OperatorHttpServer({
+    host: '127.0.0.1',
+    port: 0,
+    diagnostics: () => ({
+      sip: { listening: true },
+      rtp: { listening: true },
+      ppp: { configuredUsers: 1 },
+      sessions: { active: 0, limit: 1 },
+      media: {},
+      metrics: {}
+    }),
+    freepbx: { serverHost: '127.0.0.1', sipPort: 5060 }
+  });
+  await operator.start();
+  const { port } = operator.server.address();
+
+  try {
+    const post = await fetch(`http://127.0.0.1:${port}/ppp/events`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: 'ip-up', callId: 'call-egress', interfaceName: 'ppp0' })
+    });
+    assert.equal(post.status, 202);
+
+    const events = await fetch(`http://127.0.0.1:${port}/ppp/events`).then((response) => response.json());
+    assert.equal(events.events.length, 1);
+    assert.equal(events.events[0].state, 'ip-up');
+    assert.equal(events.events[0].callId, 'call-egress');
+  } finally {
+    await operator.stop();
+  }
 });
 
 test('SIP 200 OK answer carries SDP and dialog headers', () => {
@@ -515,6 +570,90 @@ test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans 
   assert.equal(supervisor.stop('call-supervisor'), true);
   assert.equal(child.killed, 'SIGTERM');
   assert.deepEqual(removed, [sessionDir]);
+});
+
+test('pppd supervisor writes egress lease descriptor before daemon start', () => {
+  const child = new EventEmitter();
+  child.pid = 5252;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const leaseDir = mkdtempSync(join(tmpdir(), 'sipfax-lease-dir-'));
+  const supervisor = new PppdSupervisor({
+    command: '/usr/sbin/pppd',
+    leaseDir,
+    spawnProcess() {
+      return child;
+    }
+  });
+  const credentials = new PppCredentialStore([{ username: 'fax', password: 'secret' }]);
+
+  const started = supervisor.start({
+    callId: 'call-descriptor',
+    slavePath: '/dev/pts/4',
+    lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' },
+    credentials,
+    egressDescriptor: {
+      callId: 'call-descriptor',
+      outboundInterface: 'eth0',
+      nft: { up: ['add table inet sipfax_call_descriptor'], down: ['delete table inet sipfax_call_descriptor'] },
+      iptables: { up: [], down: [] }
+    }
+  });
+
+  assert.equal(started.egressDescriptorPath, join(leaseDir, 'call-descriptor.json'));
+  assert.equal(JSON.parse(readFileSync(started.egressDescriptorPath, 'utf8')).outboundInterface, 'eth0');
+});
+
+test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sipfax-egress-helper-'));
+  const mockBin = join(root, 'bin');
+  const leaseDir = join(root, 'leases');
+  const activeDir = join(root, 'active');
+  const logPath = join(root, 'commands.log');
+  mkdirSync(mockBin);
+  mkdirSync(leaseDir);
+
+  writeFileSync(join(mockBin, 'nft'), [
+    '#!/bin/sh',
+    'printf "nft %s\\n" "$*" >> "$SIPFAX_TEST_LOG"',
+    'cat >> "$SIPFAX_TEST_LOG"'
+  ].join('\n'));
+  writeFileSync(join(mockBin, 'sysctl'), [
+    '#!/bin/sh',
+    'printf "sysctl %s\\n" "$*" >> "$SIPFAX_TEST_LOG"'
+  ].join('\n'));
+  chmodSync(join(mockBin, 'nft'), 0o755);
+  chmodSync(join(mockBin, 'sysctl'), 0o755);
+
+  const descriptor = new EgressPolicy({
+    clientCidr: '10.88.0.0/24',
+    outboundInterface: 'eth-test0',
+    operatorUrl: ''
+  }).leaseDescriptor({
+    callId: 'call-cycle',
+    lease: { localAddress: '10.88.0.1', clientAddress: '10.88.0.2' }
+  });
+  writeFileSync(join(leaseDir, 'call-cycle.json'), `${JSON.stringify(descriptor)}\n`);
+
+  const env = {
+    ...process.env,
+    PATH: `${mockBin}:${process.env.PATH}`,
+    SIPFAX_PPP_LEASE_DIR: leaseDir,
+    SIPFAX_PPP_ACTIVE_DIR: activeDir,
+    SIPFAX_TEST_LOG: logPath
+  };
+  const helper = join(process.cwd(), 'bin/sipfax-egress-apply');
+
+  execFileSync(process.execPath, [helper, 'up', 'call-cycle', 'ppp0', '10.88.0.1', '10.88.0.2'], { env });
+  execFileSync(process.execPath, [helper, 'down', 'call-cycle', 'ppp0', '10.88.0.1', '10.88.0.2'], { env });
+
+  const log = readFileSync(logPath, 'utf8');
+  assert.match(log, /sysctl -w net\.ipv4\.ip_forward=1/);
+  assert.match(log, /sysctl -w net\.ipv4\.conf\.eth-test0\.forwarding=1/);
+  assert.match(log, /add table inet sipfax_call_cycle/);
+  assert.match(log, /delete table inet sipfax_call_cycle/);
+  assert.match(log, /sysctl -w net\.ipv4\.ip_forward=0/);
 });
 
 test('in-process dial-up terminator clears state when codec is removed', () => {

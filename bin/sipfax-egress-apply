@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const action = process.argv[2];
+const callId = process.argv[3];
+const interfaceName = process.argv[4] ?? '';
+const localAddress = process.argv[5] ?? '';
+const remoteAddress = process.argv[6] ?? '';
+
+const leaseDir = process.env.SIPFAX_PPP_LEASE_DIR ?? '/run/sipfax/ppp-leases';
+const activeDir = process.env.SIPFAX_PPP_ACTIVE_DIR ?? '/run/sipfax/ppp-egress-active';
+const sysctlCommand = process.env.SIPFAX_SYSCTL_COMMAND ?? 'sysctl';
+
+if (!['up', 'down'].includes(action) || !callId) {
+  console.error('usage: sipfax-egress-apply up|down <call-id> [interface] [local-ip] [remote-ip]');
+  process.exit(64);
+}
+
+const safeCallId = basename(callId).replace(/[^a-zA-Z0-9_.-]/g, '_');
+const descriptorPath = join(leaseDir, `${safeCallId}.json`);
+if (!existsSync(descriptorPath)) {
+  console.error(`sipfax egress descriptor not found: ${descriptorPath}`);
+  process.exit(66);
+}
+
+const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8'));
+mkdirSync(activeDir, { recursive: true, mode: 0o750 });
+
+if (action === 'up') {
+  setForwarding(descriptor, true);
+  applyRules(descriptor, 'up');
+  writeFileSync(activePath(safeCallId), JSON.stringify({
+    callId,
+    interfaceName,
+    localAddress,
+    remoteAddress,
+    outboundInterface: descriptor.outboundInterface,
+    activatedAt: new Date().toISOString()
+  }, null, 2));
+  await postOperatorEvent(descriptor, 'ip-up');
+} else {
+  applyRules(descriptor, 'down');
+  rmSync(activePath(safeCallId), { force: true });
+  if (!hasActiveLeases()) {
+    setForwarding(descriptor, false);
+  }
+  await postOperatorEvent(descriptor, 'ip-down');
+}
+
+function applyRules(descriptor, ruleAction) {
+  if (commandExists('nft') && descriptor.nft?.[ruleAction]?.length) {
+    run('nft', ['-f', '-'], descriptor.nft[ruleAction].join('\n') + '\n');
+    return;
+  }
+
+  const iptables = commandExists('iptables-nft') ? 'iptables-nft' : 'iptables';
+  for (const rule of descriptor.iptables?.[ruleAction] ?? []) {
+    const args = rule.split(/\s+/);
+    const command = args.shift();
+    run(command === 'iptables' ? iptables : command, args);
+  }
+}
+
+function setForwarding(descriptor, enabled) {
+  const value = enabled ? '1' : '0';
+  run(sysctlCommand, ['-w', `net.ipv4.ip_forward=${value}`]);
+  if (descriptor.outboundInterface) {
+    run(sysctlCommand, ['-w', `net.ipv4.conf.${descriptor.outboundInterface}.forwarding=${value}`]);
+  }
+}
+
+function run(command, args, input = null) {
+  const result = spawnSync(command, args, {
+    input,
+    encoding: 'utf8',
+    stdio: input === null ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
+  });
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new Error(`${command} ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+function commandExists(command) {
+  return spawnSync('/bin/sh', ['-c', 'command -v -- "$1" >/dev/null 2>&1', 'sipfax-command-exists', command], {
+    stdio: 'ignore'
+  }).status === 0;
+}
+
+function activePath(id) {
+  return join(activeDir, `${id}.json`);
+}
+
+function hasActiveLeases() {
+  return existsSync(activeDir) && spawnSync('/bin/sh', ['-c', `find "$1" -type f -name '*.json' -print -quit | grep -q .`, 'sipfax-egress-active', activeDir]).status === 0;
+}
+
+async function postOperatorEvent(descriptor, state) {
+  if (!descriptor.operatorUrl) {
+    return;
+  }
+
+  try {
+    await fetch(new URL('/ppp/events', descriptor.operatorUrl), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        state,
+        callId,
+        interfaceName,
+        localAddress,
+        remoteAddress,
+        outboundInterface: descriptor.outboundInterface
+      })
+    });
+  } catch {
+    // Firewall changes must not depend on diagnostics delivery.
+  }
+}

@@ -19,8 +19,13 @@ if [[ ! -f /etc/sipfax/sipfax.env ]]; then
 fi
 
 install -m 0644 "${repo_root}/deploy/sipfax.service" /etc/systemd/system/sipfax.service
+install -d -m 0755 -o root -g root /usr/lib/sipfax
+install -m 0755 -o root -g root "${repo_root}/bin/sipfax-egress-apply" /usr/lib/sipfax/sipfax-egress-apply
+install -d -m 0755 -o root -g root /etc/ppp/ip-up.d /etc/ppp/ip-down.d
+install -m 0755 -o root -g root "${repo_root}/deploy/ppp/ip-up" /etc/ppp/ip-up.d/sipfax-egress
+install -m 0755 -o root -g root "${repo_root}/deploy/ppp/ip-down" /etc/ppp/ip-down.d/sipfax-egress
 install -d -m 0755 -o sipfax -g sipfax /var/cache/sipfax
 install -d -m 0755 -o sipfax -g sipfax /var/log/sipfax
 systemctl daemon-reload
 
-echo "Installed sipfax.service. Run: systemctl enable --now sipfax.service"
+echo "Installed sipfax.service, pppd hooks, and SIPfax egress helper. Run: systemctl enable --now sipfax.service"

@@ -8,12 +8,16 @@ process that keeps the existing SIPfax external modem process contract:
 - fd 3 writes JSON-line control events. Override with `SIPFAX_MODEM_CONTROL_FD`.
 - `SIPFAX_MODEM_CODEC`, `SIPFAX_MODEM_PAYLOAD_TYPE`, and
   `SIPFAX_MODEM_CLOCK_RATE` select the negotiated G.711 boundary format.
-- decoded V.21 bytes are written to `SIPFAX_MODEM_DATA_OUT` when set, or to
-  `./sipfax-softmodem-data.bin` by default.
+- data mode opens a pty pair and emits `pty-opened` with `ptySlavePath`.
+  HDLC-decoded PPP bytes are written to the pty master. Bytes read from the pty
+  master are HDLC-framed, byte-stuffed, and modulated back onto the selected
+  outbound carrier.
+- HDLC-decoded payload bytes are also mirrored to `SIPFAX_MODEM_DATA_OUT` when
+  set, or to `./sipfax-softmodem-data.bin` by default, for diagnostics.
 
-Only V.21 is advertised and enabled in this milestone. HDLC framing, pty
-bridging, PPP wiring, and faster modulation families are intentionally left for
-later LKMA-193 follow-ups.
+The worker advertises V.21 and V.22/V.22bis in the V.8 answer menu. When the
+caller offers V.22/V.22bis, SIPfax selects V.22bis at 2400 bit/s; otherwise it
+falls back to V.21 at 300 bit/s for non-V.8 or failed V.8 calls.
 
 ## Debian Bookworm Build
 
@@ -51,7 +55,8 @@ SIPfax service process.
 ## V.21 Bench Replay
 
 The replay harness consumes the LKMA-193a ground-truth WAV and asserts that the
-worker enters V.21 data mode and emits at least one decoded byte:
+worker enters V.21 data mode. PPP bytes now flow through the HDLC pty bridge, so
+the replay check does not require raw diagnostic bytes in `SIPFAX_MODEM_DATA_OUT`.
 
 ```bash
 cd vendor/sipfax-softmodem
@@ -71,3 +76,35 @@ python3 bench-v21.py \
 Use `--allow-missing` for developer smoke checks on machines where the lab
 capture has not been copied into the repository yet. Acceptance runs must not
 use `--allow-missing`.
+
+## V.22bis Bench Replay
+
+The V.22bis replay harness consumes the Phase 1 V.22bis artifact and asserts
+that the worker enters data mode with `modulation` reported as `V.22bis`:
+
+```bash
+cd vendor/sipfax-softmodem
+python3 bench-v22bis.py \
+  --worker ./sipfax-softmodem \
+  --wav ../../artifacts/lkma-193a/ground-truth/v22bis/inbound.wav
+```
+
+The checked-in Phase 1 V.22bis artifact is synthetic. This bench therefore
+forces the selected modulation while still replaying the artifact through the
+same framed G.711 worker boundary. Replace the artifact with the real lab
+recording before using the bench as a negotiated-signal quality check.
+
+## HDLC Pty Bridge Bench
+
+The pty bridge harness forces data mode, waits for `pty-opened`, writes a PPP
+fixture to the reported slave path, feeds idle G.711 frames, and asserts that the
+worker emits non-idle outbound modem audio:
+
+```bash
+cd vendor/sipfax-softmodem
+make bench-hdlc-pty
+```
+
+The hardware acceptance run should attach the real Windows dial-up computer
+through the ATA/FreePBX path, dial the SIPfax instance backed by this worker,
+and verify that `pppd` starts on the `ptySlavePath` reported on fd 3.

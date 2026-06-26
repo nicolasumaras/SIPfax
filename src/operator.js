@@ -6,6 +6,7 @@ export class OperatorHttpServer {
     this.port = port;
     this.diagnostics = diagnostics;
     this.freepbx = freepbx;
+    this.pppEvents = [];
     this.server = http.createServer((request, response) => {
       this.handleRequest(request, response);
     });
@@ -30,12 +31,17 @@ export class OperatorHttpServer {
   }
 
   handleRequest(request, response) {
+    const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
+    if (request.method === 'POST' && url.pathname === '/ppp/events') {
+      this.acceptPppEvent(request, response);
+      return;
+    }
+
     if (request.method !== 'GET') {
       sendText(response, 405, 'method not allowed\n');
       return;
     }
 
-    const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
     if (url.pathname === '/healthz') {
       sendJson(response, 200, buildHealth(this.diagnostics()));
       return;
@@ -51,7 +57,27 @@ export class OperatorHttpServer {
       return;
     }
 
+    if (url.pathname === '/ppp/events') {
+      sendJson(response, 200, { events: this.pppEvents });
+      return;
+    }
+
     sendText(response, 404, 'not found\n');
+  }
+
+  acceptPppEvent(request, response) {
+    readJsonBody(request, 8192)
+      .then((event) => {
+        this.pppEvents.push({
+          ...event,
+          receivedAt: new Date().toISOString()
+        });
+        this.pppEvents = this.pppEvents.slice(-20);
+        sendJson(response, 202, { accepted: true });
+      })
+      .catch((error) => {
+        sendJson(response, 400, { error: error.message });
+      });
   }
 }
 
@@ -150,4 +176,26 @@ function sendText(response, statusCode, body, contentType = 'text/plain') {
     'Cache-Control': 'no-store'
   });
   response.end(body);
+}
+
+function readJsonBody(request, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > maxBytes) {
+        reject(new Error('request body too large'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(new Error(`invalid JSON: ${error.message}`));
+      }
+    });
+    request.on('error', reject);
+  });
 }

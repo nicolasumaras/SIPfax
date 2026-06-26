@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+helper="${SIPFAX_EGRESS_HELPER:-/usr/lib/sipfax/sipfax-egress-apply}"
+call_id="${6:-${PPP_IPPARAM:-}}"
+
+if [ -z "$call_id" ]; then
+  echo "sipfax ip-up: missing pppd ipparam call id" >&2
+  exit 0
+fi
+
+"$helper" up "$call_id" "${1:-}" "${4:-}" "${5:-}"

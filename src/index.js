@@ -8,14 +8,16 @@ export const DEFAULT_SOFTMODEM_BINARY = '/opt/sipfax/bin/sipfax-softmodem';
 
 const modemCommand = process.env.SIPFAX_MODEM_COMMAND;
 const softmodemBinary = process.env.SIPFAX_SOFTMODEM_BINARY ?? DEFAULT_SOFTMODEM_BINARY;
+const operatorHost = process.env.SIPFAX_OPERATOR_HOST ?? '127.0.0.1';
+const operatorPort = Number.parseInt(process.env.SIPFAX_OPERATOR_PORT ?? '8080', 10);
 
 const config = {
   host: process.env.SIPFAX_HOST ?? '0.0.0.0',
   publicHost: process.env.SIPFAX_PUBLIC_HOST ?? '127.0.0.1',
   sipPort: Number.parseInt(process.env.SIPFAX_SIP_PORT ?? '5060', 10),
   rtpPort: Number.parseInt(process.env.SIPFAX_RTP_PORT ?? '40000', 10),
-  operatorHost: process.env.SIPFAX_OPERATOR_HOST ?? '127.0.0.1',
-  operatorPort: Number.parseInt(process.env.SIPFAX_OPERATOR_PORT ?? '8080', 10),
+  operatorHost,
+  operatorPort,
   freepbxExtension: process.env.SIPFAX_FREEPBX_EXTENSION ?? 'faxmodem',
   modem: createModemBackend(),
   ppp: new PppSessionController({
@@ -29,11 +31,13 @@ const config = {
       command: process.env.SIPFAX_PPPD_COMMAND ?? '/usr/sbin/pppd',
       authProtocol: process.env.SIPFAX_PPP_AUTH ?? 'chap',
       dnsServers: parseList(process.env.SIPFAX_PPP_DNS, ['1.1.1.1', '9.9.9.9']),
-      notifyScript: process.env.SIPFAX_PPP_NOTIFY_SCRIPT || null
+      notifyScript: process.env.SIPFAX_PPP_NOTIFY_SCRIPT || null,
+      leaseDir: process.env.SIPFAX_PPP_LEASE_DIR ?? '/run/sipfax/ppp-leases'
     }),
     egressPolicy: new EgressPolicy({
       clientCidr: process.env.SIPFAX_PPP_POOL ?? '10.64.0.0/24',
       outboundInterface: process.env.SIPFAX_EGRESS_INTERFACE ?? 'wan0',
+      operatorUrl: process.env.SIPFAX_OPERATOR_URL ?? `http://${operatorHost}:${operatorPort}`,
       allowInternet: process.env.SIPFAX_EGRESS_ENABLED !== 'false',
       allowDns: process.env.SIPFAX_EGRESS_DNS !== 'false',
       allowedDestinations: parseList(process.env.SIPFAX_EGRESS_ALLOW, ['0.0.0.0/0'])

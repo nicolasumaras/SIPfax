@@ -12,6 +12,8 @@ WorkingDirectory=/opt/sipfax
 EnvironmentFile=/etc/sipfax/sipfax.env
 Environment=NODE_ENV=production
 Environment=NPM_CONFIG_CACHE=/var/cache/sipfax/npm
+RuntimeDirectory=sipfax
+RuntimeDirectoryMode=0750
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=5s
@@ -26,7 +28,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/cache/sipfax /var/log/sipfax
+ReadWritePaths=/var/cache/sipfax /var/log/sipfax /run/sipfax
 RestrictSUIDSGID=true
 LockPersonality=true
 # Node 24/V8 needs executable anonymous memory for JIT/runtime startup.

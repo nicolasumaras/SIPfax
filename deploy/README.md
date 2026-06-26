@@ -30,11 +30,11 @@ Start from a Debian 12 VM on `vmbr0` with a fixed LAN address reserved for
 SIPfax. The FreePBX VM should be able to reach that IP on UDP `5060` and
 `40000`.
 
-Install base packages and Node `24.x`:
+Install base packages, Node `24.x`, PPP, and nftables:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg git ufw
+sudo apt-get install -y ca-certificates curl gnupg git ufw ppp nftables
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 node --version
@@ -93,8 +93,8 @@ keep the shipped unit's `ReadWritePaths=/var/cache/sipfax /var/log/sipfax`
 entry intact so `ProtectSystem=strict` does not make the artifact path
 read-only.
 
-Install `ppp` on the SIPfax VM. When the modem worker emits a `pty-opened`
-control event with `slavePath`, SIPfax starts `pppd` on that pty with
+Install `ppp` and `nftables` on the SIPfax VM. When the modem worker emits a
+`pty-opened` control event with `slavePath`, SIPfax starts `pppd` on that pty with
 `nodetach`, `nodefaultroute`, `noccp`, `require-chap` by default, the leased
 local/client address pair, configured `ms-dns` values, MTU 1500, and high-latency
 LCP/IPCP retry settings. `SIPFAX_PPP_AUTH=pap` switches the required auth mode
@@ -102,6 +102,15 @@ for legacy clients. If `SIPFAX_PPP_NOTIFY_SCRIPT` is set, the script is used for
 pppd `ip-up-script` and `ip-down-script`; emit JSON lines such as
 `{"state":"IPCP-open","interfaceName":"ppp0"}` so operator diagnostics can show
 `ppp.state`, peer addresses, DNS servers, interface, and session duration.
+
+SIPfax writes a per-call PPP egress descriptor under
+`/run/sipfax/ppp-leases/<call-id>.json` before `pppd` starts. The descriptor
+contains the rendered nftables and iptables-nft fallback rules from
+`EgressPolicy`. SIPfax itself runs as the unprivileged `sipfax` user and does
+not write firewall state. The root-side pppd hooks installed by
+`deploy/install-systemd.sh` are the only path that enables forwarding, applies
+NAT/MASQUERADE, rolls rules back on `ip-down`, and posts best-effort loopback
+diagnostics to operator HTTP.
 
 ## systemd Install
 
@@ -112,6 +121,16 @@ sudo deploy/install-systemd.sh
 sudo systemctl enable --now sipfax.service
 sudo systemctl status sipfax.service
 ```
+
+`deploy/install-systemd.sh` also installs:
+
+- `/usr/lib/sipfax/sipfax-egress-apply`
+- `/etc/ppp/ip-up.d/sipfax-egress`
+- `/etc/ppp/ip-down.d/sipfax-egress`
+
+Operator review is required before enabling the hooks on a production VM,
+because they write nftables/iptables state and toggle IPv4 forwarding while a
+PPP lease is active.
 
 The shipped unit leaves `MemoryDenyWriteExecute=false` because Node `24.x`/V8
 requires executable anonymous memory during runtime startup. Do not add a live
@@ -151,6 +170,13 @@ ssh -L 8080:127.0.0.1:8080 <admin>@<sipfax-vm-ip>
 
 Then query `http://127.0.0.1:8080` locally.
 
+PPP egress is applied by nftables when `nft` is available. The helper falls back
+to `iptables-nft` for systems where nftables is not present. On `ip-up`, the
+helper enables `net.ipv4.ip_forward=1` and
+`net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`, then applies the
+per-call ruleset. On `ip-down`, it removes the per-call ruleset and disables
+forwarding after the last active SIPfax PPP lease is gone.
+
 ## Verification
 
 On the SIPfax VM:
@@ -176,6 +202,11 @@ journalctl -u sipfax.service -f | grep 'modem backend'
 For the LKMA-196 path, a live Windows dial-up attempt should show real worker
 modulation, for example `media.modem.modulation` as `V.21`, and frame counters
 increasing from the worker control stream.
+
+For PPP egress, an authenticated Linux client should be able to reach a public
+HTTP destination with `curl --interface ppp0 <url>`. After disconnect, confirm
+that `sudo nft list ruleset | grep sipfax_` no longer shows the call-specific
+table and forwarding is disabled when no other SIPfax PPP lease is active.
 
 From the FreePBX side:
 

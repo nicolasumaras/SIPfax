@@ -58,6 +58,25 @@ pppd --version
 when building the vendored worker on the VM. `iptables` provides the
 `iptables-nft` fallback used only when `nft` is unavailable.
 
+### Optional: higher-speed modem engine (V.32bis / V.34, slmodem datapump)
+
+The default engine is the spandsp worker (V.21 / V.22bis). To enable the
+higher-speed engine (`SIPFAX_MODEM_ENGINE=slmodem`), the SmartLink `slmodemd`
+datapump is required. It is a **32-bit x86** binary object (`dsplibs.o`), so the
+build host needs multilib:
+
+```bash
+sudo apt-get install -y gcc-multilib libc6-dev-i386
+./vendor/slmodem/fetch.sh          # stages slmodemd/ + dsplibs.o, verifies sha256
+make -C vendor/slmodem/slmodemd    # 32-bit slmodemd
+make -C vendor/slmodem-bridge      # the SIPfax<->slmodemd audio bridge
+```
+
+`dsplibs.o` is **gratis and redistributable but closed-source** (Debian "non-free"
+= not open-licensed, not paid). Provenance and the pinned SHA-256 are recorded in
+`vendor/slmodem/README.md`. The engine runs as a 32-bit process; the rest of
+SIPfax stays 64-bit. The default `spandsp` engine needs none of this.
+
 Create the service user and checkout path:
 
 ```bash

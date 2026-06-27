@@ -528,7 +528,7 @@ test('pppd supervisor builds required daemon options', () => {
   assert.equal(args.includes('ipcp-max-configure'), true);
 });
 
-test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans shutdown', () => {
+test('pppd supervisor writes secrets, accepts notify events, and cleans shutdown', () => {
   const child = new EventEmitter();
   child.pid = 4242;
   child.stdout = new EventEmitter();
@@ -539,9 +539,11 @@ test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans 
   };
   const spawns = [];
   const removed = [];
+  const secretsDir = mkdtempSync(join(tmpdir(), 'sipfax-secrets-'));
   const supervisor = new PppdSupervisor({
     command: '/usr/sbin/pppd',
     tempDir: tmpdir(),
+    secretsDir,
     spawnProcess(command, args, options) {
       spawns.push({ command, args, options });
       return child;
@@ -560,11 +562,11 @@ test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans 
     credentials
   });
 
-  assert.equal(spawns[0].command, '/bin/sh');
-  assert.equal(spawns[0].args.includes('/usr/sbin/pppd'), true);
+  assert.equal(spawns[0].command, '/usr/sbin/pppd');
+  assert.equal(spawns[0].args[0], '/dev/pts/3');
+  assert.equal(spawns[0].args.includes('nodetach'), true);
   assert.equal(started.pid, 4242);
-  const sessionDir = spawns[0].args[3];
-  const secretsPath = join(sessionDir, 'chap-secrets-4242');
+  const secretsPath = join(secretsDir, 'chap-secrets');
   assert.equal(existsSync(secretsPath), true);
   assert.match(readFileSync(secretsPath, 'utf8'), /"fax" \* "secret" \*/);
 
@@ -577,7 +579,7 @@ test('pppd supervisor writes per-pid secrets, accepts notify events, and cleans 
 
   assert.equal(supervisor.stop('call-supervisor'), true);
   assert.equal(child.killed, 'SIGTERM');
-  assert.deepEqual(removed, [sessionDir]);
+  assert.equal(removed.length, 1);
 });
 
 test('pppd supervisor writes egress lease descriptor before daemon start', () => {
@@ -587,9 +589,11 @@ test('pppd supervisor writes egress lease descriptor before daemon start', () =>
   child.stderr = new EventEmitter();
   child.kill = () => {};
   const leaseDir = mkdtempSync(join(tmpdir(), 'sipfax-lease-dir-'));
+  const secretsDir = mkdtempSync(join(tmpdir(), 'sipfax-secrets-'));
   const supervisor = new PppdSupervisor({
     command: '/usr/sbin/pppd',
     leaseDir,
+    secretsDir,
     spawnProcess() {
       return child;
     }

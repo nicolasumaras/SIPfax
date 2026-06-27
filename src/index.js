@@ -5,6 +5,7 @@ import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, pa
 import { PppdSupervisor } from './pppd-supervisor.js';
 
 export const DEFAULT_SOFTMODEM_BINARY = '/opt/sipfax/bin/sipfax-softmodem';
+export const DEFAULT_SLMODEM_BRIDGE = '/opt/sipfax/bin/sipfax-slmodem-bridge';
 
 const modemCommand = process.env.SIPFAX_MODEM_COMMAND;
 const softmodemBinary = process.env.SIPFAX_SOFTMODEM_BINARY ?? DEFAULT_SOFTMODEM_BINARY;
@@ -77,8 +78,18 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 function createModemBackend() {
+  // Engine selection. Default 'spandsp' (the V.21/V.22bis worker) so nothing
+  // regresses. 'slmodem' uses the higher-speed datapump bridge (V.32bis/V.34).
+  // An explicit SIPFAX_MODEM_COMMAND always wins. The bridge reads its own
+  // config (SIPFAX_MODEM_MODULATION, SIPFAX_SLMODEMD, ...) from the environment,
+  // which media.js forwards to the spawned process.
+  const engine = (process.env.SIPFAX_MODEM_ENGINE ?? 'spandsp').toLowerCase();
+  let command = modemCommand ?? softmodemBinary;
+  if (!modemCommand && engine === 'slmodem') {
+    command = process.env.SIPFAX_SLMODEM_BRIDGE ?? DEFAULT_SLMODEM_BRIDGE;
+  }
   return new ExternalModemProcessBackend({
-    command: modemCommand ?? softmodemBinary,
+    command,
     args: parseList(process.env.SIPFAX_MODEM_ARGS, [])
   });
 }

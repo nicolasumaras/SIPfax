@@ -1,0 +1,58 @@
+diff --git a/slmodemd/modem_main.c b/slmodemd/modem_main.c
+index 998090a..cb678e1 100644
+--- a/slmodemd/modem_main.c
++++ b/slmodemd/modem_main.c
+@@ -65,6 +65,7 @@
+ 
+ #include <netinet/in.h>
+ #include <sys/socket.h>
++#include <sys/un.h>
+ #include <arpa/inet.h>
+ 
+ #define ENOIOCTLCMD 515
+@@ -619,6 +620,34 @@ static int socket_start (struct modem *m)
+ 	int ret;
+ 	DBG("socket_start...\n");
+ 
++	/* SIPfax: connect audio to the bridge's unix socket instead of fork+exec(-e).
++	 * The fork-based -e transport is unreliable on answer (ATA); a direct connect
++	 * removes the race and the priv-drop exec issues. */
++	{
++		const char *sipfax_path = getenv("SIPFAX_AUDIO_SOCK");
++		if (sipfax_path) {
++			int s = socket(AF_UNIX, SOCK_STREAM, 0);
++			struct sockaddr_un sa;
++			int i, ok = -1, r;
++			char z[384];
++			memset(&sa, 0, sizeof(sa));
++			sa.sun_family = AF_UNIX;
++			strncpy(sa.sun_path, sipfax_path, sizeof(sa.sun_path) - 1);
++			for (i = 0; i < 50; i++) {
++				if (connect(s, (struct sockaddr *)&sa, sizeof(sa)) == 0) { ok = 0; break; }
++				usleep(100000);
++			}
++			if (ok < 0) { perror("sipfax connect"); close(s); return -1; }
++			dev->fd = s;
++			dev->delay = 0;
++			memset(z, 0, sizeof(z));
++			r = write(dev->fd, z, sizeof(z));
++			if (r < 0) { close(dev->fd); dev->fd = -1; return r; }
++			dev->delay = r / 2;
++			return 0;
++		}
++	}
++
+ 	int sockets[2];
+ 
+ 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
+@@ -1079,7 +1108,9 @@ int modem_main(const char *dev_name)
+ 	prop_dp_init();
+ 	modem_timer_init();
+ 
+-	sprintf(link_name,"/dev/ttySL%d", device.num);
++	{ const char *L_ = getenv("SIPFAX_TTY_LINK");
++		if (L_ && *L_) snprintf(link_name, sizeof(link_name), "%s", L_);
++		else sprintf(link_name,"/dev/ttySL%d", device.num); }
+ 
+ 	m = modem_create(modem_driver,basename(dev_name));
+ 	m->name = basename(dev_name);

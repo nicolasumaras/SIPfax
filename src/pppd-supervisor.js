@@ -83,6 +83,7 @@ export class PppdSupervisor extends EventEmitter {
     dnsServers = DEFAULT_DNS_SERVERS,
     notifyScript = null,
     leaseDir = '/run/sipfax/ppp-leases',
+    secretsDir = '/etc/ppp',
     tempDir = tmpdir(),
     spawnProcess = spawn,
     cleanup = rmSync
@@ -93,6 +94,7 @@ export class PppdSupervisor extends EventEmitter {
     this.dnsServers = [...dnsServers];
     this.notifyScript = notifyScript;
     this.leaseDir = leaseDir;
+    this.secretsDir = secretsDir;
     this.tempDir = tempDir;
     this.spawnProcess = spawnProcess;
     this.cleanup = cleanup;
@@ -136,9 +138,11 @@ export class PppdSupervisor extends EventEmitter {
     // pppd has no command-line option to select a secrets file; it always
     // reads /etc/ppp/{chap,pap}-secrets. Render the per-call credentials there
     // before launch (single active call) and remove the file on teardown.
-    const secretsFile = this.authProtocol === 'pap'
-      ? '/etc/ppp/pap-secrets'
-      : '/etc/ppp/chap-secrets';
+    // secretsDir defaults to /etc/ppp; tests inject a writable temp dir.
+    const secretsFile = join(
+      this.secretsDir,
+      this.authProtocol === 'pap' ? 'pap-secrets' : 'chap-secrets'
+    );
     renderChapSecrets(credentials, secretsFile);
     const child = this.spawnProcess(this.command, args, {
       stdio: ['ignore', 'pipe', 'pipe']

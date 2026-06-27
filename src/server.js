@@ -1,19 +1,23 @@
 import dgram from 'node:dgram';
-import { ModemBridge, RtpEndpoint } from './media.js';
-import { SingleSessionManager } from './session.js';
+import { MultiSessionManager } from './session.js';
 import { buildResponse, parseSipMessage } from './sip.js';
 
 export class SipFaxServer {
-  constructor({ host, publicHost, sipPort, rtpPort, ppp, modem = null }) {
+  constructor({ host, publicHost, sipPort, rtpHost, rtpPortPool, modemFactory = null, ppp, maxSessions = 1, lineFactory }) {
     this.host = host;
     this.publicHost = publicHost;
     this.sipPort = sipPort;
-    this.rtpPort = rtpPort;
+    this.rtpHost = rtpHost ?? host;
     this.sipSocket = dgram.createSocket('udp4');
-    this.rtpEndpoint = new RtpEndpoint({ host, port: rtpPort });
-    this.modem = modem;
-    this.modemBridge = new ModemBridge({ modem });
-    this.sessions = new SingleSessionManager({ publicHost, localRtpPort: rtpPort, ppp });
+    this.sessions = new MultiSessionManager({
+      publicHost,
+      rtpHost: this.rtpHost,
+      rtpPortPool,
+      modemFactory,
+      ppp,
+      maxSessions,
+      ...(lineFactory ? { lineFactory } : {})
+    });
     this.startedAt = new Date();
     this.metrics = {
       invitesAccepted: 0,
@@ -21,73 +25,28 @@ export class SipFaxServer {
       rtpFramesAccepted: 0,
       rtpFramesDropped: 0
     };
-    this.listening = {
-      sip: false,
-      rtp: false
-    };
+    this.listening = { sip: false, rtp: false };
 
-    this.rtpEndpoint.on('frame', (frame) => {
-      this.metrics.rtpFramesAccepted += 1;
-      this.modemBridge.acceptFrame(frame);
-    });
-    this.modemBridge.on('outbound-audio', (audio) => {
-      this.rtpEndpoint.sendPayload(audio.payload, {
-        payloadType: audio.payloadType,
-        timestampIncrement: audio.timestampIncrement,
-        marker: audio.marker
-      });
-    });
-    if (this.modem?.on) {
-      this.modem.on('protocol-state', (event) => {
-        console.log(
-          `dialup protocol state call=${this.sessions.activeSession?.callId ?? 'none'} ` +
-            `${event.previousState}->${event.state} reason=${event.reason}`
-        );
-      });
-      this.modem.on('backend-log', (line) => {
-        console.log(`modem backend: ${String(line).trim()}`);
-      });
-      this.modem.on('backend-error', (error) => {
-        console.error(`modem backend error: ${error.message}`);
-      });
-      this.modem.on('backend-control', (event) => {
-        this.handleModemControl(event);
-      });
-    }
-    this.rtpEndpoint.on('dropped', () => {
-      this.metrics.rtpFramesDropped += 1;
-    });
     this.sipSocket.on('message', (message, remote) => {
       this.handleSipDatagram(message.toString('utf8'), remote);
     });
   }
 
   async start() {
-    await this.rtpEndpoint.start();
-    this.listening.rtp = true;
     await new Promise((resolve) => {
       this.sipSocket.bind(this.sipPort, this.host, resolve);
     });
     this.listening.sip = true;
+    this.listening.rtp = true; // per-call RTP sockets are allocated on demand
   }
 
   async stop() {
-    if (this.modem?.stop) {
-      this.modem.stop();
+    for (const callId of [...this.sessions.sessions.keys()]) {
+      this.sessions.terminate(callId);
     }
-
-    await Promise.all([
-      new Promise((resolve, reject) => {
-        this.sipSocket.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      }),
-      this.rtpEndpoint.stop()
-    ]);
+    await new Promise((resolve, reject) => {
+      this.sipSocket.close((error) => (error ? reject(error) : resolve()));
+    });
     this.listening.sip = false;
     this.listening.rtp = false;
   }
@@ -107,11 +66,6 @@ export class SipFaxServer {
 
     if (request.method === 'BYE') {
       this.sessions.terminate(request.callId);
-      this.rtpEndpoint.setSessionCodec(null);
-      this.modemBridge.setSessionCodec(null);
-      if (this.modem?.stop) {
-        this.modem.stop();
-      }
       this.sendSip(remote, buildResponse(request, 200, 'OK'));
       return;
     }
@@ -128,10 +82,10 @@ export class SipFaxServer {
       return;
     }
 
-    this.metrics.invitesAccepted += 1;
+    if (!result.retransmit) {
+      this.metrics.invitesAccepted += 1;
+    }
     const { session } = result;
-    this.rtpEndpoint.setSessionCodec(session.codec);
-    this.modemBridge.setSessionCodec(session.codec);
 
     this.sendSip(remote, buildResponse(request, 100, 'Trying'));
     this.sendSip(remote, buildResponse(request, 180, 'Ringing', { toTag: session.toTag }));
@@ -145,47 +99,28 @@ export class SipFaxServer {
     );
   }
 
-  handleModemControl(event) {
-    const callId = this.sessions.activeSession?.callId;
-    if (!callId) {
-      return;
-    }
-
-    const eventName = event.event ?? event.lastEvent ?? event.state;
-    if (eventName === 'pty-opened') {
-      const slavePath = event.slavePath ?? event.ptySlavePath ?? event.ptyPath;
-      this.sessions.openPty(callId, { slavePath });
-      return;
-    }
-
-    if (eventName === 'pty-closed') {
-      this.sessions.closePty(callId);
-    }
-  }
-
   sendSip(remote, message) {
     this.sipSocket.send(Buffer.from(message), remote.port, remote.address);
   }
 
   diagnostics() {
+    const sessions = this.sessions.diagnostics();
+    let rtpAccepted = this.metrics.rtpFramesAccepted;
+    let rtpDropped = this.metrics.rtpFramesDropped;
+    for (const s of sessions.sessions) {
+      rtpAccepted += s.metrics?.rtpFramesAccepted ?? 0;
+      rtpDropped += s.metrics?.rtpFramesDropped ?? 0;
+    }
+    const pool = this.sessions.rtpPortPool;
     return {
       startedAt: this.startedAt.toISOString(),
       uptimeSeconds: Math.floor((Date.now() - this.startedAt.getTime()) / 1000),
-      sip: {
-        host: this.host,
-        port: this.sipPort,
-        publicHost: this.publicHost,
-        listening: this.listening.sip
-      },
-      rtp: {
-        host: this.host,
-        port: this.rtpPort,
-        listening: this.listening.rtp
-      },
-      sessions: this.sessions.diagnostics(),
+      sip: { host: this.host, port: this.sipPort, publicHost: this.publicHost, listening: this.listening.sip },
+      rtp: { host: this.rtpHost, range: pool ? [pool.lo, pool.hi] : null, listening: this.listening.rtp },
+      sessions,
       ppp: this.sessions.ppp.diagnostics(),
-      media: this.modemBridge.diagnostics(),
-      metrics: { ...this.metrics }
+      media: { activeLines: sessions.active },
+      metrics: { ...this.metrics, rtpFramesAccepted: rtpAccepted, rtpFramesDropped: rtpDropped }
     };
   }
 }

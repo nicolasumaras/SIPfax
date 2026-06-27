@@ -1,11 +1,17 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const ADMIN_HTML_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'admin.html');
 
 export class OperatorHttpServer {
-  constructor({ host = '127.0.0.1', port = 8080, diagnostics, freepbx }) {
+  constructor({ host = '127.0.0.1', port = 8080, diagnostics, freepbx, config = null }) {
     this.host = host;
     this.port = port;
     this.diagnostics = diagnostics;
     this.freepbx = freepbx;
+    this.config = config;
     this.pppEvents = [];
     this.server = http.createServer((request, response) => {
       this.handleRequest(request, response);
@@ -20,20 +26,26 @@ export class OperatorHttpServer {
 
   stop() {
     return new Promise((resolve, reject) => {
-      this.server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
+      this.server.close((error) => (error ? reject(error) : resolve()));
     });
   }
 
   handleRequest(request, response) {
     const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
+
     if (request.method === 'POST' && url.pathname === '/ppp/events') {
       this.acceptPppEvent(request, response);
+      return;
+    }
+
+    // ----- admin API (Basic auth) -------------------------------------
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+      if (!this.requireAdmin(request, response)) {
+        return;
+      }
+      this.handleAdmin(request, response, url).catch((error) => {
+        sendJson(response, 400, { error: error.message });
+      });
       return;
     }
 
@@ -46,17 +58,14 @@ export class OperatorHttpServer {
       sendJson(response, 200, buildHealth(this.diagnostics()));
       return;
     }
-
     if (url.pathname === '/metrics') {
       sendText(response, 200, renderMetrics(this.diagnostics()), 'text/plain; version=0.0.4');
       return;
     }
-
     if (url.pathname === '/freepbx/pjsip.conf') {
-      sendText(response, 200, renderFreePbxPjsip(this.freepbx), 'text/plain');
+      sendText(response, 200, renderFreePbxPjsip(this.freepbxParams()), 'text/plain');
       return;
     }
-
     if (url.pathname === '/ppp/events') {
       sendJson(response, 200, { events: this.pppEvents });
       return;
@@ -65,13 +74,92 @@ export class OperatorHttpServer {
     sendText(response, 404, 'not found\n');
   }
 
+  // ----- admin -------------------------------------------------------
+  requireAdmin(request, response) {
+    if (!this.config?.adminConfigured()) {
+      sendJson(response, 503, { error: 'admin UI not configured: set an admin password' });
+      return false;
+    }
+    const header = request.headers.authorization ?? '';
+    const [scheme, encoded] = header.split(' ');
+    if (scheme === 'Basic' && encoded) {
+      const [user, ...rest] = Buffer.from(encoded, 'base64').toString('utf8').split(':');
+      if (this.config.verifyAdmin(user, rest.join(':'))) {
+        return true;
+      }
+    }
+    response.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="SIPfax admin", charset="UTF-8"',
+      'Content-Type': 'application/json'
+    });
+    response.end(JSON.stringify({ error: 'authentication required' }));
+    return false;
+  }
+
+  async handleAdmin(request, response, url) {
+    const { method } = request;
+    const path = url.pathname;
+
+    if (method === 'GET' && path === '/admin') {
+      try {
+        sendText(response, 200, readFileSync(ADMIN_HTML_PATH, 'utf8'), 'text/html; charset=utf-8');
+      } catch {
+        sendText(response, 500, 'admin UI asset missing\n');
+      }
+      return;
+    }
+    if (method === 'GET' && path === '/admin/config') {
+      sendJson(response, 200, this.config.redacted());
+      return;
+    }
+    if (method === 'GET' && path === '/admin/sessions') {
+      sendJson(response, 200, this.diagnostics().sessions);
+      return;
+    }
+    if (method === 'GET' && path === '/admin/freepbx') {
+      sendText(response, 200, renderFreePbxPjsip(this.freepbxParams()), 'text/plain');
+      return;
+    }
+    if (method === 'POST' && path === '/admin/users') {
+      const body = await readJsonBody(request, 8192);
+      const result = this.config.addUser({ username: body.username, password: body.password });
+      sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+    if (method === 'DELETE' && path.startsWith('/admin/users/')) {
+      const name = decodeURIComponent(path.slice('/admin/users/'.length));
+      const result = this.config.removeUser(name);
+      sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+    if (method === 'PUT' && path === '/admin/cap') {
+      const body = await readJsonBody(request, 4096);
+      const result = this.config.setMaxSessions(body.maxSessions);
+      sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+    if (method === 'PUT' && path === '/admin/sip') {
+      const body = await readJsonBody(request, 8192);
+      const result = this.config.setSip(body);
+      sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+
+    sendText(response, 404, 'not found\n');
+  }
+
+  freepbxParams() {
+    return {
+      ...this.freepbx,
+      codecs: this.config?.trunk?.codecs ?? this.freepbx?.codecs,
+      maxChannels: this.config?.maxSessions ?? this.freepbx?.maxChannels ?? 1
+    };
+  }
+
   acceptPppEvent(request, response) {
     readJsonBody(request, 8192)
       .then((event) => {
-        this.pppEvents.push({
-          ...event,
-          receivedAt: new Date().toISOString()
-        });
+        this.pppEvents.push({ ...event, receivedAt: new Date().toISOString() });
         this.pppEvents = this.pppEvents.slice(-20);
         sendJson(response, 202, { accepted: true });
       })
@@ -135,10 +223,12 @@ export function renderFreePbxPjsip({
   serverHost,
   sipPort,
   extension = 'faxmodem',
-  codecs = ['ulaw', 'alaw']
+  codecs = ['ulaw', 'alaw'],
+  maxChannels = 1
 }) {
   return [
-    `; SIPfax trunk for FreePBX/Asterisk PJSIP. Route extension ${extension} to this endpoint.`,
+    `; SIPfax PJSIP TRUNK for FreePBX/Asterisk. Route inbound DIDs / extension ${extension} here.`,
+    `; Set the trunk "Maximum Channels" to ${maxChannels} (the SIPfax concurrency cap).`,
     `; Keep SIPfax outside the Asterisk media path: no T.38, transcoding, recording, VAD, or conferencing.`,
     `[${name}]`,
     'type=endpoint',
@@ -156,25 +246,20 @@ export function renderFreePbxPjsip({
     `[${name}]`,
     'type=aor',
     `contact=sip:${serverHost}:${sipPort}`,
-    'max_contacts=1',
+    `max_contacts=${maxChannels}`,
+    'qualify_frequency=30',
     ''
   ].join('\n');
 }
 
 function sendJson(response, statusCode, body) {
   const serialized = JSON.stringify(body, null, 2);
-  response.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store'
-  });
+  response.writeHead(statusCode, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   response.end(`${serialized}\n`);
 }
 
 function sendText(response, statusCode, body, contentType = 'text/plain') {
-  response.writeHead(statusCode, {
-    'Content-Type': contentType,
-    'Cache-Control': 'no-store'
-  });
+  response.writeHead(statusCode, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
   response.end(body);
 }
 

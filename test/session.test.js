@@ -13,13 +13,32 @@ import {
   InProcessDialupTerminator,
   ModemAnswerToneSource,
   ModemBridge,
-  parseRtpPacket
+  parseRtpPacket,
+  RtpPortPool
 } from '../src/media.js';
 import { buildHealth, OperatorHttpServer, renderFreePbxPjsip, renderMetrics } from '../src/operator.js';
 import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController } from '../src/ppp.js';
 import { buildPppdArgs, PppdSupervisor, renderChapSecrets } from '../src/pppd-supervisor.js';
 import { SipFaxServer } from '../src/server.js';
-import { SingleSessionManager } from '../src/session.js';
+import { MultiSessionManager } from '../src/session.js';
+import { Line } from '../src/line.js';
+import { SipfaxConfig } from '../src/config.js';
+
+// A no-socket Line stub so session-manager unit tests don't bind real UDP ports.
+class FakeLine extends EventEmitter {
+  constructor({ callId, codec, rtpPort, modem }) {
+    super();
+    this.callId = callId; this.codec = codec; this.rtpPort = rtpPort; this.modem = modem;
+    this.stopped = false;
+  }
+  start() { return Promise.resolve(); }
+  stop() { this.stopped = true; return Promise.resolve(); }
+  diagnostics() { return { callId: this.callId, rtpPort: this.rtpPort, codec: this.codec?.name ?? null, metrics: {} }; }
+}
+const fakeLineFactory = (options) => new FakeLine(options);
+function makeManager(extra = {}) {
+  return new MultiSessionManager({ publicHost: '198.51.100.5', lineFactory: fakeLineFactory, ...extra });
+}
 import { parseSdpOffer } from '../src/sdp.js';
 import { buildResponse, parseSipMessage } from '../src/sip.js';
 
@@ -42,37 +61,53 @@ test('SDP parser accepts static G.711 payloads only when offered', () => {
   );
 });
 
-test('single-session manager starts one G.711 call and rejects concurrent INVITEs', () => {
-  const manager = new SingleSessionManager({ publicHost: '198.51.100.5', localRtpPort: 40000 });
+test('multi-session manager starts one G.711 call and rejects beyond the cap', () => {
+  const manager = makeManager({ maxSessions: 1 });
   const invite = parseSipMessage(makeInvite({ callId: 'call-1', payloads: '0 8' }));
 
   const first = manager.startFromInvite(invite);
   assert.equal(first.accepted, true);
   assert.equal(first.session.codec.name, 'PCMU');
-  assert.equal(manager.activeSession.state, 'ringing');
+  assert.equal(manager.sessions.get('call-1').session.state, 'ringing');
 
   const second = manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-2', payloads: '0' })));
   assert.equal(second.accepted, false);
   assert.equal(second.statusCode, 486);
 });
 
-test('single-session manager rejects non-G.711 offers', () => {
-  const manager = new SingleSessionManager({ publicHost: '198.51.100.5', localRtpPort: 40000 });
+test('multi-session manager accepts up to the cap and admits more when raised live', () => {
+  const manager = makeManager({ maxSessions: 3 });
+  for (const id of ['a', 'b', 'c']) {
+    assert.equal(manager.startFromInvite(parseSipMessage(makeInvite({ callId: id, payloads: '0' }))).accepted, true);
+  }
+  assert.equal(manager.activeCount, 3);
+  assert.equal(manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'd', payloads: '0' }))).accepted, false);
+
+  manager.setMaxSessions(4);
+  assert.equal(manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'd', payloads: '0' }))).accepted, true);
+  assert.equal(manager.activeCount, 4);
+});
+
+test('multi-session manager rejects non-G.711 offers', () => {
+  const manager = makeManager();
   const result = manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-3', payloads: '18' })));
 
   assert.equal(result.accepted, false);
   assert.equal(result.statusCode, 488);
 });
 
-test('ACK establishes and BYE frees the single-session slot', () => {
-  const manager = new SingleSessionManager({ publicHost: '198.51.100.5', localRtpPort: 40000 });
+test('ACK establishes and BYE frees a session slot and its RTP port', () => {
+  const pool = new RtpPortPool({ range: [41000, 41010] });
+  const manager = makeManager({ rtpPortPool: pool });
   manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-4', payloads: '8' })));
+  assert.equal(pool.available, pool.capacity - 1);
 
   assert.equal(manager.acknowledge('call-4'), true);
-  assert.equal(manager.activeSession.state, 'established');
-  assert.equal(manager.activeSession.ppp.state, 'awaiting-auth');
+  assert.equal(manager.sessions.get('call-4').session.state, 'established');
+  assert.equal(manager.sessions.get('call-4').session.ppp.state, 'awaiting-auth');
   assert.equal(manager.terminate('call-4'), true);
-  assert.equal(manager.activeSession, null);
+  assert.equal(manager.sessions.has('call-4'), false);
+  assert.equal(pool.available, pool.capacity);
 });
 
 test('PPP authentication assigns client address and DNS for an established call', () => {
@@ -81,11 +116,7 @@ test('PPP authentication assigns client address and DNS for an established call'
     addressPool: new AddressPool({ cidr: '10.70.0.0/30' }),
     dnsServers: ['1.1.1.1']
   });
-  const manager = new SingleSessionManager({
-    publicHost: '198.51.100.5',
-    localRtpPort: 40000,
-    ppp
-  });
+  const manager = makeManager({ ppp });
 
   manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-ppp', payloads: '0' })));
   manager.acknowledge('call-ppp');
@@ -99,7 +130,7 @@ test('PPP authentication assigns client address and DNS for an established call'
   assert.equal(accepted.session.lease.localAddress, '10.70.0.1');
   assert.equal(accepted.session.lease.clientAddress, '10.70.0.2');
   assert.deepEqual(accepted.session.dnsServers, ['1.1.1.1']);
-  assert.equal(manager.diagnostics().ppp.addressPool.activeLeases, 1);
+  assert.equal(manager.ppp.diagnostics().addressPool.activeLeases, 1);
 
   manager.terminate('call-ppp');
   assert.equal(ppp.diagnostics().addressPool.activeLeases, 0);
@@ -679,7 +710,7 @@ test('in-process dial-up terminator clears state when codec is removed', () => {
   assert.equal(terminator.diagnostics().running, false);
 });
 
-test('server runtime modem wiring sends outbound RTP after inbound media discovers the remote endpoint', async () => {
+test('Line forwards inbound RTP to the modem and modem audio back out as RTP', async () => {
   const modem = new EventEmitter();
   modem.setSessionCodec = (codec) => {
     modem.codec = codec;
@@ -688,19 +719,11 @@ test('server runtime modem wiring sends outbound RTP after inbound media discove
     modem.emit('outbound-audio', Buffer.from([0x21, 0x22, 0x23]), { timestampIncrement: 160 });
   };
 
-  const server = new SipFaxServer({
-    host: '127.0.0.1',
-    publicHost: '127.0.0.1',
-    sipPort: 0,
-    rtpPort: 0,
-    modem
-  });
+  const line = new Line({ callId: 't', codec: G711_CODECS.get(0), rtpHost: '127.0.0.1', rtpPort: 0, modem });
   const remote = dgram.createSocket('udp4');
 
   try {
-    await server.start();
-    server.rtpEndpoint.setSessionCodec(G711_CODECS.get(0));
-    server.modemBridge.setSessionCodec(G711_CODECS.get(0));
+    await line.start();
     const received = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('timed out waiting for outbound RTP')), 500);
       remote.once('message', (message) => {
@@ -710,25 +733,21 @@ test('server runtime modem wiring sends outbound RTP after inbound media discove
     });
 
     await new Promise((resolve) => remote.bind(0, '127.0.0.1', resolve));
-    const serverRtpPort = server.rtpEndpoint.socket.address().port;
-    const inbound = buildRtpPacket({
+    const port = line.rtpEndpoint.socket.address().port;
+    remote.send(buildRtpPacket({
       payloadType: 0,
       sequenceNumber: 1,
       timestamp: 160,
       ssrc: 0x01020304,
       payload: Buffer.from([0x7f, 0x80, 0x81])
-    });
-    remote.send(inbound, serverRtpPort, '127.0.0.1');
+    }), port, '127.0.0.1');
 
     const outbound = parseRtpPacket(await received);
     assert.equal(outbound.payloadType, 0);
     assert.deepEqual([...outbound.payload], [0x21, 0x22, 0x23]);
-    assert.equal(server.modemBridge.diagnostics().framesOut, 1);
+    assert.equal(line.modemBridge.diagnostics().framesOut, 1);
   } finally {
-    await Promise.all([
-      server.stop(),
-      new Promise((resolve) => remote.close(resolve))
-    ]);
+    await Promise.all([line.stop(), new Promise((resolve) => remote.close(resolve))]);
   }
 });
 
@@ -752,42 +771,29 @@ test('server modem control pty events start and stop pppd for the active call', 
       }
     }
   });
-  const server = new SipFaxServer({
-    host: '127.0.0.1',
-    publicHost: '127.0.0.1',
-    sipPort: 0,
-    rtpPort: 0,
-    ppp
-  });
+  const manager = makeManager({ ppp });
 
-  server.sessions.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-control', payloads: '0' })));
-  server.sessions.acknowledge('call-control');
-  server.handleModemControl({ event: 'pty-opened', slavePath: '/dev/pts/11' });
-  server.handleModemControl({ event: 'pty-closed' });
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-control', payloads: '0' })));
+  manager.acknowledge('call-control');
+  const { line } = manager.sessions.get('call-control');
+  line.emit('pty-opened', { callId: 'call-control', slavePath: '/dev/pts/11' });
+  line.emit('pty-closed', { callId: 'call-control' });
 
   assert.equal(starts.length, 1);
   assert.equal(starts[0].slavePath, '/dev/pts/11');
   assert.deepEqual(stops, ['call-control']);
 });
 
-test('server with unavailable softmodem worker emits no synthetic outbound RTP', async () => {
+test('Line emits no outbound RTP when the modem worker is unavailable', async () => {
   const modem = new ExternalModemProcessBackend({ command: '/definitely/not-installed/sipfax-softmodem' });
   const backendError = new Promise((resolve) => {
     modem.once('backend-error', resolve);
   });
-  const server = new SipFaxServer({
-    host: '127.0.0.1',
-    publicHost: '127.0.0.1',
-    sipPort: 0,
-    rtpPort: 0,
-    modem
-  });
+  const line = new Line({ callId: 't2', codec: G711_CODECS.get(0), rtpHost: '127.0.0.1', rtpPort: 0, modem });
   const remote = dgram.createSocket('udp4');
 
   try {
-    await server.start();
-    server.rtpEndpoint.setSessionCodec(G711_CODECS.get(0));
-    server.modemBridge.setSessionCodec(G711_CODECS.get(0));
+    await line.start();
     await backendError;
 
     const received = new Promise((resolve) => {
@@ -799,24 +805,21 @@ test('server with unavailable softmodem worker emits no synthetic outbound RTP',
     });
 
     await new Promise((resolve) => remote.bind(0, '127.0.0.1', resolve));
-    const serverRtpPort = server.rtpEndpoint.socket.address().port;
+    const port = line.rtpEndpoint.socket.address().port;
     remote.send(buildRtpPacket({
       payloadType: 0,
       sequenceNumber: 1,
       timestamp: 160,
       ssrc: 0x01020304,
       payload: Buffer.alloc(160, 0x7f)
-    }), serverRtpPort, '127.0.0.1');
+    }), port, '127.0.0.1');
 
     assert.equal(await received, null);
-    assert.equal(server.modemBridge.diagnostics().framesOut, 0);
-    assert.equal(server.modemBridge.diagnostics().modem.type, 'external-process');
-    assert.match(server.modemBridge.diagnostics().modem.lastError, /ENOENT/);
+    assert.equal(line.modemBridge.diagnostics().framesOut, 0);
+    assert.equal(line.modemBridge.diagnostics().modem.type, 'external-process');
+    assert.match(line.modemBridge.diagnostics().modem.lastError, /ENOENT/);
   } finally {
-    await Promise.all([
-      server.stop(),
-      new Promise((resolve) => remote.close(resolve))
-    ]);
+    await Promise.all([line.stop(), new Promise((resolve) => remote.close(resolve))]);
   }
 });
 
@@ -875,7 +878,8 @@ test('FreePBX PJSIP snippet keeps Asterisk out of the media feature path', () =>
     extension: '4900'
   });
 
-  assert.match(config, /Route extension 4900/);
+  assert.match(config, /extension 4900/);
+  assert.match(config, /TRUNK/);
   assert.match(config, /allow=ulaw,alaw/);
   assert.match(config, /t38_udptl=no/);
   assert.match(config, /direct_media=no/);

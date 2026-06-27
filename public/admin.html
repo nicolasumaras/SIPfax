@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIPfax admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 900px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+  .sub { color: #888; margin: 0 0 1rem; }
+  section { border: 1px solid #8884; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8883; font-size: 13px; }
+  th { color: #888; font-weight: 600; }
+  input, button { font: inherit; padding: .35rem .5rem; border-radius: 6px; border: 1px solid #8886; }
+  button { cursor: pointer; background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.ghost { background: transparent; color: inherit; }
+  button.danger { background: #dc2626; border-color: #dc2626; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; background: #8883; font-size: 12px; }
+  textarea { width: 100%; min-height: 8rem; font: 12px/1.4 ui-monospace, monospace; }
+  .warn { color: #d97706; }
+  .ok { color: #16a34a; }
+  #toast { position: fixed; bottom: 1rem; right: 1rem; background: #111; color: #fff; padding: .5rem .9rem; border-radius: 6px; opacity: 0; transition: opacity .2s; }
+  #toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+  <h1>SIPfax admin</h1>
+  <p class="sub">Concurrent dial-up modem lines &middot; <span id="status">…</span></p>
+
+  <section>
+    <h2>Concurrency cap</h2>
+    <div class="row">
+      <label>Max concurrent lines <input id="cap" type="number" min="1" style="width:6rem"></label>
+      <button id="saveCap">Save</button>
+      <span class="sub" style="margin:0">Applies live; existing calls are never dropped.</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>PPP users</h2>
+    <table id="users"><thead><tr><th>Username</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="row" style="margin-top:.75rem">
+      <input id="u" placeholder="username" autocomplete="off">
+      <input id="p" placeholder="password" type="text" autocomplete="off">
+      <button id="addUser">Add user</button>
+      <span class="sub" style="margin:0">New users can dial in immediately — no restart.</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Lines — active calls <button id="refresh" class="ghost" style="float:right">↻</button></h2>
+    <table id="sessions">
+      <thead><tr><th>Call-ID</th><th>User</th><th>Client IP</th><th>Rate</th><th>State</th><th>Dur</th></tr></thead>
+      <tbody><tr><td colspan="6" class="sub">no active calls</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>SIP / trunk</h2>
+    <div id="sip" class="sub"></div>
+    <h2 style="font-size:.95rem">FreePBX trunk config <button id="copyFp" class="ghost" style="float:right">Copy</button></h2>
+    <textarea id="freepbx" readonly>…</textarea>
+  </section>
+
+  <div id="toast"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+function toast(msg, ok = true) {
+  const t = $('#toast'); t.textContent = msg; t.style.background = ok ? '#111' : '#b91c1c';
+  t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200);
+}
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || (method + ' ' + path + ' -> ' + r.status)); }
+  return r.headers.get('content-type')?.includes('json') ? r.json() : r.text();
+}
+
+async function loadConfig() {
+  const c = await api('GET', '/admin/config');
+  $('#cap').value = c.maxSessions;
+  const tb = $('#users tbody'); tb.innerHTML = '';
+  for (const u of c.ppp.users) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${u.username}</td><td style="text-align:right"></td>`;
+    const b = document.createElement('button'); b.textContent = 'Remove'; b.className = 'danger';
+    b.onclick = () => removeUser(u.username);
+    tr.lastChild.appendChild(b); tb.appendChild(tr);
+  }
+  $('#sip').innerHTML =
+    `host <span class="pill">${c.sip.host}:${c.sip.sipPort}</span> ` +
+    `public <span class="pill">${c.sip.publicHost}</span> ` +
+    `RTP <span class="pill">${c.sip.rtpHost}:${c.sip.rtpPortRange[0]}-${c.sip.rtpPortRange[1]}</span> ` +
+    `codecs <span class="pill">${c.trunk.codecs.join(', ')}</span> ` +
+    `engine <span class="pill">${c.modem.engine} / ${c.modem.modulation}</span>`;
+  $('#freepbx').value = await api('GET', '/admin/freepbx');
+}
+async function loadSessions() {
+  const d = await api('GET', '/admin/sessions');
+  $('#status').textContent = `${d.active} / ${d.limit} lines active`;
+  const tb = $('#sessions tbody'); tb.innerHTML = '';
+  if (!d.sessions.length) { tb.innerHTML = '<tr><td colspan="6" class="sub">no active calls</td></tr>'; return; }
+  for (const s of d.sessions) {
+    const rate = s.baud ? s.baud + ' bps' : (s.modulation || '—');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td title="${s.callId}">${String(s.callId).slice(0, 12)}…</td>` +
+      `<td>${s.username || '—'}</td><td>${s.clientAddress || '—'}</td>` +
+      `<td>${rate}</td><td>${s.state || '—'}</td><td>${s.durationSeconds ?? 0}s</td>`;
+    tb.appendChild(tr);
+  }
+}
+async function removeUser(name) {
+  try { await api('DELETE', '/admin/users/' + encodeURIComponent(name)); toast('removed ' + name); loadConfig(); }
+  catch (e) { toast(e.message, false); }
+}
+$('#addUser').onclick = async () => {
+  try { await api('POST', '/admin/users', { username: $('#u').value.trim(), password: $('#p').value }); $('#u').value = ''; $('#p').value = ''; toast('user added'); loadConfig(); }
+  catch (e) { toast(e.message, false); }
+};
+$('#saveCap').onclick = async () => {
+  try { const r = await api('PUT', '/admin/cap', { maxSessions: Number($('#cap').value) }); toast('cap = ' + $('#cap').value + (r.needsRestart?.length ? ' (restart needed)' : '')); loadConfig(); }
+  catch (e) { toast(e.message, false); }
+};
+$('#refresh').onclick = loadSessions;
+$('#copyFp').onclick = () => { navigator.clipboard?.writeText($('#freepbx').value); toast('copied'); };
+
+loadConfig().catch((e) => toast(e.message, false));
+loadSessions().catch(() => {});
+setInterval(() => loadSessions().catch(() => {}), 2500);
+</script>
+</body>
+</html>

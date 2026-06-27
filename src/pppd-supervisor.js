@@ -291,15 +291,10 @@ export class PppdSupervisor extends EventEmitter {
     } catch (error) {
       session.lastError = error.message;
     }
-    if (session.secretsPath) {
-      // The secrets file lives in root-owned /etc/ppp; we own the file but
-      // not the directory, so clear it in place rather than unlinking it.
-      try {
-        writeFileSync(session.secretsPath, '', { mode: 0o600 });
-      } catch (error) {
-        session.lastError = error.message;
-      }
-    }
+    // NOTE: the {chap,pap}-secrets file holds ALL configured PPP users (pppd
+    // reads it globally) and may be in use by other concurrent calls, so it is
+    // NOT cleared on per-call teardown. It is (re)rendered with the full user
+    // set on each pppd launch and when the user list changes.
   }
 
   writeEgressDescriptor(callId, descriptor) {

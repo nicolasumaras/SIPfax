@@ -42,6 +42,12 @@ export class PppCredentialStore {
     }
   }
 
+  removeUser(username) {
+    const existed = this.users.delete(username);
+    this.secrets.delete(username);
+    return existed;
+  }
+
   verify({ username, password }) {
     const expectedHash = this.users.get(username);
     if (!expectedHash || !password) {
@@ -438,11 +444,11 @@ export function parseList(value, fallback) {
   return value.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
-function hashPassword(password) {
+export function hashPassword(password) {
   return createHash('sha256').update(password).digest('hex');
 }
 
-function safeEqual(left, right) {
+export function safeEqual(left, right) {
   const leftBuffer = Buffer.from(left, 'hex');
   const rightBuffer = Buffer.from(right, 'hex');
 

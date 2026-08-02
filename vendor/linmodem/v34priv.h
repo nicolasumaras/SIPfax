@@ -145,7 +145,7 @@ typedef struct V34DSPState {
     /* the previous decoded decision comming to this path. Each
        decision Y[5] is coded on one byte */
 
-    u8 state_decision[TRELLIS_MAX_STATES][TRELLIS_LENGTH];
+    s16 state_decision[TRELLIS_MAX_STATES][TRELLIS_LENGTH]; /* SIPFAX: was u8; holds 0..511 */
     u8  state_path[TRELLIS_MAX_STATES][TRELLIS_LENGTH];
     s16 state_memory[TRELLIS_LENGTH][4];
     u8  u0_memory[TRELLIS_LENGTH];

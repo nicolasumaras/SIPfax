@@ -1302,7 +1302,14 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
 
     put_bits(&p, 1, 0); /* start bit */
 
-    crc = calc_crc(buf + 17, p - (buf+17));
+    {   /* spec CRC: over information bits only (exclude sync/start/fill) */
+        u8 cov[200]; int cn = 0, bp, clen = p - (buf + 17);
+        for (bp = 17; bp < 17 + clen; bp++) {
+            int st = (bp==17 || bp==34) || (type ? (bp>=51 && ((bp-51)%17)==0) : (bp==51 || bp==68));
+            if (!st) cov[cn++] = buf[bp];
+        }
+        crc = calc_crc(cov, cn);
+    }
     put_bits(&p, 16, crc);
 
     put_bits(&p, 1, 0); /* fill bit */
@@ -2636,7 +2643,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             rate_ac = (f[24]<<3)|(f[25]<<2)|(f[26]<<1)|f[27];
                             ackb = f[33];
                             for (mi = 0; mi < 15; mi++) msk |= ((unsigned int)f[35+mi]) << mi;
-                            for (i3 = 17; i3 < crc_off; i3++) cb[cn++] = f[i3];
+                            for (i3 = 17; i3 < crc_off; i3++) {   /* spec CRC: exclude start bits */
+                                int st = (i3==17 || i3==34) || (type ? (i3>=51 && ((i3-51)%17)==0) : (i3==51 || i3==68));
+                                if (!st) cb[cn++] = f[i3];
+                            }
                             for (i3 = 0; i3 < 16; i3++) rx_crc |= ((int)f[crc_off+i3]) << (15-i3);
                             ok = (calc_crc(cb, cn) == rx_crc);
                             {   /* accept on CRC, or on consensus of the reliable head fields */
@@ -2690,7 +2700,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         }
         s->srx_pqd = qd;
     }
-    if (s->p4_mode == 2) mu = 0.0;   /* MP: freeze the TRN-converged taps; free-running DD drifts them */
+    if (s->p4_mode == 2) {   /* MP/data: decision-FREE CMA tap tracking. DD decisions are
+                                wrong once timing drifts, so DD-LMS can't recover; CMA holds
+                                constant modulus (4-point) and tracks slow channel/clock drift. */
+        double m2 = oi*oi + oq*oq, g = 1.0 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
+    }
     for (i = 0; i < CMANT; i++) {
         double gi = ei*s->cma_bufi[i] + eq*s->cma_bufq[i];
         double gq = eq*s->cma_bufi[i] - ei*s->cma_bufq[i];

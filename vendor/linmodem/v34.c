@@ -2407,6 +2407,7 @@ void V34_cma_decode_file(const char *path)
 
 FILE *cma_dumpf = 0;
 FILE *cma_t2df = 0;
+FILE *p4bitf = 0;
 int cma_t1 = 18, cma_t2 = 23;   /* caller GPC default; GPA=5,23 */
 /* ---- Stage 1c: streaming CMA/DD + carrier-recovery demod (validated design) ---- */
 #define CMANT 32
@@ -2591,118 +2592,69 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             }
         }
         if (s->srx_locked && s->p4_mode == 2) {
-            /* differential CW bits, GPC self-sync descramble, frame collection */
+            /* MP receiver: differential-CW dibits (In = pqd-qd) -> GPC self-sync FIR
+               descramble (x[n]=y[n]^y[n-18]^y[n-23]) -> ring. A folding majority-vote
+               decoder reads MP frames (Tables 20/21) with a real CRC through the
+               hybrid-echo BER; E = >=19 descrambled ones after an MP. */
             int dqp = (s->srx_pqd - qd) & 3, kb;
             for (kb = 0; kb < 2; kb++) {
                 int yb = kb ? ((dqp >> 1) & 1) : (dqp & 1);
                 int xb = yb ^ ((s->p4_ybits >> 17) & 1) ^ ((s->p4_ybits >> 22) & 1);
                 s->p4_ybits = ((s->p4_ybits << 1) | (unsigned int)yb) & 0x7fffff;
                 s->p4_ring[s->p4_rn & 4095] = (u8)xb; s->p4_rn++;
-                if (!s->p4_mpp_rx && s->p4_rn > 600 && (++s->p4_try >= 256)) {
-                    /* FOLDING MP DECODER: majority-vote across frame repetitions; robust
-                       to the bit errors from full-duplex hybrid echo. */
-                    int Ls[2] = { 88, 190 }, li;
+                if (p4bitf) fputc('0'+xb, p4bitf);
+                if (xb) { if (++s->p4_ones_run >= 19 && s->p4_mp_rx && !s->p4_e_rx) {
+                            s->p4_e_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn); } } }
+                else s->p4_ones_run = 0;
+                if (!s->p4_mpp_rx && s->p4_rn > 700 && (++s->p4_try >= 128)) {
+                    int Ls[2] = { 88, 188 }, li;
                     s->p4_try = 0;
                     for (li = 0; li < 2; li++) {
-                        int L = Ls[li], per = 6, avail = s->p4_rn > 4096 ? 4096 : s->p4_rn;
-                        int start, i2, off, run, st;
-                        static u8 maj[190]; static int votes[190];
+                        int L = Ls[li], per = 8, avail = s->p4_rn > 4096 ? 4096 : s->p4_rn;
+                        int start2, i2, run, st;
+                        static u8 maj[188]; static int votes[188];
                         if (avail < per*L) { if (avail/L >= 3) per = avail/L; else continue; }
-                        start = s->p4_rn - per*L;
+                        start2 = s->p4_rn - per*L;
                         for (i2 = 0; i2 < L; i2++) votes[i2] = 0;
-                        for (i2 = 0; i2 < per*L; i2++) votes[i2 % L] += s->p4_ring[(start + i2) & 4095];
+                        for (i2 = 0; i2 < per*L; i2++) votes[i2 % L] += s->p4_ring[(start2 + i2) & 4095];
                         for (i2 = 0; i2 < L; i2++) maj[i2] = (votes[i2]*2 >= per);
-                        /* find 17-ones sync in the cyclic majority pattern */
                         run = 0; st = -1;
                         for (i2 = 0; i2 < 2*L; i2++) {
                             if (maj[i2 % L]) run++;
                             else { if (run >= 17 && i2 >= L) { st = (i2 - 17) % L; break; } run = 0; }
                         }
                         if (st < 0) continue;
-                        {   /* frame = maj rotated so sync starts at bit0 */
-                            u8 f[190]; int type, rate_ca, rate_ac, ackb; unsigned int mask=0; int mi;
+                        {
+                            u8 f[188]; int type, rate_ca, rate_ac, ackb, crc_off, rx_crc = 0, ok, i3, mi;
                             extern int calc_crc(u8 *buf, int size);
-                            u8 cb[160]; int cn=0, crc_off, rx_crc=0, ok;
+                            static u8 cb[188]; int cn = 0; unsigned int msk = 0;
                             for (i2 = 0; i2 < L; i2++) f[i2] = maj[(st + i2) % L];
                             type = f[18];
-                            if ((type ? 190 : 88) != L) continue;
-                            rate_ca = f[20]|(f[21]<<1)|(f[22]<<2)|(f[23]<<3);
-                            rate_ac = f[24]|(f[25]<<1)|(f[26]<<2)|(f[27]<<3);
+                            if ((type ? 188 : 88) != L) continue;
+                            crc_off = type ? 171 : 69;
+                            rate_ca = (f[20]<<3)|(f[21]<<2)|(f[22]<<1)|f[23];
+                            rate_ac = (f[24]<<3)|(f[25]<<2)|(f[26]<<1)|f[27];
                             ackb = f[33];
-                            for (mi = 0; mi < 15; mi++) mask |= ((unsigned int)f[35+mi]) << mi;
-                            for (i2 = 18; i2 <= 33; i2++) cb[cn++] = f[i2];
-                            for (i2 = 35; i2 <= 50; i2++) cb[cn++] = f[i2];
-                            if (!type) { for (i2 = 52; i2 <= 67; i2++) cb[cn++] = f[i2]; crc_off = 69; }
-                            else {
-                                int g;
-                                for (g = 0; g < 6; g++) for (i2 = 0; i2 < 16; i2++) cb[cn++] = f[52 + g*17 + i2];
-                                for (i2 = 155; i2 <= 170; i2++) cb[cn++] = f[i2];
-                                crc_off = 172;
-                            }
-                            for (i2 = 0; i2 < 16; i2++) rx_crc |= ((int)f[crc_off+i2]) << i2;
+                            for (mi = 0; mi < 15; mi++) msk |= ((unsigned int)f[35+mi]) << mi;
+                            for (i3 = 17; i3 < crc_off; i3++) cb[cn++] = f[i3];
+                            for (i3 = 0; i3 < 16; i3++) rx_crc |= ((int)f[crc_off+i3]) << (15-i3);
                             ok = (calc_crc(cb, cn) == rx_crc);
-                            { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d per=%d sync@%d type=%d rates=%d/%d ack=%d crc=%s at sym %ld\n", L, per, st, type, rate_ca*2400, rate_ac*2400, ackb, ok?"OK":"fail", s->cma_qn); }
-                            if (ok || per >= 5) {   /* CRC, or strong fold consensus */
-                                s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = mask;
-                                if (!s->p4_mp_rx) { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP received (fold, %s)\n", ok?"CRC":"consensus"); }
-                                s->p4_mp_rx = 1;
-                                if (ackb && !s->p4_mpp_rx) { s->p4_mpp_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP-prime received (fold)\n"); } }
+                            {   /* accept on CRC, or on consensus of the reliable head fields */
+                                int key = (type<<28) ^ (rate_ca<<12) ^ (rate_ac<<4) ^ (f[29]<<2) ^ (f[30]<<1) ^ ackb;
+                                int trel = (f[29]<<1) | f[30];
+                                int consensus = (key == s->p4_key);
+                                s->p4_keyn = consensus ? s->p4_keyn+1 : 1; s->p4_key = key;
+                                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d type=%d ca=%d ac=%d trel=%d ack=%d crc=%s cons=%d\n", L, type, rate_ca*2400, rate_ac*2400, trel, ackb, ok?"OK":"fail", s->p4_keyn); }
+                                if (ok || s->p4_keyn >= 2) {
+                                    s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = msk;
+                                    s->p4_trellis = trel; s->p4_mp_crcok = ok;
+                                    if (!s->p4_mp_rx) { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP READ (%s): ca=%d ac=%d trellis=%dstate ack=%d\n", ok?"CRC":"consensus", rate_ca*2400, rate_ac*2400, (1<<(4+trel)), ackb); }
+                                    s->p4_mp_rx = 1;
+                                    if (ackb && !s->p4_mpp_rx) { s->p4_mpp_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP-prime READ (%s)\n", ok?"CRC":"consensus"); } }
+                                    if (ok) break;
+                                }
                             }
                         }
-                        break;
-                    }
-                }
-                if (s->p4_collect) {
-                    s->p4_frame[s->p4_fn++] = (u8)xb;
-                    if (s->p4_fn >= 18 && s->p4_fn >= (s->p4_frame[1] ? 190 : 88) - 17) {
-                        /* frame complete: p4_frame[0]=bit17(start0), [1]=type, ... offset = bit-17 */
-                        u8 *f = s->p4_frame; int type = f[1];
-                        int rate_ca = f[3] | (f[4]<<1) | (f[5]<<2) | (f[6]<<3);
-                        int rate_ac = f[7] | (f[8]<<1) | (f[9]<<2) | (f[10]<<3);
-                        int ackb = f[16];
-                        unsigned int mask = 0; int mi;
-                        for (mi = 0; mi < 15; mi++) mask |= ((unsigned int)f[18+mi]) << mi;
-                        /* CRC per spec covered set (info bits, no sync/start/fill) */
-                        {
-                            extern int calc_crc(u8 *buf, int size);
-                            u8 cb[160]; int cn = 0, i2, crc_off, rx_crc = 0, ok;
-                            for (i2 = 1; i2 <= 16; i2++) cb[cn++] = f[i2];        /* bits18:33 */
-                            for (i2 = 18; i2 <= 33; i2++) cb[cn++] = f[i2];       /* bits35:50 */
-                            if (!type) { for (i2 = 35; i2 <= 50; i2++) cb[cn++] = f[i2];  crc_off = 52; }
-                            else {
-                                int g;                                            /* 3x2 coeffs: 6x(start+16) at bits51.. */
-                                for (g = 0; g < 6; g++) for (i2 = 0; i2 < 16; i2++) cb[cn++] = f[35 + g*17 + i2];
-                                for (i2 = 138; i2 <= 153; i2++) cb[cn++] = f[i2]; /* reserved 16 */
-                                crc_off = 155;
-                            }
-                            for (i2 = 0; i2 < 16; i2++) rx_crc |= ((int)f[crc_off + i2]) << i2;
-                            ok = (calc_crc(cb, cn) == rx_crc);
-                            { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] frame done: type=%d crc_rx=%04x crc_calc=%04x rates=%d/%d ack=%d\n", type, rx_crc, calc_crc(cb,cn), rate_ca, rate_ac, ackb); }
-                            if (!ok && s->p4_last_valid && memcmp(f, s->p4_last, 51) == 0) ok = 2; /* repetition fallback */
-                            memcpy(s->p4_last, f, 51); s->p4_last_valid = 1;
-                            if (ok) {
-                                s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = mask;
-                                if (!s->p4_mp_rx) { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP received (type %d, %s) rates ca=%d ac=%d mask=%04x ack=%d at sym %ld\n", type, ok==1?"CRC":"rep", rate_ca*2400, rate_ac*2400, mask, ackb, s->cma_qn); }
-                                s->p4_mp_rx = 1;
-                                if (ackb && !s->p4_mpp_rx) { s->p4_mpp_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP' received at sym %ld\n", s->cma_qn); } }
-                            }
-                        }
-                        s->p4_collect = 0; s->p4_ones_run = 0;
-                    }
-                } else {
-                    if (xb) {
-                        s->p4_ones_run++;
-                        if (s->p4_ones_run >= 19 && s->p4_mp_rx && !s->p4_e_rx) {
-                            s->p4_e_rx = 1;
-                            { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn); }
-                        }
-                    } else {
-                        if (s->p4_ones_run >= 17) {   /* sync then start bit: begin frame at bit17 */
-                            s->p4_collect = 1; s->p4_fn = 0;
-                            s->p4_frame[s->p4_fn++] = 0;
-                            { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] frame start (sync run %d) at sym %ld\n", s->p4_ones_run, s->cma_qn); }
-                        }
-                        s->p4_ones_run = 0;
                     }
                 }
             }
@@ -2738,6 +2690,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         }
         s->srx_pqd = qd;
     }
+    if (s->p4_mode == 2) mu = 0.0;   /* MP: freeze the TRN-converged taps; free-running DD drifts them */
     for (i = 0; i < CMANT; i++) {
         double gi = ei*s->cma_bufi[i] + eq*s->cma_bufq[i];
         double gq = eq*s->cma_bufi[i] - ei*s->cma_bufq[i];
@@ -2820,11 +2773,11 @@ void V34_stream_decode_file(const char *path)
     rx.S = p.S; rx.use_high_carrier = 1;
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }
-    cma_dumpf = fopen("/tmp/stream-soft.txt","w");
+    cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
     fclose(f);
-    if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
+    if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
 }
 
 /* init the V34 constants. Should be launched once */

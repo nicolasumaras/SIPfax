@@ -849,8 +849,10 @@ static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
   /* compute the next trellis state */
   trans = (Y[3] << 3) | (Y[4] << 2) | (Y[2] << 1) | Y[1];
 
+  { extern FILE *gt_f; if (gt_f) fprintf(gt_f, "%d %d %d %d %d %d ", yy[0][0], yy[0][1], yy[1][0], yy[1][1], trans, s->conv_reg); }
   s->conv_reg = trellis_next_state(s->conv_nb_states, s->conv_reg, trans);
   Y[0] = s->conv_reg & 1;
+  { extern FILE *gt_f; if (gt_f) fprintf(gt_f, "%d %d\n", s->conv_reg, Y[0]); }
 
   /* super frame synchronisation pattern */
   if (s->sync_count == 0) {
@@ -1050,6 +1052,7 @@ static void encode_mapping_frame(V34DSPState *s)
 
 /* put a new baseband symbol in the tx queue */
 void (*g_symtap)(int, int) = 0;
+FILE *gt_f = 0;
 static void put_sym(V34DSPState *s, int si, int sq)
 {
     if (g_symtap) { g_symtap(si, sq); return; }
@@ -2845,9 +2848,10 @@ void V34_dataloop_test(void)
     V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
     tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
     g_prbs=1; g_txn=0; g_rxn=0; g_rx_state=&rx;
+    { extern FILE *gt_f; char *ge=getenv("SIPFAX_GTDUMP"); if(ge) gt_f=fopen(ge,"w"); }
     { extern void (*g_symtap)(int,int); g_symtap=dataloop_symsink;
       for(i=0;i<4000;i++) encode_mapping_frame(&tx);
-      g_symtap=0; }
+      g_symtap=0; { extern FILE *gt_f; if(gt_f){fclose(gt_f);gt_f=0;} } }
     fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d\n", R, g_txn, g_rxn);
     { FILE*ft=fopen("/tmp/dl_tx.txt","w"); for(i=0;i<g_txn;i++)fputc('0'+g_txb[i],ft); fclose(ft);
       FILE*fr=fopen("/tmp/dl_rx.txt","w"); for(i=0;i<g_rxn;i++)fputc('0'+g_rxb[i],fr); fclose(fr); }

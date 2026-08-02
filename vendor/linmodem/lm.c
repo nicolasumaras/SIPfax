@@ -532,6 +532,14 @@ int main(int argc, char **argv)
         char *sf = getenv("SIPFAX_STREAM_FILE");
         if (sf) { extern void V34_stream_decode_file(const char *); V34_stream_decode_file(sf); return 0; }
     }
+    {
+        char *dc = getenv("SIPFAX_DATACFG");
+        if (dc) { extern void V34_datacfg_dump(void); V34_datacfg_dump(); return 0; }
+    }
+    {
+        char *dl = getenv("SIPFAX_DATALOOP");
+        if (dl) { extern void V34_dataloop_test(void); V34_dataloop_test(); return 0; }
+    }
         char *df = getenv("SIPFAX_DECODE_FILE");
         if (df) {
             extern void V34_decode_file(const char *, int);

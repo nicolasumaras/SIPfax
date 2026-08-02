@@ -37,7 +37,8 @@ void print_bit_vector(char *str, u8 *tab, int n)
 
 
 static void agc_init(V34DSPState *s);
-static void baseband_decode(V34DSPState *s, int si, int sq);
+void baseband_decode_impl(V34DSPState *s, int si, int sq);
+void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
 int v34_softi[40000], v34_softq[40000];  /* soft equalized symbols */
@@ -1048,8 +1049,10 @@ static void encode_mapping_frame(V34DSPState *s)
 
 
 /* put a new baseband symbol in the tx queue */
+void (*g_symtap)(int, int) = 0;
 static void put_sym(V34DSPState *s, int si, int sq)
 {
+    if (g_symtap) { g_symtap(si, sq); return; }
     s->tx_buf[s->tx_buf_ptr][0] = (si * s->tx_amp) >> 7;
     s->tx_buf[s->tx_buf_ptr][1] = (sq * s->tx_amp) >> 7;
 
@@ -1589,8 +1592,9 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     k = trellis_ptr;
     k--;
     if (k < 0) k = TRELLIS_LENGTH-1;
-    j = 0; /* arbitrary path selected : all the paths converge to same
-              decoded bits*/
+    /* start traceback from the MINIMUM-metric survivor (not arbitrary j=0):
+       survivors have not necessarily merged, so the wrong start gives wrong bits */
+    { int bs=0, be=s->state_error[0], st; for(st=1;st<s->conv_nb_states;st++) if(s->state_error[st]<be){be=s->state_error[st];bs=st;} j=bs; }
     for(i=0;i<(TRELLIS_LENGTH-1);i++) {
         j = s->state_path[j][k];
         k--;
@@ -1599,10 +1603,16 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     u0 = s->u0_memory[trellis_ptr];
     q = p + (s->state_decision[j][k] * 4);
 #if 1
-    yout[0][0] = tcm_decision(q[0], s->state_memory[trellis_ptr][0]);
-    yout[0][1] = tcm_decision(q[1], s->state_memory[trellis_ptr][1]);
-    yout[1][0] = tcm_decision(q[2], s->state_memory[trellis_ptr][2]);
-    yout[1][1] = tcm_decision(q[3], s->state_memory[trellis_ptr][3]);
+    { char *nt=getenv("SIPFAX_NOTRELLIS");
+      if (nt && atoi(nt)) {
+        yout[0][0] = s->state_memory[trellis_ptr][0]; yout[0][1] = s->state_memory[trellis_ptr][1];
+        yout[1][0] = s->state_memory[trellis_ptr][2]; yout[1][1] = s->state_memory[trellis_ptr][3];
+      } else {
+        yout[0][0] = tcm_decision(q[0], s->state_memory[trellis_ptr][0]);
+        yout[0][1] = tcm_decision(q[1], s->state_memory[trellis_ptr][1]);
+        yout[1][0] = tcm_decision(q[2], s->state_memory[trellis_ptr][2]);
+        yout[1][1] = tcm_decision(q[3], s->state_memory[trellis_ptr][3]);
+      } }
     /* undo the rotation */    
     if ((s->state_decision[j][k] >> 7)) {
         x = yout[1][1];
@@ -1816,7 +1826,8 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
   }
 }
 
-static void baseband_decode(V34DSPState *s, int si, int sq)
+void baseband_decode_pub(V34DSPState *s, int si, int sq) { extern void baseband_decode_impl(V34DSPState*,int,int); baseband_decode_impl(s,si,sq); }
+void baseband_decode_impl(V34DSPState *s, int si, int sq)
 {
     s16 y[2][2];
     static int delay = 0;
@@ -2232,7 +2243,7 @@ static void V34_demod(V34DSPState *s,
                             fprintf(stderr,"[eq] sym%d si=%d sq=%d ang=%.2f qd=%d\n",v34_symdump_n,si,sq,ang,qd);
                     }
                     if (!v34_dbg && ++ptr > (28 * 2)) {
-                        baseband_decode(s, si, sq);
+                        baseband_decode_impl(s, si, sq);
                     }
                 }
                 break;
@@ -2792,6 +2803,60 @@ void V34_stream_decode_file(const char *path)
     while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
     fclose(f);
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
+}
+
+
+void V34_datacfg_dump(void)
+{
+    extern int v34_dbg;
+    V34State p; static V34DSPState s;
+    char *e; int R = 16800, i;
+    memset(&p, 0, sizeof(p)); memset(&s, 0, sizeof(s));
+    e = getenv("SIPFAX_DATA_R"); if (e) R = atoi(e);
+    p.S = V34_S3429; p.R = R; p.use_high_carrier = 1; p.calling = 0;
+    p.conv_nb_states = 64; p.expanded_shape = 0; p.use_non_linear = 0; p.use_aux_channel = 0;
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    V34_init_low(&s, &p, 0);
+    fprintf(stderr, "[datacfg] R=%d S=%d symrate=%.1f carrier=%.1f\n", s.R, s.S, s.symbol_rate, s.carrier_freq);
+    fprintf(stderr, "[datacfg] J=%d P=%d N=%d b=%d r=%d W=%d K=%d q=%d M=%d L=%d conv_states=%d\n",
+            s.J, s.P, s.N, s.b, s.r, s.W, s.K, s.q, s.M, s.L, s.conv_nb_states);
+    { FILE *f = fopen("/tmp/constel.txt", "w");
+      for (i = 0; i < s.L; i++) fprintf(f, "%d %d\n", s.constellation[i][0], s.constellation[i][1]);
+      fclose(f);
+      fprintf(stderr, "[datacfg] dumped %d constellation points -> /tmp/constel.txt\n", s.L); }
+}
+
+
+static V34DSPState *g_rx_state;
+static void dataloop_symsink(int si, int sq) { extern void baseband_decode_pub(V34DSPState*,int,int); baseband_decode_pub(g_rx_state, si, sq); }
+static unsigned int g_prbs;
+static u8 g_txb[200000], g_rxb[200000]; static int g_txn, g_rxn;
+static int dataloop_src(void *o) { int b = ((g_prbs>>21)^(g_prbs>>20))&1; g_prbs=((g_prbs<<1)|b)&0x7fffff; if(!g_prbs)g_prbs=1; if(g_txn<200000)g_txb[g_txn++]=(u8)b; return b; }
+static void dataloop_sink(void *o, int b) { if(g_rxn<200000)g_rxb[g_rxn++]=(u8)b; }
+void V34_dataloop_test(void)
+{
+    static V34DSPState tx, rx; V34State pt, pr; int i, R=16800; char *e;
+    e=getenv("SIPFAX_DATA_R"); if(e) R=atoi(e);
+    memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
+    { extern void dsp_init(void); dsp_init(); } V34_static_init();
+    pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
+    V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
+    tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
+    g_prbs=1; g_txn=0; g_rxn=0; g_rx_state=&rx;
+    { extern void (*g_symtap)(int,int); g_symtap=dataloop_symsink;
+      for(i=0;i<4000;i++) encode_mapping_frame(&tx);
+      g_symtap=0; }
+    fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d\n", R, g_txn, g_rxn);
+    { FILE*ft=fopen("/tmp/dl_tx.txt","w"); for(i=0;i<g_txn;i++)fputc('0'+g_txb[i],ft); fclose(ft);
+      FILE*fr=fopen("/tmp/dl_rx.txt","w"); for(i=0;i<g_rxn;i++)fputc('0'+g_rxb[i],fr); fclose(fr); }
+    { int best=-1,bestlag=0,lag;
+      for(lag=0;lag<600;lag++){ int mt=0,cn=0;
+        for(i=0;i+lag<g_rxn && i<g_txn && i<3000;i++){ if(g_txb[i]==g_rxb[i+lag])mt++; cn++; }
+        if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
+      { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
+        fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1)); } }
 }
 
 /* init the V34 constants. Should be launched once */

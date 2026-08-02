@@ -188,6 +188,17 @@ typedef struct V34DSPState {
     unsigned int jh_reg[8]; int srx_pqd; unsigned int srx_regD;
     int jh_n, jh_wait;
     double srx_th, srx_s4i, srx_s4q; int srx_blkn;
+    /* Phase-4 receiver + TX gating */
+    int p4_mode;                 /* 0=phase3, 1=hunt caller P4 TRN, 2=MP collect */
+    int p4_trn_syms;             /* caller TRN symbols since re-lock */
+    unsigned int p4_ybits;       /* received-bit history for GPC FIR descramble */
+    int p4_ones_run, p4_collect, p4_fn;
+    u8 p4_frame[224];
+    u8 p4_last[64]; int p4_last_valid;
+    int p4_mp_rx, p4_mpp_rx, p4_e_rx;
+    int p4_mp_rate_ca, p4_mp_rate_ac; unsigned int p4_mp_mask;
+    int p4_trn_tx; int p4_mp_hunt_rx;
+    u8 p4_ring[4096]; int p4_rn; int p4_try;
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;

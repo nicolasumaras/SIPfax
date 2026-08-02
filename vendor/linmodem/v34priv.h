@@ -190,7 +190,7 @@ typedef struct V34DSPState {
     double srx_th, srx_s4i, srx_s4q; int srx_blkn;
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;
-    int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q;
+    int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 
     int dbg_last; long dbg_n; int dbg_last2;
     int trn_rounds;        /* answer TRN repetitions before J */

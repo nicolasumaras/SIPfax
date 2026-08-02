@@ -1183,7 +1183,8 @@ static void V34_send_TRN(V34DSPState *s)
         y1 = s->constellation[q][1] << 7;
         z = (I2 << 1) | I1;
         { extern int v34_dbg; static int tn=0; if(v34_dbg && tn<40){fprintf(stderr,"%d",z); if(++tn==40)fprintf(stderr," <-TRN z\n");} }
-        rotate_clockwise(x, y, x1, y1, z);
+        /* spec 10.1.3.8: rotate CLOCKWISE by z*90; the macro rotates CCW -> negate */
+        rotate_clockwise(x, y, x1, y1, (4 - z) & 3);
         put_sym(s, x, y);
     }
     s->Z_1 = z; /* the last value z is used for the next sequence */
@@ -1255,7 +1256,8 @@ static void V34_mod_MP(V34DSPState *s, u8 *buf, int size, int is_16states)
         { extern int v34_dbg; static int jn=0; if(v34_dbg && jn<40){fprintf(stderr,"[b%d/i%d%d]",(int)(p-buf),I1,I2);} }
         z = (((I2 << 1) | I1) + z) & 3;
         { extern int v34_dbg; static int jn=0; if(v34_dbg && jn<40){fprintf(stderr,"%d",z); if(++jn==40)fprintf(stderr," <-J z\n");} }
-        rotate_clockwise(x, y, x1, y1, z);
+        /* spec 10.1.3.3: rotate CLOCKWISE by Zn*90 -> negate for the CCW macro */
+        rotate_clockwise(x, y, x1, y1, (4 - z) & 3);
         put_sym(s, x, y);
     }
     s->Z_1 = z;
@@ -2435,6 +2437,9 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
           else return;
       }
     }
+    { double p2 = yi*yi + yq*yq;                      /* squelch: hold everything in silence */
+      s->cma_sq = 0.99*s->cma_sq + 0.01*p2;
+      if (s->cma_started && s->cma_sq < 0.05*s->cma_pow) return; }
     g = (s->cma_pow > 1e-12) ? 1.0/sqrt(s->cma_pow) : 1.0;
     yi *= g; yq *= g;
     for (i = CMANT-1; i > 0; i--) { s->cma_bufi[i] = s->cma_bufi[i-1]; s->cma_bufq[i] = s->cma_bufq[i-1]; }
@@ -2530,7 +2535,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         qd = (pi_ >= 0) ? (pq_ >= 0 ? 1 : 0) : (pq_ >= 0 ? 2 : 3);
         s->cma_q[s->cma_qn & 127] = qd; s->cma_qn++;
         for (r = 0; r < 4; r++) {
-            int z = (qd - r) & 3; b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;
+            int z = (r - qd) & 3; b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;   /* spec CW */
             regsnap[r] = s->srx_reg4[r];
             for (k = 0; k < 2; k++) {
                 int pred = ((s->srx_reg4[r] >> 22) & 1) ^ 1;
@@ -2553,7 +2558,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             rr = (rr << 1) & 0x7fffff; if (b2s[w][0]) rr ^= poly;
             pp1 = ((rr >> 22) & 1) ^ 1;
             zx = (pp1 << 1) | pp0;
-            tq2 = (zx + w) & 3;
+            tq2 = (w - zx) & 3;   /* spec CW inverse */
             ti = TI[tq2]*R; tq_ = TQ[tq2]*R;
             er = ti - pi_; eqr = tq_ - pq_;
             c2 = cos(s->srx_th); s2 = sin(s->srx_th);
@@ -2573,7 +2578,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    the DIFFERENTIAL dibit bits (the true scrambler outputs during J; it
                    self-syncs within 23 bits of J starting). 8 pattern-phase scorers run
                    against it; a phase >=28/32 while TRN agreement is broken -> J. */
-                int dq_ = (qd - s->srx_pqd) & 3; int jb0 = dq_ & 1, jb1 = (dq_ >> 1) & 1;
+                int dq_ = (s->srx_pqd - qd) & 3; int jb0 = dq_ & 1, jb1 = (dq_ >> 1) & 1;   /* spec CW */
                 unsigned int rD0 = s->srx_regD, rD1;
                 rD1 = (rD0 << 1) & 0x7fffff; if (jb0) rD1 ^= poly;
                 s->srx_regD = (rD1 << 1) & 0x7fffff; if (jb1) s->srx_regD ^= poly;
@@ -2610,6 +2615,7 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
         int i; for (i=0;i<CMANT;i++){s->cma_wi[i]=s->cma_wq[i]=s->cma_bufi[i]=s->cma_bufq[i]=0;}
         s->cma_wi[CMANT/2] = 1.0; s->cma_pow = 0.0; s->cma_warm = 0;
         s->cma_ncma = 1000; { char *e=getenv("SIPFAX_CMA_N"); if (e) s->cma_ncma = atoi(e); }
+        { char *e = getenv("SIPFAX_RX_DBG"); if (e && atoi(e)) { extern int v34_dbg; v34_dbg = 1; } }
         { char *e=getenv("SIPFAX_CMA_TPHASE"); if (e) s->cma_residx = atof(e); }
         { char *e=getenv("SIPFAX_CMA_POLY"); if (e && atoi(e)==1) { cma_t1=5; cma_t2=23; } }
         s->cma_init = 1;

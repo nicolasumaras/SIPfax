@@ -200,3 +200,48 @@ lock TRN (3.5% EVM above). Sequence:
 3. Carry the trained taps into data mode, add carrier/timing tracking and the 44.5 ppm clock
    correction, then slice against the 48-point constellation.
 4. Only then judge the residual EVM - and only then is the trellis decoder meaningful.
+
+## 9. TRN-trained equalization works - and the real blocker is now protocol, not DSP
+
+`v34_rx.py` adds the trained equalizer (T/2 fractionally-spaced, CMA warm-up ->
+decision-directed, multi-pass, with carrier PLL, AGC and the measured clock correction).
+
+On the linmodem capture, against the *known* Phase-3/Phase-4 signals:
+
+| region | 4-point EVM | 16-point EVM | clock |
+|---|---|---|---|
+| Phase-3 TRN (11.6-14.6 s) | **2.91%** | 22.46% | +45.2 ppm |
+| Phase-4 MP (15.6-18.6 s) | **3.49%** | 22.36% | +42.6 ppm |
+
+**~3% EVM is ~30 dB** - the receiver core works on real V.34 audio. The 16-point column
+rules out a 16-point constellation: both are 4-point at 3429 baud.
+
+### What this finally explains
+
+Cross-referencing the call log timestamps, the linmodem capture decomposes as:
+
+| capture time | content |
+|---|---|
+| 11 - 15 s | caller Phase 3 (S / PP / TRN / J) |
+| 15 - 19 s | caller MP |
+| 19.4 s + | 1200 Hz V.8 INFO carrier - the caller gives up |
+
+**There is no data mode in the capture at all.** linmodem never completes Phase 4, so the
+caller never enters data mode. Every earlier attempt to fit a 48-point data constellation
+to "the data segment" was fitting a lattice to TRN and MP - which is exactly why no
+constellation, rate, modulo, or warp ever fit, and why the "~30 dB gap" looked so strange.
+
+### The blocker has moved
+
+The DSP receiver core is built and validated end-to-end on real audio (~3% EVM). It is not
+yet a *data-mode* decoder, but that is no longer the limiting factor:
+
+- **To decode data we first need a capture that contains data**, which requires linmodem to
+  complete Phase 4 (E / B1) so the caller actually enters data mode. That is protocol work
+  in the C implementation, not DSP.
+- The slmodem reference does reach data mode, but at 33.6 with precoding and a large
+  shell-shaped constellation (kurtosis 1.68); decoding it additionally needs the precoder
+  modulo and the full mapper.
+
+Note: "descramble TRN to all ones" is an unreliable check here (~50% even on known-valid
+TRN). Use EVM / SER to the nearest ideal point instead.

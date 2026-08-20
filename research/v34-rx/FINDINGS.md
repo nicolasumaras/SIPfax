@@ -640,3 +640,54 @@ The 16-point MP path already exists and is decoupled from TRN (`mp_16point`, sec
 it can be enabled without the TRN regression that sank the first attempt. Given that six
 single-variable tests produced nothing, the efficient move is to match the known-good peer
 on all of these fields at once, then narrow down afterwards if it works.
+
+## 18. The 16-point regression explained - and the blocker is finally well-defined (2026-08-20)
+
+Testing `SIPFAX_MP_SLCOMPAT=1` live produced *no* MP exchange at all - the same signature as
+the first 16-point attempt. Two measurements explain it completely.
+
+**1. Our 16-point MP transmission is correct.** Decoding our own transmitted audio with the
+new decoder: **86-97 frames per window, valid CRC**, carrying exactly slmodem's field values
+(`ca=16800 ac=16800 trel=0 shape=1 mask=0x3fff`). So the 16-point modulation works and we
+are now sending, field for field and constellation for constellation, the MP that this
+caller acknowledges from slmodem.
+
+**2. The caller follows our J.** Classifying the caller's Phase-4 signal:
+
+| we signalled | caller's Phase-4 signal |
+|---|---|
+| J4POINTS | 4-point |
+| **J16POINTS** | **16-point** (4pt-EVM 45% vs 16pt-EVM 9%) |
+
+This is 10.1.3.3: *"The scrambled bits are mapped to a 4- or 16-point 2D constellation
+depending on the signal J."* J governs the constellation for the link, so signalling
+16-point makes the **caller's** TRN and MP 16-point too - and **our receiver only handles
+4-point**. It therefore never detects the caller's TRN, never enters MP hunt, and never
+reads its MP. Hence "TRN done (6 chunks)" (the timeout path) and zero MP frames.
+
+### What this resolves
+
+The regression was never evidence against 16-point MP. It was our own receiver being unable
+to follow the caller into the constellation we had just asked it to use. Both 16-point
+attempts failed for this reason, and the TRN/MP decoupling introduced earlier made it worse
+by putting our J (16-point) at odds with our own TRN (4-point).
+
+It also offers the first plausible explanation for the original symptom: slmodem, which this
+caller acknowledges, signals 16-point. We signalled 4-point on every call where the caller
+sent us valid MP - and it never acknowledged. The caller may simply not accept a 4-point MP
+from an answer modem, even though it sends 4-point itself.
+
+### The blocker, now precisely defined
+
+To send the MP that gets acknowledged, the receiver has to follow. Required:
+
+1. **16-point TRN detection** in the C receiver (currently 4-point only) - this is what
+   breaks first and prevents MP hunt.
+2. **16-point MP decoding** in the C receiver. The algorithm is already written and
+   validated in `mp_decode.py`: 4 bits/symbol, I1/I2 from the differential rotation and
+   Q1/Q2 from the base-point index, rotation-invariant.
+3. Keep `is_16states` consistent for J, TRN and MP - they are one setting, not three. The
+   decoupling added earlier should be reverted once the receiver can handle 16-point.
+
+That is concrete, offline-verifiable work against captures already in the repo: this call's
+capture contains a real 16-point caller TRN and MP to develop against.

@@ -44,36 +44,62 @@ repeating MP frames). But no lattice model fits it:
 - 0.786 is almost exactly the theoretical value (0.816) for points distributed *uniformly*
   with respect to the lattice.
 
-## 4. The signature points at Tomlinson-Harashima precoding
+## 4. Tomlinson-Harashima precoding: HYPOTHESISED, THEN RULED OUT
 
 | distribution | kurtosis |
 |---|---|
 | 48-point QAM, uniform over points | 1.337 |
-| dense 960-point QAM | 1.333 |
-| **uniform over a square** | **1.397** |
+| **uniform over a square** (TH precoder signature) | 1.397 |
 | **measured (real capture)** | **1.390** |
+| **synthetic 48-QAM degraded to ~13 dB** | **1.391** |
 
-Uniform-over-a-square is the TH precoder signature: the precoder output `x(n) = y(n) - p(n)`
-fills the modulo region rather than sitting on the constellation lattice.
+The measured kurtosis first looked like the TH precoder signature (uniform-over-a-square).
+**That inference was wrong.** A plain 48-QAM degraded to ~13 dB reproduces *both* the
+kurtosis (1.391 vs 1.390) *and* the EVM (15.1% vs 16.2%). The kurtosis coincidence was
+noise inflation, not a precoder.
 
-**This also explains why every equalizer attempt floored at ~15%.** A precoded signal only
-returns to the lattice *after* the channel is equalized, and the slicer must then apply the
-modulo. Blind CMA / decision-directed adaptation against a plain lattice slicer cannot
-converge on a precoded signal - which is exactly what we observed, repeatedly.
+Independently, the MP transmit path was audited and is **correct**, which removes the
+mechanism entirely:
 
-Open question: we advertise `h=0`, so the caller should *not* be precoding. Either our MP's
-precoder-coefficient fields are being read as non-zero by the caller (a bit-layout bug in
-`V34_send_MP`, worth auditing against Table 21 - note the h fields sit behind start bits),
-or the caller precodes regardless.
+- Encoder bit offsets tally to exactly 188 bits and match our CRC-validated decoder on
+  every field: `type@18, rate_ca@20, rate_ac@24, trellis@29, ack@33, CRC@171`.
+  The CRC landing at 171 pins every preceding field width - if an h field were mis-sized
+  the CRC would land elsewhere and real modem frames would not verify (they do).
+- h-field offsets: `h1r@52 h1i@69 h2r@86 h2i@103 h3r@120 h3i@137`.
+- `s->h` is only ever `memset` to 0 and never assigned, so we genuinely transmit h=0.
 
-## 5. Next steps
+**Conclusion: we do not request precoding and the caller is not precoding.**
 
-1. **Audit our transmitted MP h-field bit layout** against Table 21/V.34. If the caller reads
-   garbage coefficients it will precode with them, which matches everything above.
-2. **Train the equalizer on Phase-3 TRN** (known sequence, sent *before* precoding starts) and
-   carry the trained taps into data mode, instead of blind CMA. This is what a real V.34
-   receiver does and is the only way to converge on a precoded signal.
-3. Then add the **modulo slicer** (V.34 9.6.2: `c(n)` components are integer multiples of
-   `2w`, `w=1` for `b<56`) ahead of the trellis decoder.
-4. Correct the ~42 ppm symbol-clock offset with a tracking loop (measured, currently
-   uncompensated; harmless over 8 s, not over a long connection).
+## 5. Where it actually stands
+
+Best converged result on the real 8 s, with everything fixed (validated front end,
+Oerder-Meyr timing, 44.5 ppm drift correction, multi-pass equalizer run to convergence):
+
+| configuration | EVM |
+|---|---|
+| plain 48-QAM slicer | 13.15% (converged, stable over 6 passes) |
+| + compressive radial warp `u(1+a|u|^2)`, a=-0.16 | 9.54% |
+
+So the signal behaves like a 48-QAM at only ~13 dB effective SNR **on a 44 dB line** - a
+~30 dB gap that is NOT explained by timing, carrier, equalizer convergence, constellation
+size, or precoding. The compressive warp helping (13.2% -> 9.5%, monotonic, and still
+improving at the fold limit of the cubic model) suggests a genuine *saturating*
+nonlinearity somewhere in the path, but that is not yet pinned down.
+
+Two prior-free probes disagree about what the symbols are, so neither is trusted yet:
+matched-filter-only gives kurtosis 1.39 (QAM-like, ~48 points), while a CMA-only
+equalizer gives kurtosis 1.002 and 4 clusters (constant modulus) - the latter is
+most likely CMA collapsing after repeated passes.
+
+## 6. Next steps
+
+1. **Capture slmodem's data-mode receive audio as a control.** slmodem decodes this exact
+   path at 33.6, so running the same pipeline over its receive signal answers the question
+   this analysis keeps tripping over: if the pipeline shows clean constellation structure
+   there, the pipeline is sound and the linmodem call's signal is genuinely degraded; if it
+   does not, the pipeline still has a defect. This is the missing control experiment.
+2. Identify the compressive nonlinearity (level/clipping in the ATA or a companding
+   mismatch) - inverting it is worth ~3.5 dB already.
+3. Train the equalizer on Phase-3 TRN rather than blind CMA (blind adaptation on a dense
+   constellation has been unreliable throughout this work).
+4. Correct the measured 44.5 ppm symbol-clock offset with a tracking loop.

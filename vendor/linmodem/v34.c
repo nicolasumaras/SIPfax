@@ -1284,8 +1284,19 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
        its MP' we never advance to E/B1. Before the caller's MP arrives we fall
        back to our own maximum. */
     {
-        int r_ca, r_ac, trel, mi;
+        int r_ca, r_ac, trel, mi, shape = 0;
         unsigned int msk;
+        {   /* SIPFAX: slmodem-compatible MP. Decoding slmodem's own transmission (which
+               this caller acknowledges) shows it advertises its OWN capabilities rather
+               than mirroring the caller: 16-point MP, ca=ac=16800, trellis 16-state,
+               expanded shaping, mask 0x3fff. */
+            char *sl = getenv("SIPFAX_MP_SLCOMPAT");
+            if (sl && atoi(sl)) {
+                r_ca = 7; r_ac = 7; trel = 0; msk = 0x3fff;
+                shape = 1;
+                goto mp_params_done;
+            }
+        }
         if (s->p4_mp_rx && s->p4_mp_rate_ca > 0 && s->p4_mp_rate_ac > 0 && s->p4_mp_mask != 0) {
             r_ca = s->p4_mp_rate_ca;
             r_ac = s->p4_mp_rate_ac;
@@ -1294,6 +1305,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         } else {
             r_ca = 12; r_ac = 12; trel = 0; msk = 0x0fff;
         }
+        mp_params_done:
         put_bits(&p, 17, 0x1ffff); /* frame sync */
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
@@ -1303,7 +1315,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         put_bits(&p, 1, 0); /* no aux channel */
         put_bits(&p, 2, trel); /* trellis: match the caller's selection */
         put_bits(&p, 1, 0); /* non linear encoder disabled */
-        put_bits(&p, 1, 0); /* constellation shaping, 0=minimum */
+        put_bits(&p, 1, shape); /* constellation shaping (1=expanded, as slmodem) */
         put_bits(&p, 1, do_ack); /* acknowledge bit */
 
         put_bits(&p, 1, 0); /* start bit */
@@ -1527,8 +1539,21 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
         case V34_STARTUP4_MP:
             V34_send_MP(s, 1, 0);                /* repeat until caller's MP arrives */
             if (s->p4_mp_rx) {
-                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: caller MP in -> MP'\n"); }
-                s->state = V34_STARTUP4_MPP;
+                /* SIPFAX: our parameters only become the negotiated ones once the caller's
+                   MP has been read. Switching to MP' at that instant means the caller only
+                   ever sees ack=0 frames carrying the FALLBACK parameters, and then ack=1
+                   frames carrying different ones. Send a few MP(ack=0) frames with the
+                   settled parameters first, so what it acknowledges is stable. */
+                if (s->mp_hold == 0) {
+                    char *mh = getenv("SIPFAX_MP_HOLD");
+                    s->mp_hold = (mh ? atoi(mh) : 8);
+                    if (s->mp_hold < 1) s->mp_hold = 1;
+                    { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: caller MP in -> holding MP(ack=0) for %d frames with negotiated params\n", s->mp_hold); }
+                }
+                if (--s->mp_hold <= 0) {
+                    { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: -> MP'\n"); }
+                    s->state = V34_STARTUP4_MPP;
+                }
             }
             break;
         case V34_STARTUP4_MPP:
@@ -1563,7 +1588,8 @@ static void V34_mod_init(V34DSPState *s, V34State *p)
                        4-point is clearly acceptable on this link. SIPFAX_MP16=1 selects
                        16-point to test that lead without a rebuild. */
                 char *m16 = getenv("SIPFAX_MP16");
-                s->mp_16point = (m16 && atoi(m16)) ? 1 : 0;
+                char *slc = getenv("SIPFAX_MP_SLCOMPAT");
+                s->mp_16point = ((m16 && atoi(m16)) || (slc && atoi(slc))) ? 1 : 0;
             }
 }
 

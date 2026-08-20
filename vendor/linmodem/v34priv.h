@@ -170,6 +170,7 @@ typedef struct V34DSPState {
     int state;
     int is_16states;
     int mp_16point;
+    int mp_hold;   /* SIPFAX: MP(ack=0) frames still to send with settled params */
     unsigned long long jph_hist[8]; /* SIPFAX: J' phase scorers */
     int jp_hunt;                    /* SIPFAX: J seen, waiting for J' */
     long jp_since;                  /* SIPFAX: symbols since J */ /* SIPFAX: MP/J constellation, independent of TRN */ /* 16 states required in the startup sequences */

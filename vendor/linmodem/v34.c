@@ -3474,163 +3474,6 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
     }
     s->cma_cnt++;
 }
-void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
-{
-    double FCarr = 24000.0/7.0*4.0/7.0, FS = 8000.0, BAUD = 24000.0/7.0;
-    double SPS = FS/BAUD, dcinc = 2.0*M_PI*FCarr/FS, step = SPS/2.0;
-    unsigned int k;
-    if (!s->cma_init) {
-        int i; for (i=0;i<CMANT;i++){s->cma_wi[i]=s->cma_wq[i]=s->cma_bufi[i]=s->cma_bufq[i]=0;}
-        s->cma_wi[CMANT/2] = 1.0; s->cma_pow = 0.0; s->cma_warm = 0;
-        s->cma_ncma = 1000; { char *e=getenv("SIPFAX_CMA_N"); if (e) s->cma_ncma = atoi(e); }
-        { char *e = getenv("SIPFAX_RX_DBG"); if (e && atoi(e)) { extern int v34_dbg; v34_dbg = 1; } }
-        { char *e=getenv("SIPFAX_CMA_TPHASE"); if (e) s->cma_residx = atof(e); }
-        { char *e=getenv("SIPFAX_CMA_POLY"); if (e && atoi(e)==1) { cma_t1=5; cma_t2=23; } }
-        s->cma_init = 1;
-    }
-    /* RRC matched filter (beta=0.15, span 12 sym) at 8 kHz: rejects the -2fc
-       image after downconversion (the un-filtered image was in-band at the T/2
-       rate and corrupted symbol decisions) and provides proper matched filtering. */
-    static double mft[57]; static int mfinit = 0;
-    if (!mfinit) {
-        int t2; double beta = 0.15, sum2 = 0.0;
-        for (t2 = 0; t2 < 57; t2++) {
-            double ti = (t2 - 28) / SPS, v;
-            if (fabs(ti) < 1e-9) v = 1.0 - beta + 4.0*beta/M_PI;
-            else {
-                double dnm = M_PI*ti*(1.0 - (4.0*beta*ti)*(4.0*beta*ti));
-                if (fabs(dnm) < 1e-9) dnm = 1e-9;
-                v = (sin(M_PI*ti*(1.0-beta)) + 4.0*beta*ti*cos(M_PI*ti*(1.0+beta))) / dnm;
-            }
-            mft[t2] = v; sum2 += v*v;
-        }
-        sum2 = sqrt(sum2);
-        for (t2 = 0; t2 < 57; t2++) mft[t2] /= sum2;
-        mfinit = 1;
-    }
-    /* EXACT front-end: FC/FS = 12/49 and T/2 step = 7/6 are rational, so both the
-       carrier phase and the resampler grid are computed with INTEGER bookkeeping.
-       The old float accumulators drifted; each one-sample slip rotated symbols by
-       2*pi*12/49 = 88.15 deg, which corrupted the symbol sequence downstream. */
-    static double c49[49], s49[49]; static int lut49 = 0;
-    if (!lut49) { int li; for (li = 0; li < 49; li++) { c49[li] = cos(2.0*M_PI*li/49.0); s49[li] = sin(2.0*M_PI*li/49.0); } lut49 = 1; }
-    for (k = 0; k < nb; k++) {
-        double smp = (double)samples[k];
-        double rbi = smp*c49[s->cma_cphi], rbq = -smp*s49[s->cma_cphi];
-        double cbi, cbq; int mk;
-        s->cma_cphi += 12; if (s->cma_cphi >= 49) s->cma_cphi -= 49;
-        s->cma_mfi[s->cma_mfp & 63] = rbi; s->cma_mfq[s->cma_mfp & 63] = rbq; s->cma_mfp++;
-        cbi = cbq = 0.0;
-        for (mk = 0; mk < 57; mk++) {
-            int ix = (s->cma_mfp - 1 - mk) & 63;
-            cbi += mft[mk]*s->cma_mfi[ix]; cbq += mft[mk]*s->cma_mfq[ix];
-        }
-        for (;;) {              /* exact 7:6 grid: output m lives at input position 7m/6 */
-            long q = 7*s->cma_m; long ip = q/6; int fr = (int)(q%6);
-            long need = ip + (fr ? 1 : 0);
-            double f, vi, vq;
-            if (need > s->cma_n) break;
-            if (fr == 0) { vi = cbi; vq = cbq; }
-            else { f = fr/6.0; vi = s->cma_pbi*(1.0-f) + cbi*f; vq = s->cma_pbq*(1.0-f) + cbq*f; }
-            V34_cma_t2sample(s, vi, vq);
-            s->cma_m++;
-        }
-        s->cma_pbi = cbi; s->cma_pbq = cbq; s->cma_n++;
-    }
-}
-/* offline stream harness: SIPFAX_STREAM_FILE=path */
-void V34_stream_decode_file(const char *path)
-{
-    extern int v34_dbg;
-    V34State p; static V34DSPState rx; s16 buf[512]; FILE *f; int n, i;
-    memset(&p, 0, sizeof(p)); memset(&rx, 0, sizeof(rx));
-    p.S = V34_S3429; p.R = 33600; p.conv_nb_states = 16; p.use_high_carrier = 1; p.calling = 0;
-    { extern void dsp_init(void); dsp_init(); } V34_static_init();
-    rx.S = p.S; rx.use_high_carrier = 1;
-    v34_dbg = 1;
-    f = fopen(path, "rb"); if (!f) { perror(path); return; }
-    cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
-    { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
-    while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
-    fclose(f);
-    if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
-}
-
-
-void V34_datacfg_dump(void)
-{
-    extern int v34_dbg;
-    V34State p; static V34DSPState s;
-    char *e; int R = 16800, i;
-    memset(&p, 0, sizeof(p)); memset(&s, 0, sizeof(s));
-    e = getenv("SIPFAX_DATA_R"); if (e) R = atoi(e);
-    p.S = V34_S3429; p.R = R; p.use_high_carrier = 1; p.calling = 0;
-    p.conv_nb_states = 64; p.expanded_shape = 0; p.use_non_linear = 0; p.use_aux_channel = 0;
-    { extern void dsp_init(void); dsp_init(); }
-    V34_static_init();
-    V34_init_low(&s, &p, 0);
-    fprintf(stderr, "[datacfg] R=%d S=%d symrate=%.1f carrier=%.1f\n", s.R, s.S, s.symbol_rate, s.carrier_freq);
-    fprintf(stderr, "[datacfg] J=%d P=%d N=%d b=%d r=%d W=%d K=%d q=%d M=%d L=%d conv_states=%d\n",
-            s.J, s.P, s.N, s.b, s.r, s.W, s.K, s.q, s.M, s.L, s.conv_nb_states);
-    { FILE *f = fopen("/tmp/constel.txt", "w");
-      for (i = 0; i < s.L; i++) fprintf(f, "%d %d\n", s.constellation[i][0], s.constellation[i][1]);
-      fclose(f);
-      fprintf(stderr, "[datacfg] dumped %d constellation points -> /tmp/constel.txt\n", s.L); }
-}
-
-
-static V34DSPState *g_rx_state;
-static void dataloop_symsink(int si, int sq) { extern void baseband_decode_pub(V34DSPState*,int,int); baseband_decode_pub(g_rx_state, si, sq); }
-static unsigned int g_prbs;
-static u8 g_txb[200000], g_rxb[200000]; static int g_txn, g_rxn;
-static int dataloop_src(void *o) { int b = ((g_prbs>>21)^(g_prbs>>20))&1; g_prbs=((g_prbs<<1)|b)&0x7fffff; if(!g_prbs)g_prbs=1; if(g_txn<200000)g_txb[g_txn++]=(u8)b; return b; }
-static void dataloop_sink(void *o, int b) { if(g_rxn<200000)g_rxb[g_rxn++]=(u8)b; }
-void V34_dataloop_test(void)
-{
-    static V34DSPState tx, rx; V34State pt, pr; int i, R=16800; char *e;
-    e=getenv("SIPFAX_DATA_R"); if(e) R=atoi(e);
-    memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
-    { extern void dsp_init(void); dsp_init(); } V34_static_init();
-    pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
-    memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
-    V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
-    tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
-    g_prbs=1; g_txn=0; g_rxn=0; g_rx_state=&rx;
-    { extern FILE *gt_f; char *ge=getenv("SIPFAX_GTDUMP"); if(ge) gt_f=fopen(ge,"w"); }
-    { extern void (*g_symtap)(int,int); g_symtap=dataloop_symsink;
-      for(i=0;i<4000;i++) encode_mapping_frame(&tx);
-      g_symtap=0; { extern FILE *gt_f; if(gt_f){fclose(gt_f);gt_f=0;} } }
-    fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d\n", R, g_txn, g_rxn);
-    { FILE*ft=fopen("/tmp/dl_tx.txt","w"); for(i=0;i<g_txn;i++)fputc('0'+g_txb[i],ft); fclose(ft);
-      FILE*fr=fopen("/tmp/dl_rx.txt","w"); for(i=0;i<g_rxn;i++)fputc('0'+g_rxb[i],fr); fclose(fr); }
-    { int best=-1,bestlag=0,lag;
-      for(lag=0;lag<600;lag++){ int mt=0,cn=0;
-        for(i=0;i+lag<g_rxn && i<g_txn && i<3000;i++){ if(g_txb[i]==g_rxb[i+lag])mt++; cn++; }
-        if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
-      { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
-        fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1)); } }
-}
-
-
-void V34_mptest(void)
-{
-    static V34DSPState s; V34State p;
-    memset(&s, 0, sizeof(s)); memset(&p, 0, sizeof(p));
-    { extern void dsp_init(void); dsp_init(); }
-    V34_static_init();
-    p.S = V34_S3429; p.R = 16800; p.use_high_carrier = 1; p.calling = 0;
-    p.conv_nb_states = 64;
-    V34_init_low(&s, &p, 0);
-    /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
-    s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
-    s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
-    V34_send_MP(&s, 1, 0);      /* MP  */
-    V34_send_MP(&s, 1, 1);      /* MP' */
-    s.p4_mp_rx = 0;             /* pre-negotiation fallback */
-    V34_send_MP(&s, 1, 0);
-    fprintf(stderr, "[mptest] 3 frames dumped\n");
-}
-
 
 /* ===================================================================
    SIPFAX: Phase-4 block receiver (16-point capable).
@@ -3915,6 +3758,216 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
         i += L - 1;
     }
     return found;
+}
+
+
+/* Run the block receiver over buffered Phase-4 audio; returns the number of CRC-valid MP
+   frames and fills in the parameters from the first one. Tries 16-point first, then
+   4-point, so it works whichever constellation the caller selected. */
+static int p4_block_run(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
+                        int *shape, unsigned int *mask, int *sixteen_out)
+{
+    static double zi[P4_MAXZ], zq[P4_MAXZ], si[P4_MAXSY], sq[P4_MAXSY];
+    int nz, ns, nmp, six;
+    double off;
+    if (n < 8000) return 0;
+    nz = p4_front(x, n, zi, zq);
+    off = p4_timing(zi, zq, nz);
+    for (six = 1; six >= 0; six--) {
+        ns = p4_equalize(zi, zq, nz, off, six, 6, 10, si, sq);
+        nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, six, V34_GPC,
+                           ca, ac, trel, ack, shape, mask);
+        if (nmp) { if (sixteen_out) *sixteen_out = six; return nmp; }
+    }
+    return 0;
+}
+
+
+void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
+{
+    {   /* SIPFAX: Phase-4 block receiver. The streaming path is 4-point only, so when the
+           caller switches to 16-point it sees nothing. Buffer a few seconds of Phase 4 and
+           run the block chain once; its parameters feed the same p4_* fields the transmit
+           state machine already keys on, so MP -> MP' -> E proceeds normally. */
+        static short p4b[P4_MAXIN];
+        static int p4bn = 0, p4b_done = 0;
+        if (s->p4_mode == 0) { p4bn = 0; p4b_done = 0; }
+        else if (srx_rx16() && !s->p4_mp_rx && !p4b_done) {
+            unsigned int i;
+            for (i = 0; i < nb && p4bn < P4_MAXIN; i++) p4b[p4bn++] = samples[i];
+            if (p4bn >= 24000) {              /* ~3 s of Phase 4 */
+                int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 1, nmp;
+                unsigned int mk = 0;
+                nmp = p4_block_run(p4b, p4bn, &ca, &ac, &tr, &ak, &sh, &mk, &six);
+                p4b_done = 1;
+                if (nmp) {
+                    s->p4_mp_rate_ca = ca; s->p4_mp_rate_ac = ac;
+                    s->p4_trellis = tr; s->p4_mp_mask = mk;
+                    s->p4_mp_crcok = 1; s->p4_mp_rx = 1;
+                    if (ak) s->p4_mpp_rx = 1;
+                    { extern int v34_dbg; if (v34_dbg)
+                        fprintf(stderr, "[p4blk] LIVE MP READ: %d frames %s ca=%d ac=%d trel=%d ack=%d\n",
+                                nmp, six ? "16pt" : "4pt", ca*2400, ac*2400, tr, ak); }
+                } else {
+                    { extern int v34_dbg; if (v34_dbg)
+                        fprintf(stderr, "[p4blk] LIVE: no MP frames in %d samples\n", p4bn); }
+                }
+            }
+        }
+    }
+    double FCarr = 24000.0/7.0*4.0/7.0, FS = 8000.0, BAUD = 24000.0/7.0;
+    double SPS = FS/BAUD, dcinc = 2.0*M_PI*FCarr/FS, step = SPS/2.0;
+    unsigned int k;
+    if (!s->cma_init) {
+        int i; for (i=0;i<CMANT;i++){s->cma_wi[i]=s->cma_wq[i]=s->cma_bufi[i]=s->cma_bufq[i]=0;}
+        s->cma_wi[CMANT/2] = 1.0; s->cma_pow = 0.0; s->cma_warm = 0;
+        s->cma_ncma = 1000; { char *e=getenv("SIPFAX_CMA_N"); if (e) s->cma_ncma = atoi(e); }
+        { char *e = getenv("SIPFAX_RX_DBG"); if (e && atoi(e)) { extern int v34_dbg; v34_dbg = 1; } }
+        { char *e=getenv("SIPFAX_CMA_TPHASE"); if (e) s->cma_residx = atof(e); }
+        { char *e=getenv("SIPFAX_CMA_POLY"); if (e && atoi(e)==1) { cma_t1=5; cma_t2=23; } }
+        s->cma_init = 1;
+    }
+    /* RRC matched filter (beta=0.15, span 12 sym) at 8 kHz: rejects the -2fc
+       image after downconversion (the un-filtered image was in-band at the T/2
+       rate and corrupted symbol decisions) and provides proper matched filtering. */
+    static double mft[57]; static int mfinit = 0;
+    if (!mfinit) {
+        int t2; double beta = 0.15, sum2 = 0.0;
+        for (t2 = 0; t2 < 57; t2++) {
+            double ti = (t2 - 28) / SPS, v;
+            if (fabs(ti) < 1e-9) v = 1.0 - beta + 4.0*beta/M_PI;
+            else {
+                double dnm = M_PI*ti*(1.0 - (4.0*beta*ti)*(4.0*beta*ti));
+                if (fabs(dnm) < 1e-9) dnm = 1e-9;
+                v = (sin(M_PI*ti*(1.0-beta)) + 4.0*beta*ti*cos(M_PI*ti*(1.0+beta))) / dnm;
+            }
+            mft[t2] = v; sum2 += v*v;
+        }
+        sum2 = sqrt(sum2);
+        for (t2 = 0; t2 < 57; t2++) mft[t2] /= sum2;
+        mfinit = 1;
+    }
+    /* EXACT front-end: FC/FS = 12/49 and T/2 step = 7/6 are rational, so both the
+       carrier phase and the resampler grid are computed with INTEGER bookkeeping.
+       The old float accumulators drifted; each one-sample slip rotated symbols by
+       2*pi*12/49 = 88.15 deg, which corrupted the symbol sequence downstream. */
+    static double c49[49], s49[49]; static int lut49 = 0;
+    if (!lut49) { int li; for (li = 0; li < 49; li++) { c49[li] = cos(2.0*M_PI*li/49.0); s49[li] = sin(2.0*M_PI*li/49.0); } lut49 = 1; }
+    for (k = 0; k < nb; k++) {
+        double smp = (double)samples[k];
+        double rbi = smp*c49[s->cma_cphi], rbq = -smp*s49[s->cma_cphi];
+        double cbi, cbq; int mk;
+        s->cma_cphi += 12; if (s->cma_cphi >= 49) s->cma_cphi -= 49;
+        s->cma_mfi[s->cma_mfp & 63] = rbi; s->cma_mfq[s->cma_mfp & 63] = rbq; s->cma_mfp++;
+        cbi = cbq = 0.0;
+        for (mk = 0; mk < 57; mk++) {
+            int ix = (s->cma_mfp - 1 - mk) & 63;
+            cbi += mft[mk]*s->cma_mfi[ix]; cbq += mft[mk]*s->cma_mfq[ix];
+        }
+        for (;;) {              /* exact 7:6 grid: output m lives at input position 7m/6 */
+            long q = 7*s->cma_m; long ip = q/6; int fr = (int)(q%6);
+            long need = ip + (fr ? 1 : 0);
+            double f, vi, vq;
+            if (need > s->cma_n) break;
+            if (fr == 0) { vi = cbi; vq = cbq; }
+            else { f = fr/6.0; vi = s->cma_pbi*(1.0-f) + cbi*f; vq = s->cma_pbq*(1.0-f) + cbq*f; }
+            V34_cma_t2sample(s, vi, vq);
+            s->cma_m++;
+        }
+        s->cma_pbi = cbi; s->cma_pbq = cbq; s->cma_n++;
+    }
+}
+/* offline stream harness: SIPFAX_STREAM_FILE=path */
+void V34_stream_decode_file(const char *path)
+{
+    extern int v34_dbg;
+    V34State p; static V34DSPState rx; s16 buf[512]; FILE *f; int n, i;
+    memset(&p, 0, sizeof(p)); memset(&rx, 0, sizeof(rx));
+    p.S = V34_S3429; p.R = 33600; p.conv_nb_states = 16; p.use_high_carrier = 1; p.calling = 0;
+    { extern void dsp_init(void); dsp_init(); } V34_static_init();
+    rx.S = p.S; rx.use_high_carrier = 1;
+    v34_dbg = 1;
+    f = fopen(path, "rb"); if (!f) { perror(path); return; }
+    cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
+    { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
+    while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
+    fclose(f);
+    if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
+}
+
+
+void V34_datacfg_dump(void)
+{
+    extern int v34_dbg;
+    V34State p; static V34DSPState s;
+    char *e; int R = 16800, i;
+    memset(&p, 0, sizeof(p)); memset(&s, 0, sizeof(s));
+    e = getenv("SIPFAX_DATA_R"); if (e) R = atoi(e);
+    p.S = V34_S3429; p.R = R; p.use_high_carrier = 1; p.calling = 0;
+    p.conv_nb_states = 64; p.expanded_shape = 0; p.use_non_linear = 0; p.use_aux_channel = 0;
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    V34_init_low(&s, &p, 0);
+    fprintf(stderr, "[datacfg] R=%d S=%d symrate=%.1f carrier=%.1f\n", s.R, s.S, s.symbol_rate, s.carrier_freq);
+    fprintf(stderr, "[datacfg] J=%d P=%d N=%d b=%d r=%d W=%d K=%d q=%d M=%d L=%d conv_states=%d\n",
+            s.J, s.P, s.N, s.b, s.r, s.W, s.K, s.q, s.M, s.L, s.conv_nb_states);
+    { FILE *f = fopen("/tmp/constel.txt", "w");
+      for (i = 0; i < s.L; i++) fprintf(f, "%d %d\n", s.constellation[i][0], s.constellation[i][1]);
+      fclose(f);
+      fprintf(stderr, "[datacfg] dumped %d constellation points -> /tmp/constel.txt\n", s.L); }
+}
+
+
+static V34DSPState *g_rx_state;
+static void dataloop_symsink(int si, int sq) { extern void baseband_decode_pub(V34DSPState*,int,int); baseband_decode_pub(g_rx_state, si, sq); }
+static unsigned int g_prbs;
+static u8 g_txb[200000], g_rxb[200000]; static int g_txn, g_rxn;
+static int dataloop_src(void *o) { int b = ((g_prbs>>21)^(g_prbs>>20))&1; g_prbs=((g_prbs<<1)|b)&0x7fffff; if(!g_prbs)g_prbs=1; if(g_txn<200000)g_txb[g_txn++]=(u8)b; return b; }
+static void dataloop_sink(void *o, int b) { if(g_rxn<200000)g_rxb[g_rxn++]=(u8)b; }
+void V34_dataloop_test(void)
+{
+    static V34DSPState tx, rx; V34State pt, pr; int i, R=16800; char *e;
+    e=getenv("SIPFAX_DATA_R"); if(e) R=atoi(e);
+    memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
+    { extern void dsp_init(void); dsp_init(); } V34_static_init();
+    pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
+    V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
+    tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
+    g_prbs=1; g_txn=0; g_rxn=0; g_rx_state=&rx;
+    { extern FILE *gt_f; char *ge=getenv("SIPFAX_GTDUMP"); if(ge) gt_f=fopen(ge,"w"); }
+    { extern void (*g_symtap)(int,int); g_symtap=dataloop_symsink;
+      for(i=0;i<4000;i++) encode_mapping_frame(&tx);
+      g_symtap=0; { extern FILE *gt_f; if(gt_f){fclose(gt_f);gt_f=0;} } }
+    fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d\n", R, g_txn, g_rxn);
+    { FILE*ft=fopen("/tmp/dl_tx.txt","w"); for(i=0;i<g_txn;i++)fputc('0'+g_txb[i],ft); fclose(ft);
+      FILE*fr=fopen("/tmp/dl_rx.txt","w"); for(i=0;i<g_rxn;i++)fputc('0'+g_rxb[i],fr); fclose(fr); }
+    { int best=-1,bestlag=0,lag;
+      for(lag=0;lag<600;lag++){ int mt=0,cn=0;
+        for(i=0;i+lag<g_rxn && i<g_txn && i<3000;i++){ if(g_txb[i]==g_rxb[i+lag])mt++; cn++; }
+        if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
+      { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
+        fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1)); } }
+}
+
+
+void V34_mptest(void)
+{
+    static V34DSPState s; V34State p;
+    memset(&s, 0, sizeof(s)); memset(&p, 0, sizeof(p));
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    p.S = V34_S3429; p.R = 16800; p.use_high_carrier = 1; p.calling = 0;
+    p.conv_nb_states = 64;
+    V34_init_low(&s, &p, 0);
+    /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
+    s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
+    s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
+    V34_send_MP(&s, 1, 0);      /* MP  */
+    V34_send_MP(&s, 1, 1);      /* MP' */
+    s.p4_mp_rx = 0;             /* pre-negotiation fallback */
+    V34_send_MP(&s, 1, 0);
+    fprintf(stderr, "[mptest] 3 frames dumped\n");
 }
 
 /* SIPFAX_P4BLOCK=<file.s16> : run the block receiver over a raw 8 kHz capture and report,

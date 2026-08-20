@@ -399,3 +399,44 @@ The most promising remaining avenue is the part of Phase 4 not yet compared in d
 exact S / Sbar sequences we emit before TRN, and the E sequence - since those are what mark
 the phase boundaries the caller's state machine keys on. Unlike constellation guesses, those
 can be checked against the spec tables directly and verified offline from our own TX audio.
+
+## 13. S / Sbar / E verified - also not the difference (2026-08-20)
+
+Detecting S/Sbar directly in the transmitted audio (both are a constant +-90 deg per-symbol
+alternation; the S->Sbar boundary is a 180 deg jump, which keeps the alternation intact, so
+the pair shows up as one run of 128+16 = 144 symbols):
+
+| | S+Sbar run | at |
+|---|---|---|
+| **ours** | **144 symbols (42.0 ms)** | start of our Phase-4 burst |
+| **slmodem** | **145 symbols (42.3 ms)** | start of its Phase-4 burst |
+
+Our Phase-4 preamble is structurally correct and matches the working reference. Source
+agrees: `V34_send_S` emits 64x2 = 128 symbols alternating 0/-90 deg, `V34_send_Sinv` emits
+8x2 = 16 symbols at 180/90 deg (the same alternation rotated 180 deg).
+
+`V34_send_E` is never reached: the E state is entered only on `p4_mpp_rx || p4_e_rx`, and the
+caller sends us neither. So E cannot be the cause - it is downstream of the gate we are
+stuck at.
+
+One structural difference is visible but not yet explained: **slmodem clears Phase 4 in about
+2-3 seconds** (S/Sbar at ~12.2 s, in data by ~15 s), transmitting in several discrete bursts
+with gaps, whereas we transmit one continuous burst from 15.1 s to the end of the call.
+
+### Cumulative status - everything ruled out so far
+
+| checked | verdict |
+|---|---|
+| MP frame content / negotiated parameters | correct (mirrors caller exactly); not the cause |
+| MP validity, CRC, scrambling, differential coding | correct - our own TX decodes, 653 frames CRC OK |
+| signal quality | clean, 1.7-2.9% EVM |
+| Phase-4 preamble length | 2373 symbols vs 656 minimum |
+| S / Sbar structure | 144 symbols, matches slmodem's 145 |
+| MP constellation (4 vs 16 point) | caller's own MP is 4-point, so 4-point is acceptable |
+| E sequence | unreachable - downstream of the gate |
+
+The captures have now been mined for everything they can settle. What remains is protocol
+work rather than signal analysis: walking V.34 section 11.4 (the Phase-4 state machine and
+its timing rules) against linmodem's implementation, since the failure is that a caller which
+sends us valid MP will not acknowledge ours - a state-machine or timing condition rather
+than anything measurable in the waveform.

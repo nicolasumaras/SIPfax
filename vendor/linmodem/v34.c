@@ -1431,7 +1431,11 @@ static void V34_send_J(V34DSPState *s, int length)
     int i,val;
     u8 buf[16],*p;
 
-    if (s->mp_16point)
+    /* SIPFAX: J tells the CALLER which constellation to use, and slmodem - which this
+       caller acknowledges in 0.5 s - sends J4POINTS while transmitting its own MP as
+       16-point. Keep J on is_16states so the caller stays 4-point; mp_16point governs
+       only our own MP. */
+    if (s->is_16states)
         val = J16POINTS;
     else
         val = J4POINTS;

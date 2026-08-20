@@ -1142,3 +1142,66 @@ engine spawns but never enters pipe mode and the line answers with silence). The
 env must be restored wholesale from `sipfax.env.linmodem-dev.1785688709`, and the engine
 smoke-tested (`head -c 48000 /dev/zero | linmodem-lm -P` must print "pipe engine up" and
 emit ~48k bytes) before asking for a call.
+
+## 28. ROOT CAUSE: the caller's J commands a 16-point Phase 4, and linmodem discarded the bit
+
+A 13-agent forensics workflow over the working and failing captures (5 analysis lenses,
+every finding adversarially re-measured by an independent agent; 8 confirmed, 0 refuted)
+found what 13 calls of single-hypothesis testing missed.
+
+**The caller sends J = 0x0D91 (J16POINTS) in every call - working and failing alike.**
+Per V.34 10.1.3.3 / Table 18, J "is used to request the constellation size to be used by
+the remote modem for transmitting sequences TRN, MP, MP', and E during Phase 4". The
+variant bit was measured directly: 77 consecutive J frames per call carry it, terminated
+by the canonical 0xF991.
+
+| | Phase-4 TRN | Phase-4 MP | caller's verdict |
+|---|---|---|---|
+| slmodem (working) | **16-point** (descramble-ones 0.999) | 16-point | ack=1 in 0.5 s |
+| linmodem (failing) | **4-point** (0.997; trn16 at chance) | 16-point (env override) | never acks, restarts |
+
+linmodem hard-coded `is_16states = 0` and its J detector correlated only against 0x0991
+with a 28/32 threshold - the live log's `caller J detected (29/32)` is *precisely the
+signature of a 0x0D91 signal scored against the 0x0991 pattern*. The variant bit was
+silently discarded, and the caller - whose receiver its own J had configured for 16-point
+from us - could never train on our 4-point TRN. It never read our MP at all (which is why
+every content fix changed nothing), timed out per 11.4.2.1.2, and restarted.
+
+The direction of J was pinned by **double dissociation**: we command J4POINTS and the
+caller duly transmits its Phase 4 as 4-point in both captures; the caller commands J16 and
+slmodem goes 16-point while linmodem stayed 4-point. An old code comment justified the
+4-point TRN by "slmodem sends J4POINTS while transmitting its own MP as 16-point" - true,
+and exactly the point: J commands the *other* side. Asymmetric constellations per
+direction are normal and present in the working call.
+
+Also confirmed, secondary: our Phase-4 burst opened with ~94 symbols (28 ms) of stale
+queued J draining when the TX unmuted; slmodem opens with S within 1 ms.
+
+Ruled out along the way (each by direct measurement): PP in Phase 4 (neither modem sends
+it - it is Phase-3 only, and both send it there identically), S/Sbar structure, TRN
+length/timing, TX power, envelope gaps, spectral defects, MP field/CRC/cadence/scrambler
+differences (bit-identical to slmodem's), RTP delivery, and the "I windows" inside our MP
+(equalizer-convergence variance in the classifier, not a signal property - they do not
+reproduce across calls).
+
+### The fix (linmodem 892112e)
+
+1. **J variant vote**: one 32-bit snapshot at fire time measured a dead tie (29/29) on
+   real audio, so the detector now votes - 96 further symbols predicted against both
+   patterns, decision by totals. Both real caller captures: **J4=180, J16=192/192** - a
+   perfect score with exactly the 12 variant-position misses a J16 signal must show
+   against the J4 pattern.
+2. **One constellation flag**: rx_j16 bridges to TX and sets is_16states + mp_16point
+   together - TRN, MP, MP' and E all follow the caller's command. `SIPFAX_J16_OBEY=0`
+   reverts.
+3. **Our J decoupled** from is_16states (it commands the caller, which must stay 4-point
+   for our receiver); srx_rx16() now keys on what our J commanded, fixing a latent
+   wrong-radius bug in the streaming tracker.
+4. **Stale-J flush**: the TX mute extends by exactly the queued residue so S is the first
+   thing on the wire.
+
+Validated offline before any call: 16-point TRN encodes at 0.998 descramble-ones (raw
+decode of our own synthetic TX; the earlier 0.671 was my equalizer failing to converge on
+900 symbols of 16-point - the exact artifact the verifiers warned about), 172 CRC-valid
+16-point MP frames; 4-point regression clean (0.994 / 90 frames); block receiver
+regression clean (worst step 10.7 ms, zero over 20 ms).

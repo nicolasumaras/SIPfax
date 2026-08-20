@@ -1125,10 +1125,12 @@ static int V34_baseband_to_carrier(V34DSPState *s,
    the quarter-superconstellation (10.1.3.6): (1,1) (-3,1) (1,-3) (-3,-3), i.e. increasing
    magnitude with ties broken by greatest imaginary part. */
 static int srx_rx16(void)
-{   /* 16-point RX applies exactly when we signalled J16POINTS */
+{   /* 16-point RX applies exactly when we signalled J16POINTS - i.e. when OUR J told the
+       caller to transmit 16-point. It used to key off SIPFAX_MP16/SLCOMPAT, which are
+       about our own TX and left the streaming tracker using a 16-pt Godard radius on the
+       caller's 4-point signal. */
     static int v = -1;
-    if (v < 0) { char *a = getenv("SIPFAX_MP16"), *b = getenv("SIPFAX_MP_SLCOMPAT");
-                 v = ((a && atoi(a)) || (b && atoi(b))) ? 1 : 0; }
+    if (v < 0) { char *e = getenv("SIPFAX_TX_J16"); v = (e && atoi(e)) ? 1 : 0; }
     return v;
 }
 
@@ -1432,14 +1434,16 @@ static void V34_send_J(V34DSPState *s, int length)
     int i,val;
     u8 buf[16],*p;
 
-    /* SIPFAX: J tells the CALLER which constellation to use, and slmodem - which this
-       caller acknowledges in 0.5 s - sends J4POINTS while transmitting its own MP as
-       16-point. Keep J on is_16states so the caller stays 4-point; mp_16point governs
-       only our own MP. */
-    if (s->is_16states)
-        val = J16POINTS;
-    else
-        val = J4POINTS;
+    /* SIPFAX: our J commands the CALLER's Phase-4 constellation (10.1.3.3) - it says
+       nothing about our own. slmodem sends J4POINTS while transmitting its own burst
+       16-point, and our C receiver reads the caller's 4-point signals, so keep
+       commanding 4-point. is_16states is now set from the caller's RECEIVED J (it may
+       be 1 while our J stays 4-point), so it must not drive this choice.
+       SIPFAX_TX_J16=1 forces J16POINTS for experiments. */
+    {   static int txj16 = -1;
+        if (txj16 < 0) { char *e = getenv("SIPFAX_TX_J16"); txj16 = (e && atoi(e)) ? 1 : 0; }
+        val = txj16 ? J16POINTS : J4POINTS;
+    }
     p = buf;
     put_bits(&p, 16, val);
     { extern int v34_dbg; static int once=0; if(v34_dbg && !once){once=1;
@@ -1636,7 +1640,8 @@ static void V34_mod_init(V34DSPState *s, V34State *p)
     s->state = V34_STARTUP3_S1;
     s->JP_received = 1;
     //    s->state = V34_DATA;
-    s->is_16states = 0; /* TRN stays 4-point: the caller trains on this */
+    s->is_16states = 0; /* default 4-point; set to 1 from the caller's RECEIVED J
+                           (0x0D91) via the lm-level bridge - it drives TRN, MP and E */
             {   /* SIPFAX: MP/J constellation. Default 4-point: the caller's OWN MP is
                        4-point (our decoder reads it at 2 bits/symbol with CRC OK), so
                        4-point is clearly acceptable on this link. SIPFAX_MP16=1 selects
@@ -2995,9 +3000,21 @@ void V34_encode_test(const char *path)
     V34_mod_init(&tx, &p);
     tx.get_bit = enc_get_bit; tx.opaque = 0;
     v34_dbg = 1; tx.dbg_last2 = -1; v34_ntrn = 0; v34_nj = 0;
+    {   /* SIPFAX_ENC_P4=16|4: skip straight to Phase 4 with the given constellation,
+           as if the caller's J had commanded it - validates the 16-point TRN/MP TX
+           offline (decode the output with trn_score/mp_decode). */
+        char *p4 = getenv("SIPFAX_ENC_P4");
+        if (p4) {
+            tx.J_received = 1;
+            tx.is_16states = (atoi(p4) == 16) ? 1 : 0;
+            tx.mp_16point = tx.is_16states;
+            tx.state = V34_STARTUP4_S;
+            fprintf(stderr, "[enc] Phase-4 mode: %s-point TRN/MP\n", tx.is_16states ? "16" : "4");
+        }
+    }
     f = fopen(path, "wb");
-    fprintf(stderr, "[enc] encoding answer Phase-3 TX (S=3429) -> %s\n", path);
-    for (b = 0; b < (int)(4.0 * 8000 / 512); b++) {   /* ~4 s */
+    fprintf(stderr, "[enc] encoding answer TX (S=3429) -> %s\n", path);
+    for (b = 0; b < (int)(8.0 * 8000 / 512); b++) {   /* ~8 s */
         V34_mod(&tx, out, 512);
         { int _i, mx=0; for(_i=0;_i<512;_i++){int a=out[_i]<0?-out[_i]:out[_i]; if(a>mx)mx=a;}
           if (b<4 || (b%15)==0) fprintf(stderr, "[enc] blk %d state=%d tx_amp=%d bufsz=%d max|out|=%d\n",
@@ -3219,7 +3236,9 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         static u8 jpat[16]; static u8 jppat[16]; static int jpat_init = 0;
         unsigned int poly = (cma_t1 == 5) ? (1u|(1u<<18)) : (1u|(1u<<5));  /* GPA : GPC */
         double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][2]; unsigned int regsnap[4];
+        static u8 jpat16[16];
         if (!jpat_init) { for (k = 0; k < 16; k++) { jpat[k] = (0x0991 >> (15-k)) & 1;
+                                             jpat16[k] = (0x0D91 >> (15-k)) & 1;
                                              jppat[k] = (0xF991 >> (15-k)) & 1; } jpat_init = 1; }
         o2i = oi*oi - oq*oq; o2q = 2*oi*oq;                 /* o^2 */
         o4i = o2i*o2i - o2q*o2q; o4q = 2*o2i*o2q;          /* o^4 */
@@ -3432,7 +3451,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 for (rr3 = 0; rr3 < 4; rr3++) { s->srx_reg4[rr3] = 0; s->srx_hist4[rr3] = 0; }
             }
         }
-        if (s->srx_locked && !s->J_received && s->p4_mode == 0) {
+        if (s->srx_locked && (!s->J_received || s->jvar_wait > 0) && s->p4_mode == 0) {
             /* (spawn-based J bank replaced by always-on regD phase scorers below) */
             {   /* Always-on J detector: regD is a second scrambler register updated with
                    the DIFFERENTIAL dibit bits (the true scrambler outputs during J; it
@@ -3442,7 +3461,24 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 unsigned int rD0 = s->srx_regD, rD1;
                 rD1 = (rD0 << 1) & 0x7fffff; if (jb0) rD1 ^= poly;
                 s->srx_regD = (rD1 << 1) & 0x7fffff; if (jb1) s->srx_regD ^= poly;
-                for (j = 0; j < 8; j++) {
+                if (s->J_received && s->jvar_wait > 0) {
+                    /* SIPFAX: J-variant vote (see above). Same regD predictions, both
+                       pattern hypotheses, winning phase only. */
+                    int jw = s->jvar_phase;
+                    int p0 = (int)((rD0 >> 22) & 1), p1 = (int)((rD1 >> 22) & 1);
+                    int k0 = s->jh_bitpos[jw] & 15, k1 = (s->jh_bitpos[jw]+1) & 15;
+                    s->jvar_c4  += ((p0 ^ (int)jpat[k0])   == jb0) + ((p1 ^ (int)jpat[k1])   == jb1);
+                    s->jvar_c16 += ((p0 ^ (int)jpat16[k0]) == jb0) + ((p1 ^ (int)jpat16[k1]) == jb1);
+                    s->jh_bitpos[jw] += 2;
+                    if (--s->jvar_wait == 0) {
+                        s->rx_j16 = (s->jvar_c16 > s->jvar_c4);
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[srx] J variant vote: J4=%d J16=%d /192 -> %s\n",
+                                    s->jvar_c4, s->jvar_c16,
+                                    s->rx_j16 ? "J16POINTS (16-pt Phase 4 commanded)" : "J4POINTS"); }
+                    }
+                }
+                for (j = 0; !s->J_received && j < 8; j++) {
                     int q0 = (int)((rD0 >> 22) & 1) ^ (int)jpat[s->jh_bitpos[j] & 15];
                     int q1 = (int)((rD1 >> 22) & 1) ^ (int)jpat[(s->jh_bitpos[j]+1) & 15];
                     s->jh_hist[j] = (s->jh_hist[j] << 2) | ((unsigned long long)(q0 == jb0) << 1) | (unsigned long long)(q1 == jb1);
@@ -3452,7 +3488,23 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                         if (mj >= 28 && !s->J_received) {
                             int rr2;
                             s->J_received = 1;
-                            { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] caller J detected at sym %ld (phase %d, %d/32) -> J_received\n", s->cma_qn, j, mj); }
+                            {   /* SIPFAX: which J variant? J4POINTS=0x0991 and J16POINTS=0x0D91
+                                   differ at exactly one bit per 16 (pattern index 5), and the
+                                   caller's J commands OUR Phase-4 constellation (10.1.3.3).
+                                   This caller sends 0x0D91, which fired the old J4-only
+                                   correlator at 29/32 and the variant bit was silently
+                                   discarded - the root cause of 13 failed handshakes (the
+                                   caller trained for a 16-point TRN we never sent). One
+                                   32-bit snapshot is too noisy to discriminate (measured
+                                   tie 29/29 on real audio), so VOTE: keep predicting the
+                                   next 96 symbols against BOTH patterns and decide by the
+                                   totals - 12 variant positions instead of 2. */
+                                s->jvar_wait = 96; s->jvar_phase = j;
+                                s->jvar_c4 = 0; s->jvar_c16 = 0;
+                                { extern int v34_dbg; if (v34_dbg)
+                                    fprintf(stderr, "[srx] caller J detected at sym %ld (phase %d, %d/32) - voting variant over 96 syms\n",
+                                            s->cma_qn, j, mj); }
+                            }
                             {   /* SIPFAX: 11.4.1.2.1 wants J' (Table 19) detected before TRN.
                                    SIPFAX_JP=1 waits for it; otherwise keep the old behaviour. */
                                 char *jpe = getenv("SIPFAX_JP");
@@ -4235,6 +4287,21 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
       if (rxcma) { extern void V34_demod_cma(V34DSPState*, const s16*, unsigned int); V34_demod_cma(&s->v34_rx, input, nb_samples); }
       else V34_demod(&s->v34_rx, input, nb_samples); }
     s->v34_tx.J_received = s->v34_rx.J_received;   /* bridge caller-J -> TX WAIT_J */
+    /* SIPFAX: obey the caller's J constellation command (10.1.3.3): 0x0D91 means OUR
+       Phase-4 TRN, MP, MP' and E must all be 16-point. slmodem - which this caller
+       acknowledges in 0.5 s - complies; ignoring it left the caller training against a
+       4-point TRN it was told would be 16-point, and it never read our MP at all.
+       One flag drives all three signals; SIPFAX_J16_OBEY=0 restores the old behaviour. */
+    if (s->v34_rx.J_received && s->v34_rx.rx_j16 && !s->v34_tx.is_16states) {
+        static int obey = -1;
+        if (obey < 0) { char *e = getenv("SIPFAX_J16_OBEY"); obey = e ? atoi(e) : 1; }
+        if (obey) {
+            s->v34_tx.is_16states = 1;
+            s->v34_tx.mp_16point = 1;
+            { extern int v34_dbg; if (v34_dbg)
+                fprintf(stderr, "[p4] caller commanded 16-point -> TRN/MP/E all 16-point\n"); }
+        }
+    }
     s->v34_tx.p4_mp_hunt_rx = (s->v34_rx.p4_mode == 2);
     s->v34_tx.p4_mp_rx = s->v34_rx.p4_mp_rx;
     s->v34_tx.p4_mpp_rx = s->v34_rx.p4_mpp_rx;
@@ -4304,6 +4371,22 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
             long cyc = ms % 4300;
             if (s->p3rep) cyc = 0;   /* replay: never yield-mute, play recording as-is */            /* 2300 TX + 2000 silent */
             int yielding = (!s->p3go) && (cyc >= 2300);
+            /* SIPFAX: flush the stale J. While muted the modulator keeps cycling J
+               through the tx symbol queue, and the leftover ~80 queued symbols plus the
+               tx-filter pipeline drained AUDIBLY when J_received unmuted us: the Phase-4
+               burst opened with 94 symbols (28 ms) of stale J before S. slmodem opens
+               with S directly. Keep muting for exactly the queued residue (7/3 samples
+               per symbol at 8 kHz) so S is the first thing on the wire. */
+            {   static int jmute = -1;
+                if (s->v34_rx.J_received && jmute < 0)
+                    jmute = ((s->v34_tx.tx_buf_size + s->v34_tx.tx_filter_wsize)*7 + 2)/3 + 8;
+                if (jmute > 0) {
+                    int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
+                    jmute -= nb_samples;
+                    if (jmute <= 0) { extern int v34_dbg; if (v34_dbg)
+                        fprintf(stderr, "[p4] stale-J flushed, TX unmuted at S\n"); }
+                }
+            }
             if (yielding || (s->p3go && !s->v34_rx.J_received)) {
                 int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
                 if (yielding && cyc < 2300 + (nb_samples*1000/8000) + 1)

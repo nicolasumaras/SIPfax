@@ -87,6 +87,41 @@ def symbols_to_bits(s, sixteen):
     return np.column_stack([I1, I2, Q & 1, (Q >> 1) & 1]).ravel()
 
 
+def trn_bits(s, sixteen, rot=0):
+    """TRN -> transmitted (scrambled) bits.
+
+    NOTE the rotation convention differs from MP. 10.1.3.6: TRN rotates point 2*Q2+Q1 of
+    the quarter-superconstellation CLOCKWISE by In*90 with In = 2*I2n+I1n - an ABSOLUTE
+    rotation. J and MP (10.1.3.3) instead ACCUMULATE: Zn = In + Zn-1. Decoding TRN with the
+    differential convention yields ~50% ones and looks like "no lock", which is why the
+    descramble-to-all-ones check was long believed unreliable. With the absolute convention
+    a real caller TRN descrambles to 0.998 ones.
+
+    `rot` applies one of the four global phase hypotheses (absolute decoding has no
+    differential to cancel receiver phase, so the caller must try all four).
+    """
+    pts, qs, zs = mp_points(sixteen)
+    v = s*((1j)**rot)
+    v = v/np.sqrt(np.mean(np.abs(v)**2))
+    idx = np.argmin(np.abs(v[:, None] - pts[None, :]), axis=1)
+    q = qs[idx]; z = zs[idx]                 # z is In directly, not a difference
+    I1 = z & 1; I2 = z >> 1
+    if not sixteen:
+        return np.column_stack([I1, I2]).ravel()
+    return np.column_stack([I1, I2, q & 1, (q >> 1) & 1]).ravel()
+
+
+def trn_score(s, sixteen, poly):
+    """Best (ones-fraction, rot) over the four phase hypotheses. ~1.0 => TRN decoded."""
+    best = (0.0, None)
+    for rot in range(4):
+        o = float(descramble(trn_bits(s, sixteen, rot), poly).mean())
+        sc = max(o, 1-o)
+        if sc > best[0]:
+            best = (sc, rot)
+    return best
+
+
 def find_frames(bits, poly):
     """Descramble and return every CRC-valid MP frame as a dict."""
     db = descramble(bits, poly)

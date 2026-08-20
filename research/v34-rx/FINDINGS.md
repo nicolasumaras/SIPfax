@@ -691,3 +691,35 @@ To send the MP that gets acknowledged, the receiver has to follow. Required:
 
 That is concrete, offline-verifiable work against captures already in the repo: this call's
 capture contains a real 16-point caller TRN and MP to develop against.
+
+## 19. TRN uses ABSOLUTE rotation, not differential - and that retires an old false lead
+
+Starting the 16-point receiver turned up a convention error that has been distorting this
+work for a long time. **10.1.3.6**: the TRN signal rotates its constellation point
+*clockwise by In*90 degrees*, In = 2*I2n + I1n - an **absolute** rotation. **10.1.3.3**: J
+and MP instead **accumulate**, Zn = In + Zn-1.
+
+Decoding TRN with the differential convention gives ~0.50 ones and looks exactly like "no
+lock". That is why the descramble-to-all-ones check was recorded as unreliable, "~50% even
+on known-valid TRN", and abandoned in favour of EVM. It was not unreliable - it was being
+applied with the wrong rotation convention.
+
+With the absolute convention, on a real captured caller TRN:
+
+| | ones-fraction |
+|---|---|
+| differential (what we were doing) | 0.32 - 0.51 (looks like noise) |
+| **absolute (10.1.3.6) + GPC** | **0.998** |
+
+So `mp_decode.trn_bits()` / `trn_score()` now give a reliable, prior-free TRN detector: a
+correct decode returns ~1.0 ones and nothing else does. That is a much stronger validation
+signal than EVM, and it will be the check for the C receiver's 16-point TRN work.
+
+### Still open
+
+The caller's 16-point region does not decode as TRN under either constellation (best ~0.51
+ones, EVM 54%). Two candidates: our 16-point signal set may be wrong - we take the first
+four points of linmodem's energy-sorted data constellation, whereas 10.1.3.6 specifies
+"points 0-3 of the quarter-superconstellation of Figure 5", which has not been verified
+against the figure - or that region is the caller's 16-point *MP* (differential) rather than
+TRN. Resolving this is the next step, and the 0.998 control gives a trustworthy test for it.

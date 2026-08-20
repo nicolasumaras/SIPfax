@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <time.h>
 /* 
  * Implementation of the V34 modulation/demodulation
  * 
@@ -3611,15 +3612,21 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
 }
 
 /* T/2 fractionally-spaced equalizer: CMA warm-up then decision-directed, multi-pass. */
+/* SIPFAX: `reset` re-initialises the taps. It used to be unconditional, which meant every
+   pass of a decode had to run inside one call. The taps are static and persist between
+   calls, so with reset under the caller's control the same multi-pass scheme can be driven
+   ONE pass per call and amortised across audio frames - see p4_block_step. */
 static int p4_equalize(const double *zi, const double *zq, int nz, double off,
-                       int sixteen, int ncma, int ndd, double *si, double *sq)
+                       int sixteen, int ncma, int ndd, int reset, double *si, double *sq)
 {
     static double wi[P4_NT], wq[P4_NT], bufi[P4_NT], bufq[P4_NT];
     double R2 = sixteen ? 1.32 : 1.0;          /* Godard radius, unit mean power */
     double scale = sixteen ? sqrt(10.0) : sqrt(2.0);   /* base units -> unit power */
     int p, i, ns = 0;
-    for (i = 0; i < P4_NT; i++) { wi[i] = 0; wq[i] = 0; }
-    wi[P4_NT/2] = 1.0;
+    if (reset) {
+        for (i = 0; i < P4_NT; i++) { wi[i] = 0; wq[i] = 0; }
+        wi[P4_NT/2] = 1.0;
+    }
     for (p = 0; p < ncma + ndd; p++) {
         int dd = (p >= ncma), cnt = 0;
         double pos = off*P4_SPS + P4_SPS*8, th = 0, fr = 0, g = 1.0;
@@ -3771,25 +3778,61 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
 }
 
 
-/* Run the block receiver over buffered Phase-4 audio; returns the number of CRC-valid MP
-   frames and fills in the parameters from the first one. Tries 16-point first, then
-   4-point, so it works whichever constellation the caller selected. */
-static int p4_block_run(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
-                        int *shape, unsigned int *mask, int *sixteen_out)
+/* Block receiver over buffered Phase-4 audio, AMORTISED: each call performs at most one
+   bounded unit of work - the front end, or a single equaliser pass, or the MP decode.
+
+   It used to do the whole decode in one call: front end plus 2 constellations x 16 passes
+   over 20000 samples. That is ~100 ms of arithmetic, and it ran inside the audio callback,
+   so the transmit path was starved for five packet-times every second. Measured against a
+   working slmodem call: slmodem never exceeds 27 ms between RTP packets, while this stalled
+   17 times over 40 ms and 5 times over 100 ms, at exactly 1.00 s intervals matching this
+   decoder's cadence, beginning the instant our MP started. Our own MP carrier therefore had
+   a ~100 ms hole punched in it every second, which is reason enough for a peer to ignore it.
+
+   One pass is ~3 ms against a 20 ms frame, so a full decode now spans ~18 frames (~360 ms)
+   and nothing is ever starved. 4-point is tried first because that is what the caller uses;
+   16-point is retried on the same buffered audio before giving up and taking a fresh window. */
+#define P4_NCMA 6
+#define P4_NDD  10
+
+static double p4_zi[P4_MAXZ], p4_zq[P4_MAXZ], p4_si[P4_MAXSY], p4_sq[P4_MAXSY];
+static int    p4_nz, p4_ns, p4_stage, p4_pass, p4_six;
+static double p4_off;
+
+static void p4_block_reset(void)
 {
-    static double zi[P4_MAXZ], zq[P4_MAXZ], si[P4_MAXSY], sq[P4_MAXSY];
-    int nz, ns, nmp, six;
-    double off;
-    if (n < 8000) return 0;
-    nz = p4_front(x, n, zi, zq);
-    off = p4_timing(zi, zq, nz);
-    for (six = 1; six >= 0; six--) {
-        ns = p4_equalize(zi, zq, nz, off, six, 6, 10, si, sq);
-        nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, six, V34_GPC,
-                           ca, ac, trel, ack, shape, mask);
-        if (nmp) { if (sixteen_out) *sixteen_out = six; return nmp; }
+    p4_stage = 0; p4_pass = 0; p4_six = 0; p4_nz = 0; p4_ns = 0;
+}
+
+static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
+                         int *shape, unsigned int *mask, int *sixteen_out)
+{
+    if (p4_stage == 0) {                       /* snapshot: front end + symbol timing */
+        if (n < 8000) return 0;
+        p4_nz  = p4_front(x, n, p4_zi, p4_zq);
+        p4_off = p4_timing(p4_zi, p4_zq, p4_nz);
+        p4_pass = 0; p4_six = 0; p4_stage = 1;
+        return 0;
     }
-    return 0;
+    if (p4_stage == 1) {                       /* exactly one equaliser pass */
+        int dd = (p4_pass >= P4_NCMA);
+        p4_ns = p4_equalize(p4_zi, p4_zq, p4_nz, p4_off, p4_six,
+                            dd ? 0 : 1, dd ? 1 : 0, p4_pass == 0, p4_si, p4_sq);
+        if (++p4_pass >= P4_NCMA + P4_NDD) p4_stage = 2;
+        return 0;
+    }
+    {                                          /* decode what the passes produced */
+        int nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
+                               p4_six, V34_GPC, ca, ac, trel, ack, shape, mask);
+        if (nmp) {
+            if (sixteen_out) *sixteen_out = p4_six;
+            p4_stage = 0;                      /* next window */
+            return nmp;
+        }
+        if (!p4_six) { p4_six = 1; p4_pass = 0; p4_stage = 1; }  /* other constellation */
+        else         { p4_stage = 0; }                           /* both failed: fresh audio */
+        return 0;
+    }
 }
 
 
@@ -3800,8 +3843,8 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
            run the block chain once; its parameters feed the same p4_* fields the transmit
            state machine already keys on, so MP -> MP' -> E proceeds normally. */
         static short p4b[P4_MAXIN];
-        static int p4bn = 0, p4b_done = 0, p4since = 0;
-        if (s->p4_mode == 0) { p4bn = 0; p4b_done = 0; p4since = 0; }
+        static int p4bn = 0;
+        if (s->p4_mode == 0) { p4bn = 0; p4_block_reset(); }
         else if (srx_rx16() && !s->p4_e_rx && !s->p4_mpp_rx) {
             /* SIPFAX: keep re-reading. The caller sets its acknowledge bit only after it
                has received OUR MP, so its MP' arrives strictly later than the first MP we
@@ -3814,14 +3857,29 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                 for (j = 0; j < (unsigned int)keep; j++) p4b[j] = p4b[off2 + j];
                 p4bn = keep;
             }
-            for (i = 0; i < nb && p4bn < P4_MAXIN; i++) { p4b[p4bn++] = samples[i]; p4since++; }
-            if (p4bn >= 12000 && p4since >= 8000) {   /* first look at ~1.5 s, then every ~1 s */
-                p4since = 0;
-                int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 1, nmp;
+            for (i = 0; i < nb && p4bn < P4_MAXIN; i++) p4b[p4bn++] = samples[i];
+            if (p4bn >= 12000) {
+                /* One bounded step per audio frame. Running continuously is now free -
+                   the work per frame is a few ms - and it finds the acknowledge sooner
+                   than the old once-a-second full decode did. */
+                int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 0, nmp;
                 unsigned int mk = 0;
-                nmp = p4_block_run(p4b + (p4bn > 20000 ? p4bn-20000 : 0),
-                                   p4bn > 20000 ? 20000 : p4bn,
-                                   &ca, &ac, &tr, &ak, &sh, &mk, &six);
+                {   /* SIPFAX: this decoder starved the transmit path once (see
+                       p4_block_step) - keep it measured so it cannot happen silently. */
+                    static double worst = 0.0;
+                    struct timespec ta, tb; double ms;
+                    clock_gettime(CLOCK_MONOTONIC, &ta);
+                    nmp = p4_block_step(p4b + (p4bn > 20000 ? p4bn-20000 : 0),
+                                        p4bn > 20000 ? 20000 : p4bn,
+                                        &ca, &ac, &tr, &ak, &sh, &mk, &six);
+                    clock_gettime(CLOCK_MONOTONIC, &tb);
+                    ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
+                    if (ms > worst) {
+                        worst = ms;
+                        { extern int v34_dbg; if (v34_dbg && ms > 8.0)
+                            fprintf(stderr, "[p4blk] step %.1f ms - AUDIO FRAME IS 20 ms\n", ms); }
+                    }
+                }
                 if (nmp) {
                     s->p4_mp_rate_ca = ca; s->p4_mp_rate_ac = ac;
                     s->p4_trellis = tr; s->p4_mp_mask = mk;
@@ -3834,9 +3892,6 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                     { extern int v34_dbg; if (v34_dbg)
                         fprintf(stderr, "[p4blk] LIVE MP READ: %d frames %s ca=%d ac=%d trel=%d ack=%d\n",
                                 nmp, six ? "16pt" : "4pt", ca*2400, ac*2400, tr, ak); }
-                } else {
-                    { extern int v34_dbg; if (v34_dbg)
-                        fprintf(stderr, "[p4blk] LIVE: no MP frames in %d samples\n", p4bn); }
                 }
             }
         }
@@ -3999,6 +4054,62 @@ void V34_mptest(void)
 /* SIPFAX_P4BLOCK=<file.s16> : run the block receiver over a raw 8 kHz capture and report,
    for each window, the 4-point and 16-point TRN scores. Acceptance: the 16-point Phase-4
    TRN window should score ~0.99, matching research/v34-rx. */
+/* SIPFAX: drive the amortised block receiver exactly as the audio callback does - one
+   160-sample frame at a time - and report the WORST per-call latency. That number is the
+   whole point of the amortisation: it must stay far below the 20 ms frame period, because
+   when it did not, our transmit carrier lost ~100 ms every second and no peer would ack. */
+void V34_p4step_test(void)
+{
+    static short buf[P4_MAXIN];
+    static short frame[160];
+    char *fn = getenv("SIPFAX_P4STEP");
+    double t0 = 0.0, worst = 0.0, total = 0.0;
+    int n, i, bn = 0, calls = 0, reads = 0, over = 0;
+    long fed = 0;
+    FILE *f;
+    char *e;
+    if (!fn) return;
+    if ((e = getenv("SIPFAX_P4S_T0")) != 0) t0 = atof(e);
+    f = fopen(fn, "rb");
+    if (!f) { fprintf(stderr, "[p4step] cannot open %s\n", fn); return; }
+    fseek(f, (long)(t0*8000.0)*2, SEEK_SET);
+    p4_block_reset();
+    fprintf(stderr, "[p4step] %s from t=%.1fs, 160-sample frames\n", fn, t0);
+    while ((n = (int)fread(frame, 2, 160, f)) > 0) {
+        if (bn >= P4_MAXIN) {
+            int keep = 24000, off2 = bn - keep;
+            for (i = 0; i < keep; i++) buf[i] = buf[off2 + i];
+            bn = keep;
+        }
+        for (i = 0; i < n && bn < P4_MAXIN; i++) { buf[bn++] = frame[i]; fed++; }
+        if (bn >= 12000) {
+            int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 0, nmp;
+            unsigned int mk = 0;
+            struct timespec ta, tb;
+            double ms;
+            clock_gettime(CLOCK_MONOTONIC, &ta);
+            nmp = p4_block_step(buf + (bn > 20000 ? bn-20000 : 0), bn > 20000 ? 20000 : bn,
+                                &ca, &ac, &tr, &ak, &sh, &mk, &six);
+            clock_gettime(CLOCK_MONOTONIC, &tb);
+            ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
+            total += ms; calls++;
+            if (ms > worst) worst = ms;
+            if (ms > 20.0) over++;
+            if (nmp) {
+                reads++;
+                fprintf(stderr, "  t=%6.2fs  MP READ: %d frames %s ca=%d ac=%d trel=%d ack=%d\n",
+                        t0 + (double)fed/8000.0, nmp, six ? "16pt" : "4pt",
+                        ca*2400, ac*2400, tr, ak);
+            }
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[p4step] %d steps, %d MP reads | worst %.2f ms, mean %.2f ms, over-20ms %d\n",
+            calls, reads, worst, calls ? total/calls : 0.0, over);
+    fprintf(stderr, "[p4step] %s\n", worst < 20.0 ?
+            "OK - every step fits inside one audio frame" : "FAIL - a step exceeds the frame period");
+}
+
 void V34_p4block_test(void)
 {
     static short x[P4_MAXIN];
@@ -4032,18 +4143,18 @@ void V34_p4block_test(void)
                                                2/3 scores 0.71, 4/6 gives 0.975, 6/10 gives 0.985 */
             if ((ev = getenv("SIPFAX_P4B_NCMA")) != 0) nc = atoi(ev);
             if ((ev = getenv("SIPFAX_P4B_NDD")) != 0) nd = atoi(ev);
-            ns = p4_equalize(zi, zq, nz, off, 0, nc, nd, si, sq);
+            ns = p4_equalize(zi, zq, nz, off, 0, nc, nd, 1, si, sq);
             s4  = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 0, V34_GPC);
-            ns = p4_equalize(zi, zq, nz, off, 1, nc, nd, si, sq);
+            ns = p4_equalize(zi, zq, nz, off, 1, nc, nd, 1, si, sq);
             s16 = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC);
         }
-        if (0) ns = p4_equalize(zi, zq, nz, off, 0, 2, 3, si, sq);
+        if (0) ns = p4_equalize(zi, zq, nz, off, 0, 2, 3, 1, si, sq);
         {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp;
             unsigned int mk = 0;
             nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC,
                                &ca, &ac, &tr, &ak, &sh, &mk);
             if (!nmp) {
-                int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, si, sq);
+                int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, 1, si, sq);
                 nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, V34_GPC,
                                    &ca, &ac, &tr, &ak, &sh, &mk);
                 if (nmp) sixteen_mp = 0;

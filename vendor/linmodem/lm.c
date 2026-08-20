@@ -548,6 +548,10 @@ int main(int argc, char **argv)
         char *pb = getenv("SIPFAX_P4BLOCK");
         if (pb) { extern void V34_p4block_test(void); V34_p4block_test(); return 0; }
     }
+    {
+        char *ps = getenv("SIPFAX_P4STEP");
+        if (ps) { extern void V34_p4step_test(void); V34_p4step_test(); return 0; }
+    }
         char *df = getenv("SIPFAX_DECODE_FILE");
         if (df) {
             extern void V34_decode_file(const char *, int);

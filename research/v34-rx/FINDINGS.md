@@ -1023,3 +1023,79 @@ considering, none of them testable with the current tooling:
 The productive next step is not another content or timing hypothesis. It would be to compare
 the RTP streams themselves - packet timing, sizes, timestamps and jitter - between the two
 engines, which is a layer nothing in this investigation has yet examined.
+
+## 26. The RTP layer: we were starving our own transmitter
+
+Every comparison so far had been made on **decoded audio** - the pcap payloads concatenated
+back into a sample stream. That step throws away delivery timing, and delivery timing turned
+out to be where the two engines differ.
+
+Comparing the RTP stream we send against the working slmodem call:
+
+| | slmodem (works) | linmodem (fails) |
+|---|---|---|
+| packets | 2329 over 45.8 s | 1678 over 33.5 s |
+| payload | 160 B, all | 160 B, all |
+| sequence gaps | 0 | 0 |
+| RTP timestamp step | 160, always | 160, always |
+| median inter-packet | 20.01 ms | 19.99 ms |
+| **max inter-packet** | **27.7 ms** | **110.7 ms** |
+| gaps > 40 ms | **0** | **17** |
+| gaps > 100 ms | **0** | **5** |
+
+Nothing is lost: sequence numbers and RTP timestamps are perfectly contiguous, which is
+exactly why every content-level comparison kept coming back clean. The audio is all there.
+What fails is *delivery* - the sender stalls and then emits a burst.
+
+### The stalls are mine, and they are periodic
+
+```
+t= 16.79s   69.8 ms      t= 22.83s  110.7 ms
+t= 17.81s   93.5 ms      t= 23.82s   97.6 ms
+t= 18.83s  106.2 ms      ...        ~1.00 s apart, all the way out
+```
+
+They start at t=16.79 s - the instant our MP begins - and repeat at 1.00 s intervals, which
+is precisely the block receiver's decode cadence (`p4since >= 8000`). And the linmodem calls
+captured *before* the block receiver was wired live show max 23.8 ms and zero stalls.
+
+So our own MP carrier had a ~100 ms hole punched in it, five packet-times wide, every
+second, for its entire duration. A peer has no reason to acknowledge that.
+
+The cause: the decode ran wholly inside the audio callback - front end, plus two
+constellations x sixteen equaliser passes over 20000 samples. About 100 ms of arithmetic
+against a 20 ms frame period. Wiring it live and then, in section 25, making it run *more
+often* made it steadily worse.
+
+### Fix: amortise
+
+At most one bounded unit of work per call - the front end, or a single equaliser pass, or
+the MP decode - so a full decode spans ~18 frames rather than blocking one. The taps were
+already `static`; `p4_equalize` only needed its reset placed under caller control. 4-point
+is now tried first, since that is what the caller actually uses.
+
+Measured by `V34_p4step_test`, which drives the receiver in 160-sample frames exactly as the
+audio callback does:
+
+```
+16-point caller audio: 2216 steps,  5 MP reads, worst 10.18 ms, mean 1.81 ms, 0 over 20 ms
+4-point  caller audio: 2217 steps, 14 MP reads, worst 10.22 ms, mean 1.87 ms, 0 over 20 ms
+```
+
+Both still decode the caller correctly (ca=16800 ac=9600 trel=2), and *more often* than the
+old once-a-second full decode - so the acknowledgement should be seen sooner, not later.
+Worst-case step latency is now instrumented in the live path so this cannot regress quietly.
+
+### What this does and does not explain
+
+It does not by itself explain the missing acknowledgement: calls from before the block
+receiver existed also failed, and they had clean RTP. So this is not the original root cause.
+
+It is, however, a real defect that would independently prevent the handshake, and it had to
+be cleared before any further diagnosis could mean anything.
+
+The transferable lesson is the one that cost nine calls: **comparing decoded content silently
+assumes delivery is equivalent.** `pcap_util.audio()` concatenates payloads in arrival order
+and never looks at sequence numbers or timestamps, so a stalling sender and a clean one
+produce byte-identical audio. When two implementations differ in behaviour but not in
+content, check the layer the comparison discarded.

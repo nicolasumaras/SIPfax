@@ -604,3 +604,39 @@ expose any field-level difference, without a single further call.
 That is a bounded piece of work against captures already in the repo, and unlike the last
 six attempts it cannot come back "no change with no explanation" - either slmodem's frames
 decode and can be compared, or the failure to decode localises the difference itself.
+
+## 17. slmodem's MP decoded - the difference is observed, not inferred (2026-08-20)
+
+`mp_decode.py` adds a 16-point MP decoder (4 bits/symbol: I1,I2 from the differential
+rotation, Q1,Q2 from the base-point index), validated on synthetic MP at both sizes and
+rotation-invariant across all four phases. Applied to the captured transmissions:
+
+| field | **slmodem (acknowledged)** | **ours (never acknowledged)** |
+|---|---|---|
+| MP constellation | **16-point** | **4-point** |
+| call-to-answer rate | 16800 | 16800 |
+| answer-to-call rate | **16800** | **9600** |
+| trellis | **0 = 16-state** | **2 = 64-state** |
+| constellation shaping | **1 = expanded** | **0 = minimum** |
+| rate mask | **0x3fff** | 0x3ffe |
+| aux / asymmetric | 0 / 1 | 0 / 1 |
+
+Both decode with valid CRC, so this is a direct field-by-field comparison of two real
+transmissions - the observation the previous six live tests could not produce.
+
+**The 16-point lead from section 12 was right after all.** It was dismissed because the
+kurtosis classifier was unreliable and because the caller's *own* MP is 4-point (our decoder
+reads it at 2 bits/symbol with valid CRC). Both of those remain true - but they do not imply
+the *answer* modem may use 4-point. slmodem, which this caller acknowledges, sends 16-point.
+
+A second difference is just as interesting: **slmodem advertises its own capabilities rather
+than mirroring the caller's.** It answers the caller's `trel=2` request with `trel=0`, and
+offers `ac=16800` where the caller asked for 9600. Our "mirror the caller exactly" behaviour
+- added in section 10 and never independently justified - is not what the working peer does.
+
+### Next
+
+The 16-point MP path already exists and is decoupled from TRN (`mp_16point`, section 12), so
+it can be enabled without the TRN regression that sank the first attempt. Given that six
+single-variable tests produced nothing, the efficient move is to match the known-good peer
+on all of these fields at once, then narrow down afterwards if it works.

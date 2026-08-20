@@ -1423,6 +1423,9 @@ static void V34_send_E(V34DSPState *s)
     V34_mod_MP(s, buf, 20, s->is_16states);
 }
 
+/* SIPFAX: stale-J flush latch, in samples. -1 = not yet latched, 0 = done. */
+int sipfax_jmute = -1;
+
 /* J sequence */
 #define J4POINTS   0x0991
 #define J16POINTS  0x0D91
@@ -1583,15 +1586,20 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
         case V34_STARTUP4_TRN:
             V34_send_TRN(s);                     /* 1024T chunks; >=512T, cap ~1.8s */
             s->p4_trn_tx++;
-            {   /* SIPFAX: one chunk is 1024T, already double the 512T minimum, so go to
-                       MP as soon as it is sent. SIPFAX_P4_TRN_CHUNKS overrides. */
-                int want = 1; char *tc = getenv("SIPFAX_P4_TRN_CHUNKS");
-                if (tc) { want = atoi(tc); if (want < 1) want = 1; }
-                if (s->p4_trn_tx >= want) s->p4_mp_hunt_rx = 1;
+            {   /* SIPFAX: the caller trains its receiver for OUR signal on this TRN,
+                       and 16-point training converges slower - slmodem sends ~1.72 s.
+                       An earlier shortcut ended TRN the moment the caller was ready to
+                       receive MP (p4_mp_hunt_rx, which the bridge refreshes every block),
+                       which cut the TRN to 0.9 s live. Honor the chunk count strictly;
+                       default 6 x 1024T = 1.79 s, SIPFAX_P4_TRN_CHUNKS overrides. */
             }
-            if ((s->p4_mp_hunt_rx && s->p4_trn_tx >= 1) || s->p4_trn_tx >= 6) {
+            {
+                int want = 6; char *tc = getenv("SIPFAX_P4_TRN_CHUNKS");
+                if (tc) { want = atoi(tc); if (want < 1) want = 1; }
+                if (s->p4_trn_tx >= want) {
                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: TRN done (%d chunks) -> MP\n", s->p4_trn_tx); }
                 s->state = V34_STARTUP4_MP;
+                }
             }
             break;
         case V34_STARTUP4_MP:
@@ -3816,12 +3824,17 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
         for (k = 0; k < 16; k++) rxc |= db[i+co+k] << (15-k);
         if (calc_crc(cov, cn) != rxc) continue;
         found++;
-        if (found == 1) {
+        {   /* SIPFAX: report the LAST frame's fields, and OR the ack across the whole
+               window. Reporting the FIRST frame - the OLDEST audio in a 2.5 s sliding
+               window - hid the caller's ack: the working caller flips ack 0->1 mid-run
+               (slmodem's own MP does the same, 24 ack=0 frames then 4 ack=1), so the
+               window's head stays ack=0 for up to 2.5 s after the caller has actually
+               acknowledged - longer than it waits for our E before retraining. */
             if (out_ca)  *out_ca  = (db[i+20]<<3)|(db[i+21]<<2)|(db[i+22]<<1)|db[i+23];
             if (out_ac)  *out_ac  = (db[i+24]<<3)|(db[i+25]<<2)|(db[i+26]<<1)|db[i+27];
             if (out_trel) *out_trel = (db[i+29]<<1)|db[i+30];
             if (out_shape) *out_shape = db[i+32];
-            if (out_ack) *out_ack = db[i+33];
+            if (out_ack) { if (found == 1) *out_ack = db[i+33]; else *out_ack |= db[i+33]; }
             if (out_mask) { unsigned int m = 0; for (k = 0; k < 15; k++) m |= (unsigned int)db[i+35+k] << k; *out_mask = m; }
         }
         i += L - 1;
@@ -3897,7 +3910,14 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
         static short p4b[P4_MAXIN];
         static int p4bn = 0;
         if (s->p4_mode == 0) { p4bn = 0; p4_block_reset(); }
-        else if (srx_rx16() && !s->p4_e_rx && !s->p4_mpp_rx) {
+        else if (!s->p4_e_rx && !s->p4_mpp_rx) {
+            /* SIPFAX: this gate used to be srx_rx16() && ..., which conflated two
+               meanings - "the 16-pt block path is enabled" and "the caller transmits
+               16-pt". Re-keying srx_rx16() to what our J commanded (correct for the
+               Godard radius) silently disabled the block receiver entirely: a full live
+               call went J16-vote -> 16-pt TRN -> MP with zero LIVE MP READs, we never
+               acked, and the caller restarted. The block receiver must run in Phase 4
+               unconditionally - it tries both constellations itself. */
             /* SIPFAX: keep re-reading. The caller sets its acknowledge bit only after it
                has received OUR MP, so its MP' arrives strictly later than the first MP we
                decode. Reading once would mean never seeing the acknowledgement that gates
@@ -4286,6 +4306,24 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     { static int rxcma = -1; if (rxcma < 0) { char *e = getenv("SIPFAX_RX_CMA"); rxcma = e ? atoi(e) : 0; }
       if (rxcma) { extern void V34_demod_cma(V34DSPState*, const s16*, unsigned int); V34_demod_cma(&s->v34_rx, input, nb_samples); }
       else V34_demod(&s->v34_rx, input, nb_samples); }
+    {   /* SIPFAX: flush the stale J HERE, before this block's V34_mod sees J_received
+           and queues S into the same tx buffer. While muted (p3go && !J_received) the
+           modulator kept cycling J through the queue, and the leftover ~100 symbols
+           drained AUDIBLY at unmute - the Phase-4 burst opened with stale J and a timed
+           mute either under- or over-shot (its first version swallowed S entirely; its
+           second still shaved 12 ms off S's head). The exact fix: tx_buf is both the
+           symbol queue and the tx-filter history, so zeroing it makes the leftover J
+           exactly silence and S emerges whole, on time, with no arithmetic. S cannot be
+           in the buffer yet - it is queued only after J_received bridges, below. */
+        extern int sipfax_jmute;
+        if (sipfax_jmute < 0 && s->v34_rx.J_received && !s->v34_tx.J_received) {
+            memset(s->v34_tx.tx_buf, 0, sizeof(s->v34_tx.tx_buf));
+            sipfax_jmute = 0;
+            { extern int v34_dbg; if (v34_dbg)
+                fprintf(stderr, "[p4] stale J zeroed in tx queue (%d syms) - S goes out whole\n",
+                        s->v34_tx.tx_buf_size); }
+        }
+    }
     s->v34_tx.J_received = s->v34_rx.J_received;   /* bridge caller-J -> TX WAIT_J */
     /* SIPFAX: obey the caller's J constellation command (10.1.3.3): 0x0D91 means OUR
        Phase-4 TRN, MP, MP' and E must all be 16-point. slmodem - which this caller
@@ -4377,16 +4415,8 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                burst opened with 94 symbols (28 ms) of stale J before S. slmodem opens
                with S directly. Keep muting for exactly the queued residue (7/3 samples
                per symbol at 8 kHz) so S is the first thing on the wire. */
-            {   static int jmute = -1;
-                if (s->v34_rx.J_received && jmute < 0)
-                    jmute = ((s->v34_tx.tx_buf_size + s->v34_tx.tx_filter_wsize)*7 + 2)/3 + 8;
-                if (jmute > 0) {
-                    int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
-                    jmute -= nb_samples;
-                    if (jmute <= 0) { extern int v34_dbg; if (v34_dbg)
-                        fprintf(stderr, "[p4] stale-J flushed, TX unmuted at S\n"); }
-                }
-            }
+            /* (stale-J handling moved to the bridge: the queued symbols are zeroed
+               in place, so no output muting is needed here any more) */
             if (yielding || (s->p3go && !s->v34_rx.J_received)) {
                 int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
                 if (yielding && cyc < 2300 + (nb_samples*1000/8000) + 1)

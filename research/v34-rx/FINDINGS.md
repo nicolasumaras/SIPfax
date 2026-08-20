@@ -142,3 +142,61 @@ section 6 already identified as the way off blind adaptation.
 rather than constants), then lock Phase-3 TRN in the slmodem reference. That single change
 both validates the pipeline against a known constellation on real audio and unlocks
 TRN-trained equalization for data mode.
+
+## 8. Rate-agnostic front end + the control that explains everything (2026-08-20)
+
+`v34_front.py` replaces the fixed-3429 front end. Every V.34 symbol rate has an exact
+rational relation to 8 kHz, so each gets an integer samples-per-symbol at a small upsample
+factor (`symbol_rate = 2400*a/c`, `carrier = symbol_rate*d/e` from linmodem's `S_tab`):
+
+| rate | a/c | US | SPS | carrier low/high |
+|---|---|---|---|---|
+| 2400 | 1/1 | 3 | 10 | 1600 / 1800 |
+| 2743 | 8/7 | 12 | 35 | 1646 / 1829 |
+| 2800 | 7/6 | 7 | 20 | 1680 / 1867 |
+| 3000 | 5/4 | 3 | 8 | 1800 / 2000 |
+| 3200 | 4/3 | 2 | 5 | 1829 / 1920 |
+| 3429 | 10/7 | 3 | 7 | 1959 (both) |
+
+Validated **<0.61% EVM on clean synthetic at all 11 rate/carrier combinations**.
+
+### The pipeline is sound - proven on real audio
+
+Scanning startup across all rates, the linmodem capture **locks 4-point at 3.5-4.4% EVM
+(~29 dB) at 2400 baud**, t=3.4-6.2 s. This is the validation that was impossible before:
+a known constellation, in real audio, recovered cleanly. The old front end could never see
+it because it hard-coded 3429.
+
+### Why no data segment ever resolved
+
+Scanning both data segments across all 11 rates x constellations L=4..128:
+
+| segment | best margin (EVM / (dmin/2)) |
+|---|---|
+| linmodem data | 0.76 |
+| **slmodem data (decodes at 33.6!)** | **0.85** |
+
+**slmodem's data signal shows no lattice structure under this pipeline either** - and that
+signal demonstrably decodes, since the call connects at 33.6 and carries data. So the
+absence of structure is *expected* for a matched-filter + timing + slicer chain, and was
+never evidence that linmodem's signal was degraded.
+
+This retires the "~30 dB unexplained gap" from section 5. There is no anomaly: an
+unequalized dispersive V.34 data signal simply does not sit on the lattice, and the ~13%
+"EVM" was just the best fit of a lattice to an unequalized signal. Nothing about the line,
+the constellation model, or the caller was wrong.
+
+### What is actually required next
+
+Data-mode demodulation needs **equalizer training on the known Phase-3 TRN**, then carrying
+those taps into data mode - exactly what a real V.34 receiver does, and what blind CMA/DD
+has failed at throughout this work. That is now reachable, because the front end can finally
+lock TRN (3.5% EVM above). Sequence:
+
+1. Locate the caller's Phase-3 TRN precisely and confirm its symbol rate (the 4-point lock
+   above is at 2400 baud; the data segment's cyclostationary line reads 3428 Hz, so the
+   Phase-3 -> data rate relationship must be pinned down before taps can be carried over).
+2. Train the equalizer on TRN's known scrambled 4-point sequence (data-aided LMS/LS).
+3. Carry the trained taps into data mode, add carrier/timing tracking and the 44.5 ppm clock
+   correction, then slice against the 48-point constellation.
+4. Only then judge the residual EVM - and only then is the trellis decoder meaningful.

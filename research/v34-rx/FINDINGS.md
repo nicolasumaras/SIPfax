@@ -503,3 +503,57 @@ relationship between the two modems, and it is consistent with the one thing eve
 test has shown: our MP frames are individually perfect, yet the caller never acknowledges
 them. Implementing real J' detection - and anchoring the TRN/MP transition on it rather than
 on a re-hunt heuristic - is the next concrete piece of work.
+
+## 15. J' detection works live - the acknowledgement is still withheld (2026-08-20)
+
+`SIPFAX_JP=1` tested on a live call:
+
+```
+[srx] caller J detected at sym 10044 (phase 3, 29/32) -> J_received
+[srx] caller J' detected at sym 10509 (phase 6)       -> Phase 4 anchored
+[p4]  MP READ (CRC): ca=16800 ac=9600 trellis=64state ack=0
+```
+
+J' lands 465 symbols after J - matching the offline test exactly - so the detector behaves
+identically on live audio and the section 11.4.1.2.1 deviation is genuinely closed.
+
+**But the caller still never acknowledges:** 151x `ack=0 crc=OK`, no valid MP'.
+
+### The complete picture after five live tests
+
+Every element of the exchange is now verified correct on our side:
+
+| element | status |
+|---|---|
+| Phase 2/3 startup, J detection | works (caller advances to Phase 4) |
+| S / S-bar (128T / 16T) | correct, matches slmodem (144 vs 145 symbols) |
+| J' detection and Phase-4 anchoring | **now implemented, works live** |
+| Phase-4 TRN | 2373 symbols, well above the 512T minimum |
+| our MP frames | valid - 653 decode with CRC OK from our own audio |
+| our MP parameters | mirror the caller's proposal exactly (16800/9600/64-state) |
+| our signal quality | 1.7-2.9% EVM |
+| the caller's own MP | decodes for us, CRC OK, 151 frames per call |
+
+So both modems complete the entire startup and exchange MP successfully in both directions.
+The *only* missing step is the caller setting its acknowledge bit.
+
+### What this narrows it to
+
+Per 11.4.1.1.2 the call modem sets ack=1 "after receiving the answer modem's MP sequence".
+Ours are demonstrably well-formed and on the wire for tens of seconds. Since content,
+timing, framing, level and constellation have each been eliminated, what remains is
+something about how the caller's *receiver* locks onto our MP stream - not about the frames
+themselves. Candidates not yet tested:
+
+1. **We may switch to MP' too early.** We send MP (ack=0) for only ~2 s before switching, on
+   receiving the caller's MP - which is what 11.4.1.2.2 says to do, but if the caller has not
+   yet synchronised to our MP stream it may never see an ack=0 frame at all. Holding MP
+   (ack=0) for a fixed longer interval before honouring the switch is a cheap experiment.
+2. **Scrambler polarity on our MP.** We scramble with GPA as the answer modem. If the caller
+   expects the opposite assignment for MP specifically, every frame would descramble to
+   noise for it while remaining self-consistent for us - which matches the symptom exactly
+   (we can decode our own frames perfectly; the caller behaves as though it never saw them).
+
+(2) is worth testing first: it is a one-line change, it is invisible to all of our own
+verification (which uses the same polarity to encode and decode), and it would explain why
+everything looks perfect from our side while the caller acts as if nothing arrived.

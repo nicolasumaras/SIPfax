@@ -1278,21 +1278,40 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     int i,j,crc;
 
     p = buf;
-    put_bits(&p, 17, 0x1ffff); /* frame sync */
-    put_bits(&p, 1, 0); /* start bit */
-    put_bits(&p, 1, type); /* type: 1 */
-    put_bits(&p, 1, 0); /* reserved */
-    put_bits(&p, 4, 12); /* call to answer max rate: 28800 */
-    put_bits(&p, 4, 12); /* answer to call max rate: 28800 */
-    put_bits(&p, 1, 0); /* no aux channel */
-    put_bits(&p, 2, 0); /* 0=16 state trellis */
-    put_bits(&p, 1, 0); /* non linear encoder disabled */
-    put_bits(&p, 1, 0); /* constellation shaping, 0=minimum, 1=expanded */
-    put_bits(&p, 1, do_ack); /* acknowledge bit */
-    
-    put_bits(&p, 1, 0); /* start bit */
-    put_bits(&p, 15, 0x7ff8); /* all rates enabled up to 28800 */
-    put_bits(&p, 1, 1); /* asymetric data rate enable */
+    /* SIPFAX: mirror the parameters the caller proposed in its MP instead of
+       advertising a fixed 28800/28800 + 16-state trellis. A peer will not
+       acknowledge an MP whose parameters contradict its own proposal, and without
+       its MP' we never advance to E/B1. Before the caller's MP arrives we fall
+       back to our own maximum. */
+    {
+        int r_ca, r_ac, trel, mi;
+        unsigned int msk;
+        if (s->p4_mp_rx) {
+            r_ca = s->p4_mp_rate_ca;
+            r_ac = s->p4_mp_rate_ac;
+            trel = s->p4_trellis;
+            msk  = s->p4_mp_mask;
+        } else {
+            r_ca = 12; r_ac = 12; trel = 0; msk = 0x0fff;
+        }
+        put_bits(&p, 17, 0x1ffff); /* frame sync */
+        put_bits(&p, 1, 0); /* start bit */
+        put_bits(&p, 1, type);
+        put_bits(&p, 1, 0); /* reserved */
+        put_bits(&p, 4, r_ca); /* call to answer max rate (negotiated) */
+        put_bits(&p, 4, r_ac); /* answer to call max rate (negotiated) */
+        put_bits(&p, 1, 0); /* no aux channel */
+        put_bits(&p, 2, trel); /* trellis: match the caller's selection */
+        put_bits(&p, 1, 0); /* non linear encoder disabled */
+        put_bits(&p, 1, 0); /* constellation shaping, 0=minimum */
+        put_bits(&p, 1, do_ack); /* acknowledge bit */
+
+        put_bits(&p, 1, 0); /* start bit */
+        /* emit the mask so that frame bit 35+i == bit i of msk (the order our
+           decoder reads, and the caller's own mask as we received it) */
+        for (mi = 0; mi < 15; mi++) put_bits(&p, 1, (msk >> mi) & 1);
+        put_bits(&p, 1, 1); /* asymetric data rate enable */
+    }
     
     if (type == 1) {
         for(i=0;i<3;i++) {
@@ -1323,6 +1342,15 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         put_bits(&p, 2, 0); /* fill bit */
     }
 
+    {   /* SIPFAX: SIPFAX_MPTEST -> dump the generated frame bits for offline checking */
+        char *mt = getenv("SIPFAX_MPTEST");
+        if (mt) {
+            FILE *mf = fopen(mt, "a"); int mi2;
+            if (mf) { for (mi2 = 0; mi2 < (p - buf); mi2++) fputc('0' + buf[mi2], mf);
+                      fputc('\n', mf); fclose(mf); }
+            return;
+        }
+    }
     /* now we transmit the buffer */
     V34_mod_MP(s, buf, p - buf, s->is_16states);
 }
@@ -3412,6 +3440,26 @@ void V34_dataloop_test(void)
         if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
       { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
         fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1)); } }
+}
+
+
+void V34_mptest(void)
+{
+    static V34DSPState s; V34State p;
+    memset(&s, 0, sizeof(s)); memset(&p, 0, sizeof(p));
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    p.S = V34_S3429; p.R = 16800; p.use_high_carrier = 1; p.calling = 0;
+    p.conv_nb_states = 64;
+    V34_init_low(&s, &p, 0);
+    /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
+    s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
+    s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
+    V34_send_MP(&s, 1, 0);      /* MP  */
+    V34_send_MP(&s, 1, 1);      /* MP' */
+    s.p4_mp_rx = 0;             /* pre-negotiation fallback */
+    V34_send_MP(&s, 1, 0);
+    fprintf(stderr, "[mptest] 3 frames dumped\n");
 }
 
 /* init the V34 constants. Should be launched once */

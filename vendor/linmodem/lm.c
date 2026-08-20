@@ -540,6 +540,10 @@ int main(int argc, char **argv)
         char *dl = getenv("SIPFAX_DATALOOP");
         if (dl) { extern void V34_dataloop_test(void); V34_dataloop_test(); return 0; }
     }
+    {
+        char *mr = getenv("SIPFAX_MPTEST_RUN");
+        if (mr) { extern void V34_mptest(void); V34_mptest(); return 0; }
+    }
         char *df = getenv("SIPFAX_DECODE_FILE");
         if (df) {
             extern void V34_decode_file(const char *, int);

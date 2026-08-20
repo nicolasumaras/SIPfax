@@ -3631,6 +3631,279 @@ void V34_mptest(void)
     fprintf(stderr, "[mptest] 3 frames dumped\n");
 }
 
+
+/* ===================================================================
+   SIPFAX: Phase-4 block receiver (16-point capable).
+
+   A direct port of the chain validated in research/v34-rx, which decodes the captured
+   caller Phase 4 at TRN score 0.99 where the streaming receiver reaches only chance. The
+   streaming chain is built around a 4-point constant-modulus assumption and its output
+   measures kurtosis 1.001 - it destroys the amplitude structure a 16-point constellation
+   carries its data in.
+
+   Phase 4 lasts a few seconds, so this buffers it and processes the block. That also
+   restores the multi-pass equalizer convergence the Python version relies on, which a
+   single-pass streaming receiver cannot do.
+
+       3x interpolate -> exact-rational downconvert -> RRC (7 samples/symbol)
+       -> Oerder-Meyr timing (closed form) -> T/2 FSE, CMA then decision-directed,
+          multiple passes, with a 16-point target
+   =================================================================== */
+
+#define P4_US    3                  /* 8 kHz -> 24 kHz */
+#define P4_SPS   7                  /* exactly 7 samples/symbol at 24 kHz */
+#define P4_MAXIN 48000              /* 6 s of 8 kHz input */
+#define P4_MAXZ  (P4_MAXIN*P4_US)
+#define P4_MAXSY (P4_MAXZ/P4_SPS + 8)
+#define P4_NT    31                 /* FSE taps */
+
+/* the 16 Phase-4 points: base[q] rotated clockwise by z*90 (10.1.3.6) */
+static const double p4_bi[4] = { 1, -3, 1, -3 };
+static const double p4_bq[4] = { 1, 1, -3, -3 };
+
+static void p4_point(int q, int z, double *x, double *y)
+{
+    double a = p4_bi[q], b = p4_bq[q], t;
+    int k;
+    for (k = 0; k < z; k++) { t = b; b = -a; a = t; }
+    *x = a; *y = b;
+}
+
+/* root-raised-cosine, beta 0.15, at P4_SPS samples/symbol */
+static double p4_rrc_tap(int i, int n, double beta, double sps)
+{
+    double t = (i - (n-1)/2.0)/sps, v, d;
+    if (fabs(t) < 1e-8) return 1.0 - beta + 4.0*beta/M_PI;
+    if (beta > 0 && fabs(fabs(t) - 1.0/(4.0*beta)) < 1e-6)
+        return (beta/sqrt(2.0))*((1+2/M_PI)*sin(M_PI/(4*beta)) + (1-2/M_PI)*cos(M_PI/(4*beta)));
+    d = M_PI*t*(1.0 - (4.0*beta*t)*(4.0*beta*t));
+    v = sin(M_PI*t*(1-beta)) + 4.0*beta*t*cos(M_PI*t*(1+beta));
+    return v/d;
+}
+
+/* Oerder-Meyr: closed-form symbol timing, in fractions of a symbol */
+static double p4_timing(const double *zi, const double *zq, int n)
+{
+    double sr = 0, si = 0, ph;
+    int m, M = (n/P4_SPS)*P4_SPS;
+    for (m = 0; m < M; m++) {
+        double e = zi[m]*zi[m] + zq[m]*zq[m];
+        double a = -2.0*M_PI*m/P4_SPS;
+        sr += e*cos(a); si += e*sin(a);
+    }
+    ph = atan2(si, sr);
+    ph = -ph/(2.0*M_PI);
+    while (ph < 0) ph += 1.0;
+    while (ph >= 1.0) ph -= 1.0;
+    return ph;
+}
+
+/* front end: 8 kHz real passband -> 24 kHz complex baseband, matched filtered */
+static int p4_front(const short *x, int n, double *zi, double *zq)
+{
+    static double up[P4_MAXZ];
+    static double h[P4_SPS*24+1];
+    int nz = n*P4_US, i, k, nh = P4_SPS*24+1;
+    double s = 0;
+    if (nz > P4_MAXZ) { nz = P4_MAXZ; n = nz/P4_US; }
+    /* 3x interpolation: zero-stuff then lowpass with the RRC itself (it is the
+       matched filter and band-limits to well under 4 kHz) */
+    for (i = 0; i < nz; i++) up[i] = 0;
+    for (i = 0; i < n; i++) up[i*P4_US] = x[i];
+    for (i = 0; i < nh; i++) { h[i] = p4_rrc_tap(i, nh, 0.15, P4_SPS); s += h[i]*h[i]; }
+    s = sqrt(s);
+    for (i = 0; i < nh; i++) h[i] /= s;
+    /* downconvert (exact: 4/49 cycles per 24 kHz sample) then matched filter */
+    for (i = 0; i < nz; i++) {
+        double a = -2.0*M_PI*(4.0/49.0)*i, c = cos(a), sn = sin(a);
+        double v = up[i]*P4_US;
+        zi[i] = v*c; zq[i] = v*sn;
+    }
+    {   /* in-place FIR over the complex baseband */
+        static double ti[P4_MAXZ], tq[P4_MAXZ];
+        for (i = 0; i < nz; i++) {
+            double ai = 0, aq = 0;
+            int lo = i - nh/2;
+            for (k = 0; k < nh; k++) {
+                int j = lo + k;
+                if (j >= 0 && j < nz) { ai += h[k]*zi[j]; aq += h[k]*zq[j]; }
+            }
+            ti[i] = ai; tq[i] = aq;
+        }
+        for (i = 0; i < nz; i++) { zi[i] = ti[i]; zq[i] = tq[i]; }
+    }
+    {   /* normalise to unit mean power */
+        double p = 0;
+        for (i = 0; i < nz; i++) p += zi[i]*zi[i] + zq[i]*zq[i];
+        p = (nz > 0) ? sqrt(p/nz) : 1.0;
+        if (p > 1e-12) for (i = 0; i < nz; i++) { zi[i] /= p; zq[i] /= p; }
+    }
+    return nz;
+}
+
+/* nearest point of the signal set; returns (q,z) and optionally the point itself */
+static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *dx, double *dy)
+{
+    int q, z, bq2 = 0, bz = 0, nq = sixteen ? 4 : 1;
+    double bd = 1e30, px, py;
+    for (q = 0; q < nq; q++)
+        for (z = 0; z < 4; z++) {
+            double ex, ey, d;
+            p4_point(q, z, &px, &py);
+            ex = x - px; ey = y - py; d = ex*ex + ey*ey;
+            if (d < bd) { bd = d; bq2 = q; bz = z; }
+        }
+    *qo = bq2; *zo = bz;
+    if (dx) { p4_point(bq2, bz, &px, &py); *dx = px; *dy = py; }
+}
+
+/* T/2 fractionally-spaced equalizer: CMA warm-up then decision-directed, multi-pass. */
+static int p4_equalize(const double *zi, const double *zq, int nz, double off,
+                       int sixteen, int ncma, int ndd, double *si, double *sq)
+{
+    static double wi[P4_NT], wq[P4_NT], bufi[P4_NT], bufq[P4_NT];
+    double R2 = sixteen ? 1.32 : 1.0;          /* Godard radius, unit mean power */
+    double scale = sixteen ? sqrt(10.0) : sqrt(2.0);   /* base units -> unit power */
+    int p, i, ns = 0;
+    for (i = 0; i < P4_NT; i++) { wi[i] = 0; wq[i] = 0; }
+    wi[P4_NT/2] = 1.0;
+    for (p = 0; p < ncma + ndd; p++) {
+        int dd = (p >= ncma), cnt = 0;
+        double pos = off*P4_SPS + P4_SPS*8, th = 0, fr = 0, g = 1.0;
+        for (i = 0; i < P4_NT; i++) { bufi[i] = 0; bufq[i] = 0; }
+        ns = 0;
+        while (pos < nz - 2) {
+            int i0 = (int)pos, k;
+            double f = pos - i0, yi, yq, oi, oq, nrm = 1e-2;
+            yi = zi[i0]*(1-f) + zi[i0+1]*f;
+            yq = zq[i0]*(1-f) + zq[i0+1]*f;
+            for (k = P4_NT-1; k > 0; k--) { bufi[k] = bufi[k-1]; bufq[k] = bufq[k-1]; }
+            bufi[0] = yi; bufq[0] = yq;
+            oi = 0; oq = 0;
+            for (k = 0; k < P4_NT; k++) {
+                oi += wi[k]*bufi[k] - wq[k]*bufq[k];
+                oq += wi[k]*bufq[k] + wq[k]*bufi[k];
+                nrm += bufi[k]*bufi[k] + bufq[k]*bufq[k];
+            }
+            cnt++;
+            if (cnt & 1) { pos += P4_SPS/2.0; continue; }   /* T/2: adapt on symbol instants */
+            {
+                double ei, eq, mu, ypi, ypq, c = cos(-th), s2 = sin(-th);
+                ypi = (oi*c - oq*s2)*g; ypq = (oi*s2 + oq*c)*g;
+                if (!dd) {
+                    double m2 = oi*oi + oq*oq, gg = R2 - m2;
+                    ei = gg*oi; eq = gg*oq; mu = 2e-3;
+                } else {
+                    int q2, z2; double dxx, dyy, pe, dri, drq, cc, ss;
+                    p4_slice(ypi*scale, ypq*scale, sixteen, &q2, &z2, &dxx, &dyy);
+                    dxx /= scale; dyy /= scale;
+                    pe = atan2(ypq*dxx - ypi*dyy, ypi*dxx + ypq*dyy);
+                    fr += 1e-4*pe; th += fr + 5e-3*pe;
+                    g *= (1.0 + 2e-4*(sqrt(dxx*dxx+dyy*dyy) - sqrt(ypi*ypi+ypq*ypq)));
+                    cc = cos(th); ss = sin(th);
+                    dri = (dxx*cc - dyy*ss)/g; drq = (dxx*ss + dyy*cc)/g;
+                    ei = dri - oi; eq = drq - oq; mu = 2e-3;
+                }
+                for (k = 0; k < P4_NT; k++) {
+                    wi[k] += mu*(ei*bufi[k] + eq*bufq[k])/nrm;
+                    wq[k] += mu*(eq*bufi[k] - ei*bufq[k])/nrm;
+                }
+                if (ns < P4_MAXSY) { si[ns] = ypi; sq[ns] = ypq; ns++; }
+            }
+            pos += P4_SPS/2.0;
+        }
+    }
+    return ns;
+}
+
+/* self-synchronising descrambler: out = MSB(reg) ^ in, reg driven by the RECEIVED bit */
+static int p4_descr_ones(const int *bits, int n, int poly)
+{
+    unsigned int reg = 0;
+    int i, ones = 0;
+    for (i = 0; i < n; i++) {
+        int o = (int)((reg >> 22) & 1) ^ bits[i];
+        reg = (reg << 1) & 0x7fffff;
+        if (bits[i]) reg ^= (unsigned int)poly;
+        ones += o;
+    }
+    return ones;
+}
+
+/* TRN score: ABSOLUTE rotation (10.1.3.6). ~1.0 => TRN decoded. */
+static double p4_trn_score(const double *si, const double *sq, int ns, int sixteen, int poly)
+{
+    static int bits[P4_MAXSY*4];
+    double best = 0, pw = 0, scale;
+    int rot, i;
+    for (i = 0; i < ns; i++) pw += si[i]*si[i] + sq[i]*sq[i];
+    if (ns < 64 || pw <= 0) return 0;
+    scale = sqrt((sixteen ? 10.0 : 2.0)*ns/pw);
+    for (rot = 0; rot < 4; rot++) {
+        int nb = 0, on;
+        double cr = cos(rot*M_PI/2), sr = sin(rot*M_PI/2), f;
+        for (i = 0; i < ns; i++) {
+            double x = (si[i]*cr - sq[i]*sr)*scale, y = (si[i]*sr + sq[i]*cr)*scale;
+            int q2, z2;
+            p4_slice(x, y, sixteen, &q2, &z2, NULL, NULL);
+            bits[nb++] = z2 & 1; bits[nb++] = (z2 >> 1) & 1;
+            if (sixteen) { bits[nb++] = q2 & 1; bits[nb++] = (q2 >> 1) & 1; }
+        }
+        on = p4_descr_ones(bits, nb, poly);
+        f = (double)on/nb;
+        if (f < 0.5) f = 1.0 - f;
+        if (f > best) best = f;
+    }
+    return best;
+}
+
+/* SIPFAX_P4BLOCK=<file.s16> : run the block receiver over a raw 8 kHz capture and report,
+   for each window, the 4-point and 16-point TRN scores. Acceptance: the 16-point Phase-4
+   TRN window should score ~0.99, matching research/v34-rx. */
+void V34_p4block_test(void)
+{
+    static short x[P4_MAXIN];
+    static double zi[P4_MAXZ], zq[P4_MAXZ], si[P4_MAXSY], sq[P4_MAXSY];
+    char *fn = getenv("SIPFAX_P4BLOCK");
+    double t0 = 0, wsec = 1.2, tend = 60.0;
+    char *e;
+    FILE *f;
+    if (!fn) return;
+    if ((e = getenv("SIPFAX_P4B_T0")) != 0) t0 = atof(e);
+    if ((e = getenv("SIPFAX_P4B_T1")) != 0) tend = atof(e);
+    if ((e = getenv("SIPFAX_P4B_W")) != 0) wsec = atof(e);
+    f = fopen(fn, "rb");
+    if (!f) { fprintf(stderr, "[p4blk] cannot open %s\n", fn); return; }
+    fprintf(stderr, "[p4blk] window  4pt-TRN  16pt-TRN   (>=0.90 = decoded)\n");
+    for (; t0 < tend; t0 += wsec) {
+        int n, nz, ns;
+        double off, s4, s16;
+        if (fseek(f, (long)(t0*8000.0)*2, SEEK_SET) != 0) break;
+        n = (int)fread(x, 2, (size_t)(wsec*8000.0), f);
+        if (n < 4000) break;
+        {   /* skip silence */
+            double p = 0; int i;
+            for (i = 0; i < n; i++) p += (double)x[i]*x[i];
+            if (sqrt(p/n) < 250) continue;
+        }
+        nz = p4_front(x, n, zi, zq);
+        off = p4_timing(zi, zq, nz);
+        {   int nc = 6, nd = 10; char *ev;   /* 16-point needs the extra passes:
+                                               2/3 scores 0.71, 4/6 gives 0.975, 6/10 gives 0.985 */
+            if ((ev = getenv("SIPFAX_P4B_NCMA")) != 0) nc = atoi(ev);
+            if ((ev = getenv("SIPFAX_P4B_NDD")) != 0) nd = atoi(ev);
+            ns = p4_equalize(zi, zq, nz, off, 0, nc, nd, si, sq);
+            s4  = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 0, V34_GPC);
+            ns = p4_equalize(zi, zq, nz, off, 1, nc, nd, si, sq);
+            s16 = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC);
+        }
+        if (0) ns = p4_equalize(zi, zq, nz, off, 0, 2, 3, si, sq);
+        fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s\n", t0, s4, s16,
+                (s16 >= 0.90) ? "   <== 16-POINT TRN" : (s4 >= 0.90 ? "   <== 4-point TRN" : ""));
+    }
+    fclose(f);
+}
+
 /* init the V34 constants. Should be launched once */
 void V34_static_init(void)
 {

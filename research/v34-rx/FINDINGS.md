@@ -919,3 +919,46 @@ remaining candidates are fine-grained timing within Phase 4 - our stages run sev
 longer than slmodem's - or a property of how the audio reaches the caller that the two
 engines drive differently. Both would require instrumenting the *process* rather than the
 *content*, which is a different kind of investigation from everything done so far.
+
+## 24. Phase-4 timeline: the caller is not ignoring us, it is TIMING OUT and restarting
+
+`timeline.py` labels every 0.5 s window of both directions using the decoders built here
+(`.` silence, `I` INFO, `S` S/S-bar, `4`/`6` TRN 4/16-point, `m` MP, `a` MP with ack=1,
+`D` data). Comparing the two calls:
+
+```
+WORKING (slmodem)
+   caller: ...DD?44?444aDDDDDDD          TRN -> MP ALREADY ack=1 -> DATA
+   us    : 44??....D?6?IDDIDIDD
+
+FAILING (linmodem, call 9)
+   caller: ....DD4444?4?44?mmmm?mSSSSSSSSSSSSSSSSSS
+   us    : ?II?........44?4m??a??aa??aa??a??a??aa??
+                            ^^ we DO send MP' (ack=1)
+```
+
+Two things this makes visible that no content comparison could:
+
+1. **We do send MP'** - the `a` windows confirm the acknowledge bit is set on the wire, so
+   our side of the protocol is behaving.
+2. **The caller does not ignore us - it TIMES OUT and restarts.** After roughly 3 s of MP
+   with `ack=0` it switches to `SSSSSSSS`, i.e. S/S-bar, which is the start of Phase 4
+   again. That is the recovery in **11.4.2.1.2**: *"If, after sending the J' sequence, the
+   modem has not received the E sequence for the following timeout period, it shall
+   initiate the retrain procedure... 2500 ms plus two round trip delays"*.
+
+So the failure is a **deadlock against a deadline**. The caller is waiting for our **E**.
+We only send E after seeing its MP' - and it only sets MP' after accepting our MP. Whatever
+prevents it accepting our MP, the consequence is now precisely characterised: it waits
+~2.5-3 s, never gets E, and restarts. Every call has been ending this way.
+
+In the working call the caller's very first decoded MP already carries `ack=1`, meaning
+slmodem's MP reached it *before* it began transmitting MP at all - well inside the deadline.
+Our MP starts at essentially the same moment as the caller's, leaving only the remainder of
+that ~3 s window.
+
+This reframes the remaining question usefully. It is not "why is our MP rejected" in the
+abstract - it is "why does the caller not accept an MP that arrives at that point in the
+exchange", with a hard deadline attached. Getting our MP out substantially earlier - during
+the caller's TRN rather than after it - is the obvious thing to try, and is a pacing change
+rather than another content hypothesis.

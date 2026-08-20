@@ -303,3 +303,46 @@ caller emitting **MP' (ack=1) with CRC OK**, which is the gate to E / B1 / data 
 
 Note the tooling now exists to verify our own transmission offline before spending a call:
 extract the TX flow from the RTP pcap and decode it with the validated MP decoder.
+
+## 11. MP-content hypothesis FALSIFIED (2026-08-20)
+
+Section 10 proposed that the caller withheld its MP' because our MP advertised parameters
+that contradicted its proposal. Two live tests settled it - the hypothesis is **wrong**.
+
+**Test 1** (commit d65e1b1, send negotiated parameters). Result: still 152x `ack=0 crc=OK`,
+no valid MP'. But decoding our own transmitted audio showed the fix had not actually taken
+effect: we were emitting **ca=0, ac=0, empty mask** - *worse* than the original. Cause: the
+MP decoder stores its results on `v34_rx` while `V34_send_MP` builds from `v34_tx`, and only
+the p4_* *flags* were bridged in `V34_process`, never the values. (Same class of bug as the
+old `J_received` split between the two structs - worth remembering as a pattern here.)
+
+**Test 2** (commit 0880728, bridge the values + guard). Our transmission was then verified
+correct from its own audio: **629 MP' frames carrying exactly `ca=16800 ac=9600 64-state
+ack=1`**, CRC valid - precisely what the caller asked for. Result: **still 152x `ack=0
+crc=OK` and not one valid MP'.**
+
+So: we now send exactly the parameters the caller proposed, in valid frames, and it still
+never acknowledges. **MP content is not the blocker.**
+
+Both fixes are nonetheless correct and are kept: advertising negotiated parameters is right,
+and the rx->tx bridging bug was real and would have corrupted any future use of those values.
+
+### What is now known about the caller's silence
+
+- Our MP frames are valid and correctly parameterised (verified by decoding our own audio).
+- Our signal is clean (1.7-2.9% EVM) with ample Phase-4 preamble (2373 symbols vs 656 min).
+- The caller *can* demodulate us - it completed Phase 3 against our signal and advanced.
+- J signalling is self-consistent: we send `J4POINTS` and modulate MP at 4-point.
+
+### Next step (offline, no call needed)
+
+**Diff our Phase-4 transmission against slmodem's.** slmodem does get this caller to
+acknowledge, and both TX directions are already captured:
+
+- ours: the `192.168.1.31 ->` flow in the linmodem test pcaps
+- slmodem's: the same flow in the slmodem reference pcap
+
+Comparing the two Phase-4 streams - S / Sbar lengths, TRN duration, when MP starts relative
+to the caller's, frame cadence, level and constellation - should show directly what we do
+differently. That is a concrete, bounded comparison against a known-good reference, and it
+needs no further live calls.

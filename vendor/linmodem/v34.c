@@ -3181,6 +3181,13 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             }
         }
     }
+    if (srx_rx16() && s->p4_mode != 0 && s->cma_phase != 2) {
+        /* SIPFAX: 16-point Phase 4 - stop adapting. Blind CMA flattens the amplitudes the
+           16-point constellation carries its data in (measured kurtosis 1.001 = constant
+           modulus). The Phase-3 taps already equalise this channel. */
+        s->cma_phase = 2; s->cma_phn = 0;
+        { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] 16-point Phase 4: freezing taps (no blind CMA)\n"); }
+    }
     if (s->cma_phase == 0) {                         /* Phase A: CMA blind (open eye) */
         double r2t = (srx_rx16() && s->p4_mode != 0) ? 1.32 : 1.0;   /* SIPFAX: 16-pt Godard radius */
         double m2 = oi*oi + oq*oq, gg = r2t - m2; ei = gg*oi; eq = gg*oq; mu = mu_cma;
@@ -3388,10 +3395,18 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                         /* SIPFAX: the caller's Phase 4 is 16-point from here. The taps are
                            frozen from a 4-point Phase 3, so restart adaptation with the
                            16-point Godard radius rather than carrying them over. */
-                        s->cma_phase = 0; s->cma_phn = 0;
-                        s->cma_c4i = 0; s->cma_c4q = 0;
+                        {   /* SIPFAX: the channel is unchanged across the phase
+                               boundary, so keep the taps trained on the 4-point Phase-3
+                               TRN; only the amplitude reference needs re-estimating,
+                               because 16-point slicing depends on scale. */
+                            char *kt = getenv("SIPFAX_KEEPTAPS");
+                            if (kt && !atoi(kt)) {
+                                s->cma_phase = 0; s->cma_phn = 0;
+                                s->cma_c4i = 0; s->cma_c4q = 0;
+                            }
+                        }
                         s->rx16_rms = 0;
-                        { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] 16-point Phase 4 -> restart adaptation\n"); }
+                        { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] 16-point Phase 4 (keeptaps=%d)\n", (getenv("SIPFAX_KEEPTAPS") && !atoi(getenv("SIPFAX_KEEPTAPS"))) ? 0 : 1); }
                     }
                     { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] caller J' detected at sym %ld (phase %d) -> Phase 4 anchored\n", s->cma_qn, jj); }
                     s->p4_mode = 1; s->srx_locked = 0;

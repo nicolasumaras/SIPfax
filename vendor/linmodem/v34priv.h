@@ -170,6 +170,11 @@ typedef struct V34DSPState {
     int state;
     int is_16states;
     int mp_16point;
+    int trnref_state;        /* SIPFAX: 0=off 1=aligning 2=locked */
+    unsigned int trnref_reg; /* local TRN scrambler, starts at 0 (10.1.3.6) */
+    int trnref_n, trnref_d;
+    double trnref_ri[24], trnref_rq[24];   /* reference symbols (ring) */
+    double trnref_yi[24], trnref_yq[24];   /* received symbols (ring) */
     double rx16_rms;   /* SIPFAX: running mean power, for 16-point slicing */
     int rx16_z;        /* SIPFAX: previous z, for differential MP */
     int mp_hold;   /* SIPFAX: MP(ack=0) frames still to send with settled params */

@@ -245,3 +245,61 @@ yet a *data-mode* decoder, but that is no longer the limiting factor:
 
 Note: "descramble TRN to all ones" is an unreliable check here (~50% even on known-valid
 TRN). Use EVM / SER to the nearest ideal point instead.
+
+## 10. Why linmodem never reaches E/B1 (2026-08-20)
+
+### The observable
+
+Over the whole call the caller sends **151 MP frames with ack=0 and CRC OK**, and **never a
+single valid MP'** (all 59 ack=1 frames are CRC failures, i.e. misdecodes). In V.34 Phase 4 a
+modem sets ack=1 only after it has correctly received the *other* side's MP. So:
+
+> **The caller never successfully receives our MP.**
+
+Without the caller's MP', linmodem never advances to E, never sends B1, and the caller times
+out at 19.4 s and drops back to the 1200 Hz V.8 carrier. That is the whole failure.
+
+### What we ruled out - our transmission is fine
+
+Decoding **our own transmitted audio** (`live-linmodem-tx.s16`, extracted from the call's RTP)
+with an MP decoder first validated on a synthetic MP (29/29 frames CRC OK):
+
+- **653 of our MP frames decode with CRC OK.** They are well-formed, correctly scrambled with
+  GPA, correctly differentially encoded and CW-rotated, CRC valid, and they show the expected
+  progression `ack=0` early then `ack=1` (MP') from ~18 s.
+- Our signal is clean: 1.7-2.9% EVM on our own 4-point transmission.
+- Phase-4 pacing is adequate: our TX resumes at 14.24 s and the first MP frame is 2373 symbols
+  later, comfortably above the S(128T)+Sbar(16T)+TRN(512T) = 656 symbol minimum.
+- The caller demonstrably *can* demodulate us at 3429 baud - it completed Phase 3 against our
+  signal and advanced to Phase 4.
+
+So the modulation, framing, scrambling, CRC and timing of our MP are all correct.
+
+### What is left: the MP *content* is fixed, not negotiated
+
+`V34_send_MP` hard-codes its parameters:
+
+| field | we send | the caller says |
+|---|---|---|
+| call-to-answer max rate | `12` = **28800** | ca = **16800** |
+| answer-to-call max rate | `12` = **28800** | ac = **9600** |
+| trellis | `0` = **16-state** | trel = **2** (64-state) |
+| rate mask | `0x7ff8` (fixed) | - |
+| precoder h(1..3) | 0 | - |
+
+We advertise a fixed 28800/28800 with a 16-state trellis regardless of what Phase 2 and the
+caller's own MP established. The caller is asking for 16800/9600 with a 64-state trellis. An MP
+whose parameters are inconsistent with the negotiated capabilities is exactly the kind of frame
+a peer will decline to acknowledge - and this matches the already-known open item in this
+project ("our TX still sends fixed MP (28800 mask) not the negotiated rate").
+
+### The fix to try
+
+Populate the MP from the negotiated state instead of constants: mirror the caller's rates
+(ca=16800 -> field 7, ac=9600 -> field 4), set trellis to match the caller's 64-state
+selection, and make the rate mask consistent with the rates actually offered. This is a small,
+contained change in `V34_send_MP`, and it is directly testable on a live call: success is the
+caller emitting **MP' (ack=1) with CRC OK**, which is the gate to E / B1 / data mode.
+
+Note the tooling now exists to verify our own transmission offline before spending a call:
+extract the TX flow from the RTP pcap and decode it with the validated MP decoder.

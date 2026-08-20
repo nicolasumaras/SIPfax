@@ -1205,3 +1205,52 @@ decode of our own synthetic TX; the earlier 0.671 was my equalizer failing to co
 900 symbols of 16-point - the exact artifact the verifiers warned about), 172 CRC-valid
 16-point MP frames; 4-point regression clean (0.994 / 90 frames); block receiver
 regression clean (worst step 10.7 ms, zero over 20 ms).
+
+## 29. Calls 14-17: the J16 chain works end to end - and the caller still never acks
+
+Implementing the J16 obedience took four calls, each exposing one more defect in my own
+plumbing before the chain finally ran whole:
+
+| call | defect found | fix |
+|---|---|---|
+| 14 | stale-J flush re-latched every block, muting the WHOLE Phase-4 TX (caller heard silence from S onward) | one-shot guard |
+| 15 | flush latched after V34_mod had queued S into the same buffer - the mute swallowed S+Sbar entirely; with no Sbar anchor (11.4.2.1.2) the caller re-sent J' and gave up. Wire forensics of this call confirmed the rest: J16 vote fired on the real J' run, TRN went out 16-point, MP followed - all unanchored | latch at the bridge |
+| 16 | (a) block receiver disabled by my own srx_rx16() re-keying (its enable gate conflated "block path on" with "caller is 16-pt"); (b) TRN16 cut to 0.9 s by the call-10 pacing shortcut | gate unconditional; chunks honored strictly |
+| 17 | timed flush still shaved 12 ms off S's head | zero tx_buf in place (also the filter history) - S goes out whole |
+
+Also fixed en route: p4_mp_decode reported the FIRST CRC-valid frame of a 2.5 s sliding
+window, so a mid-run ack flip (exactly slmodem's own behaviour: 24 ack=0 frames then 4
+ack=1) would surface up to 2.5 s late - longer than the caller waits for E. Positively
+tested with a synthetic ack-flip stream (flip reported 0.4 s after the wire, vs ~2.5 s
+before). Retro-decode of call 17's caller shows all ~160 of its MP frames genuinely
+ack=0, so this was latent, not the cause.
+
+### Call 17's burst measures equal to slmodem's on every axis
+
+- head: `...SSSS` then TRN (whole S/Sbar, spec-shaped; caller at full level during S in
+  BOTH calls, so J'-overlap is not a discriminator)
+- TRN16: 1.79 s vs slmodem 1.72 s; 16-point from the first block in both (slmodem has NO
+  4-point bootstrap - measured, cv 0.31 from block one)
+- signal quality: raw-chain EVM floor 25.2% (ours, synthetic) vs 25.6% (slmodem, wire) -
+  identical; k-means clusters sit on the spec constellation, ring ratio 2.998 vs 3.000
+- continuity: one continuous DD-tracking pass shows our burst SMOOTHER than slmodem's,
+  no jumps at any of the six 1024T chunk boundaries
+- MP: constant SLCOMPAT fields on the wire (ca=ac=16800 trel=0 shape=1 mask=0x3fff),
+  bit-identical to slmodem's acked frames
+
+The caller anchors, runs its own Phase 4, exchanges MP with us for ~2.6 s - ack=0 in
+every frame - and quits. Same caller acks slmodem 0.24 s after its MP starts.
+
+### The anomaly hiding in plain sight
+
+Every LIVE MP READ of every call has shown it: **the caller proposes ca=16800 ac=9600
+trel=2 to us, but proposed ca=16800 ac=16800 trel=0 to slmodem.** ac is the answer->call
+direction - OUR transmit direction - and the caller assesses it from OUR Phase-2 line
+probing (L1/L2) and Phase-3 training signals. It rates our direction at barely a third of
+slmodem's before Phase 4 even begins. Phase 2 and Phase 3 have never been compared
+between the engines (linmodem's Phase 3 is also structurally nonstandard: a hand-rolled
+2.3s-TX/2.0s-silent yield cycle produces THREE bursts where slmodem sends one continuous
+2.8 s block). A second five-lens forensics workflow is now on it: Phase-2 probing
+comparison, Phase-3 structure, spec ack-conditions (may a strict caller lawfully withhold
+ack from an MP whose rates exceed its own proposal?), a free wire diff, and the
+provenance of ac=9600 across all captures.

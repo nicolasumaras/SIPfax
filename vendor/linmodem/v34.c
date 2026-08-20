@@ -1118,6 +1118,40 @@ static int V34_baseband_to_carrier(V34DSPState *s,
 #define CALC_AMP(x) (int)( (128.0 * 128.0) / sqrt(x) )
 
 /* send the V34 S sequence, duration: 128 T */
+
+/* SIPFAX: 16-point slicer for Phase-4 TRN/MP. Returns the (q,z) whose point
+   base[q] rotated CLOCKWISE by z*90 is nearest the received symbol. base = points 0..3 of
+   the quarter-superconstellation (10.1.3.6): (1,1) (-3,1) (1,-3) (-3,-3), i.e. increasing
+   magnitude with ties broken by greatest imaginary part. */
+static int srx_rx16(void)
+{   /* 16-point RX applies exactly when we signalled J16POINTS */
+    static int v = -1;
+    if (v < 0) { char *a = getenv("SIPFAX_MP16"), *b = getenv("SIPFAX_MP_SLCOMPAT");
+                 v = ((a && atoi(a)) || (b && atoi(b))) ? 1 : 0; }
+    return v;
+}
+
+static void srx_slice16(double pi_, double pq_, double rms, int *qo, int *zo)
+{
+    static const int bi[4] = { 1, -3, 1, -3 };
+    static const int bq[4] = { 1, 1, -3, -3 };
+    double sc, bd = 1e30;
+    int q, z, bqi = 0, bzi = 0;
+    /* the 16-point set has mean power 10 (in base units); normalise the input to match */
+    sc = (rms > 1e-12) ? sqrt(10.0 / rms) : 1.0;
+    pi_ *= sc; pq_ *= sc;
+    for (q = 0; q < 4; q++) {
+        double x = bi[q], y = bq[q];
+        for (z = 0; z < 4; z++) {
+            double dx = pi_ - x, dy = pq_ - y, d = dx*dx + dy*dy;
+            double nx;
+            if (d < bd) { bd = d; bqi = q; bzi = z; }
+            nx = y; y = -x; x = nx;      /* rotate CLOCKWISE by 90 for the next z */
+        }
+    }
+    *qo = bqi; *zo = bzi;
+}
+
 static void V34_send_S(V34DSPState *s)
 {
     int i;
@@ -3180,10 +3214,24 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
            diagonals - i.e. through the constellation points themselves. */
         qd = (pi_ >= 0) ? (pq_ >= 0 ? 1 : 0) : (pq_ >= 0 ? 2 : 3);
         s->cma_q[s->cma_qn & 127] = qd; s->cma_qn++;
+        {   /* SIPFAX: track mean power so the 16-point slicer has a scale reference */
+            double pw = pi_*pi_ + pq_*pq_;
+            s->rx16_rms = (s->rx16_rms <= 0) ? pw : (0.995*s->rx16_rms + 0.005*pw);
+        }
         for (r = 0; r < 4; r++) {
-            int z = (r - qd) & 3; b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;   /* spec CW */
+            int z = (r - qd) & 3, nb = 2; b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;   /* spec CW */
+            if (srx_rx16() && s->p4_mode != 0) {
+                /* 16-point TRN (10.1.3.6): In = z is ABSOLUTE, and Q1,Q2 carry the
+                   base-point index. Four bits per symbol instead of two. */
+                int q16, z16;
+                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16);
+                z = (r - z16) & 3;
+                b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;
+                b2s[r][2] = q16 & 1; b2s[r][3] = (q16 >> 1) & 1;
+                nb = 4;
+            }
             regsnap[r] = s->srx_reg4[r];
-            for (k = 0; k < 2; k++) {
+            for (k = 0; k < nb; k++) {
                 int pred = ((s->srx_reg4[r] >> 22) & 1) ^ 1;
                 s->srx_hist4[r] = (s->srx_hist4[r] << 1) | (unsigned long long)(pred == b2s[r][k]);
                 s->srx_reg4[r] = (s->srx_reg4[r] << 1) & 0x7fffff;
@@ -3230,9 +3278,19 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                descramble (x[n]=y[n]^y[n-18]^y[n-23]) -> ring. A folding majority-vote
                decoder reads MP frames (Tables 20/21) with a real CRC through the
                hybrid-echo BER; E = >=19 descrambled ones after an MP. */
-            int dqp = (s->srx_pqd - qd) & 3, kb;
-            for (kb = 0; kb < 2; kb++) {
-                int yb = kb ? ((dqp >> 1) & 1) : (dqp & 1);
+            int dqp = (s->srx_pqd - qd) & 3, kb, nbits = 2, q16 = 0;
+            if (srx_rx16()) {
+                /* 16-point MP: In is still DIFFERENTIAL (10.1.3.3) but comes from the
+                   16-point slicer's z, and Q1,Q2 follow from the base-point index. */
+                int z16;
+                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16);
+                dqp = (z16 - s->rx16_z) & 3;
+                s->rx16_z = z16;
+                nbits = 4;
+            }
+            for (kb = 0; kb < nbits; kb++) {
+                int yb = (kb == 0) ? (dqp & 1) : (kb == 1) ? ((dqp >> 1) & 1)
+                                              : (kb == 2) ? (q16 & 1) : ((q16 >> 1) & 1);
                 int xb = yb ^ ((s->p4_ybits >> 17) & 1) ^ ((s->p4_ybits >> 22) & 1);
                 s->p4_ybits = ((s->p4_ybits << 1) | (unsigned int)yb) & 0x7fffff;
                 s->p4_ring[s->p4_rn & 4095] = (u8)xb; s->p4_rn++;

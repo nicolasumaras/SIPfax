@@ -170,6 +170,8 @@ typedef struct V34DSPState {
     int state;
     int is_16states;
     int mp_16point;
+    double rx16_rms;   /* SIPFAX: running mean power, for 16-point slicing */
+    int rx16_z;        /* SIPFAX: previous z, for differential MP */
     int mp_hold;   /* SIPFAX: MP(ack=0) frames still to send with settled params */
     unsigned long long jph_hist[8]; /* SIPFAX: J' phase scorers */
     int jp_hunt;                    /* SIPFAX: J seen, waiting for J' */

@@ -1099,3 +1099,46 @@ assumes delivery is equivalent.** `pcap_util.audio()` concatenates payloads in a
 and never looks at sequence numbers or timestamps, so a stalling sender and a clean one
 produce byte-identical audio. When two implementations differ in behaviour but not in
 content, check the layer the comparison discarded.
+
+## 27. TRN length matched to slmodem - still no acknowledgement
+
+Measured from the working capture: slmodem's Phase-4 carrier comes up at 11.6 s and its MP
+is first decodable at 13.4 s, so the caller gets ~1.6-1.8 s of S/Sbar+TRN to train on -
+and having trained, its very first MP frame is already ack=1. Our pacing change had cut our
+TRN to 0.3 s. That produced a coherent failure matrix:
+
+| call | TRN | MP promptness | delivery | result |
+|---|---|---|---|---|
+| slmodem | ~1.6 s | immediate | clean | ack=1 instantly |
+| ours pre-pacing | 1.79 s ok | held ~3 s | clean | fail |
+| call 10 | 0.3 s | immediate | stalls | fail |
+| call 12 | 0.3 s | immediate | clean | fail |
+| **call 13** | **1.5 s** | **immediate** | **clean (max 49.6 ms)** | **fail** |
+
+Call 13 (`SIPFAX_P4_TRN_CHUNKS=5`) was the first call matching slmodem on every one of
+those dimensions simultaneously. The caller still sent ack=0 for ~3 s and restarted:
+
+```
+caller: I.....DD444444?444mmmmmmSSSSSSSSSSSSSSSD
+us    : ??4II?........?44m?aa??aa?Ia?Ia??aa??aa?
+```
+
+So TRN length joins the elimination list. Two observations survive as leads:
+
+1. **Periodic `I` windows inside our MP run** (`aa?Ia?Ia?`) - INFO-carrier classification in
+   the middle of what should be continuous MP. slmodem's MP region never shows this.
+2. slmodem's Phase-4 TX has a very different texture under the same classifier (`D?6?I`),
+   and only ONE MP frame decodes from its whole MP region with 0.6 s windows, while ours
+   yields ~86 per window. Either its MP region is simply short, or its Phase-4 sequence
+   contains structure (PP?) that ours lacks.
+
+Both are now under systematic investigation (5-lens workflow: signal structure incl. PP
+detection, V.34 11.4 spec audit of linmodem's TX path, caller MP field forensics, bit-level
+MP cross-validation against slmodem, and the I-window anomaly).
+
+Operational notes for this and the two preceding attempts: two calls were burned on arming
+mistakes (an invented bridge path, then a slmodem env missing `SIPFAX_MODEM_ARGS=-P` - the
+engine spawns but never enters pipe mode and the line answers with silence). The linmodem
+env must be restored wholesale from `sipfax.env.linmodem-dev.1785688709`, and the engine
+smoke-tested (`head -c 48000 /dev/zero | linmodem-lm -P` must print "pipe engine up" and
+emit ~48k bytes) before asking for a call.

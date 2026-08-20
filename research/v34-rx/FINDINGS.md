@@ -817,3 +817,61 @@ cross-checks the MP against the capabilities established during INFO would rejec
 mismatch, and that is exactly the shape of the symptom: valid frames, correct parameters,
 politely ignored. The INFO exchange is the last part of the startup never inspected, and the
 captures needed to inspect it are already in the repo.
+
+## 22. INFO compared - identical to slmodem. The startup is now fully eliminated. (2026-08-20)
+
+`info_decode.py` decodes Phase-2 INFO: binary DPSK at 600 bit/s (10.1.2.3.1), answer modem
+on 2400 Hz, call modem on 1200 Hz. 8000/600 = 40/3, so upsampling by 3 gives exactly 40
+samples per symbol and 2400 Hz is exactly 1/10 cycle per sample at 24 kHz - no fractional
+resampling. CRC verified (covered set bits 12:29 for INFO0, 12:50 for INFO1a).
+
+**INFO0a** (Table 14), CRC-valid in both captures:
+
+| | value |
+|---|---|
+| slmodem (acknowledged) | `rates[2743,2800,3429,3000lohi,3200lohi] allow3429=1 1664pt=1 lowpwr=1 maxdiff=0 cme=0 clk=0 ack=0` |
+| linmodem (never acked) | **identical** |
+
+**INFO1a** (Table 16 - the selected symbol rates and probing results), CRC-valid in both:
+
+| | value |
+|---|---|
+| slmodem | `pwr=0+0 mdlen=0 hicarr=0 preemph=6 projrate=9 (21600) SR a->c=3429 SR c->a=3429` |
+| linmodem | **identical** |
+
+So the INFO hypothesis is dead, and with it the last unexamined stage of the startup.
+
+### The full elimination list
+
+Every stage of the startup has now been compared against a peer that this exact caller does
+acknowledge, by direct measurement rather than inference:
+
+| stage | verdict |
+|---|---|
+| INFO0a / INFO1a (Phase 2) | **identical to slmodem, CRC-valid** |
+| S / S-bar (Phase 4 entry) | 144 symbols vs slmodem's 145 |
+| J / J-prime | detected, Phase 4 anchored, spec-compliant |
+| TRN (4-point and 16-point) | decoded, scores 0.99 |
+| MP frame content and fields | identical to slmodem (16-point, 16800/16800, trellis 0, shaping 1) |
+| MP validity | 113-134 CRC-valid frames per window from our own audio |
+| acknowledge sequencing | 0 -> 1 progression correct |
+| transmit level | rms 2325 vs slmodem 2184, no clipping |
+| our receiver | reads the caller's MP continuously, three reads per call |
+
+Everything we transmit matches the working peer everywhere it can be measured, and we now
+receive the caller throughout. The acknowledgement still never comes.
+
+### What is genuinely left
+
+Nothing in the *content* of the exchange distinguishes us from slmodem any more, so the
+remaining candidates are things content comparison cannot see:
+
+1. **Timing and pacing** - when our MP starts relative to the caller's, how long each stage
+   is held, the gaps between them. slmodem clears Phase 4 in 2-3 seconds; we hold MP for
+   tens of seconds. Nothing measured so far captures the *dynamics*, only the values.
+2. **Something outside the V.34 signal entirely** - the caller may be reacting to a property
+   of the SIP/RTP path (jitter, packet timing, a codec detail) rather than to the modem
+   signal. slmodem and linmodem run through the same path, but they drive it differently.
+
+Both are dynamic rather than static properties, which is consistent with everything static
+having now been eliminated.

@@ -1131,7 +1131,8 @@ static int srx_rx16(void)
     return v;
 }
 
-static void srx_slice16(double pi_, double pq_, double rms, int *qo, int *zo)
+static void srx_slice16(double pi_, double pq_, double rms, int *qo, int *zo,
+                        double *dio, double *dqo)
 {
     static const int bi[4] = { 1, -3, 1, -3 };
     static const int bq[4] = { 1, 1, -3, -3 };
@@ -1150,6 +1151,14 @@ static void srx_slice16(double pi_, double pq_, double rms, int *qo, int *zo)
         }
     }
     *qo = bqi; *zo = bzi;
+    if (dio) {   /* decided point, scaled back into signal units */
+        static const int rbi[4] = { 1, -3, 1, -3 };
+        static const int rbq[4] = { 1, 1, -3, -3 };
+        double x = rbi[bqi], y = rbq[bqi], nx;
+        int zz;
+        for (zz = 0; zz < bzi; zz++) { nx = y; y = -x; x = nx; }
+        *dio = x / sc; *dqo = y / sc;
+    }
 }
 
 static void V34_send_S(V34DSPState *s)
@@ -3150,7 +3159,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         s->cma_phn++;
         if (s->cma_phase == 0) {
             double cq = sqrt(s->cma_c4i*s->cma_c4i + s->cma_c4q*s->cma_c4q);
-            if (cq > 0.30 && s->cma_phn >= 500) {
+            if (cq > (srx_rx16() && s->p4_mode ? 0.30*0.359 : 0.30) && s->cma_phn >= 500) {
                 s->cma_phase = 1; s->cma_phn = 0;
                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] eye open (q=%.2f) -> DD at sym %d\n", cq, s->cma_cnt); }
             } else if (s->cma_phn >= 1500) {
@@ -3162,7 +3171,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             }
         } else if (s->cma_phase == 1) {
             double cq = sqrt(s->cma_c4i*s->cma_c4i + s->cma_c4q*s->cma_c4q);
-            if (cq > 0.65 && s->cma_phn >= 300) {
+            if (cq > (srx_rx16() && s->p4_mode ? 0.65*0.359 : 0.65) && s->cma_phn >= 300) {
                 s->cma_phase = 2; s->cma_phn = 0;
                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] tight (q=%.2f) -> track at sym %d\n", cq, s->cma_cnt); }
             } else if (s->cma_phn >= 2500) {
@@ -3173,10 +3182,16 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         }
     }
     if (s->cma_phase == 0) {                         /* Phase A: CMA blind (open eye) */
-        double m2 = oi*oi + oq*oq, gg = 1.0 - m2; ei = gg*oi; eq = gg*oq; mu = mu_cma;
+        double r2t = (srx_rx16() && s->p4_mode != 0) ? 1.32 : 1.0;   /* SIPFAX: 16-pt Godard radius */
+        double m2 = oi*oi + oq*oq, gg = r2t - m2; ei = gg*oi; eq = gg*oq; mu = mu_cma;
         if (cma_dumpf) fprintf(cma_dumpf, "%.4f %.4f 0\n", oi, oq);
     } else if (s->cma_phase == 1) {                  /* Phase B: DD refine (FSE adapts, tightens) */
-        double di = (oi>=0?R:-R), dq = (oq>=0?R:-R); ei = di - oi; eq = dq - oq; mu = mu_dd;
+        double di, dq;
+        if (srx_rx16() && s->p4_mode != 0) {   /* SIPFAX: real 16-point decision */
+            int q16d, z16d;
+            srx_slice16(oi, oq, s->rx16_rms, &q16d, &z16d, &di, &dq);
+        } else { di = (oi>=0?R:-R); dq = (oq>=0?R:-R); }
+        ei = di - oi; eq = dq - oq; mu = mu_dd;
         if (cma_dumpf) fprintf(cma_dumpf, "%.4f %.4f 0\n", oi, oq);
     } else {   /* Phase C v3: frozen taps + feedforward carrier + 4-candidate scrambler tracking */
         { static int tapdumped = 0;
@@ -3224,7 +3239,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 /* 16-point TRN (10.1.3.6): In = z is ABSOLUTE, and Q1,Q2 carry the
                    base-point index. Four bits per symbol instead of two. */
                 int q16, z16;
-                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16);
+                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16, NULL, NULL);
                 z = (r - z16) & 3;
                 b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;
                 b2s[r][2] = q16 & 1; b2s[r][3] = (q16 >> 1) & 1;
@@ -3283,7 +3298,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 /* 16-point MP: In is still DIFFERENTIAL (10.1.3.3) but comes from the
                    16-point slicer's z, and Q1,Q2 follow from the base-point index. */
                 int z16;
-                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16);
+                srx_slice16(pi_, pq_, s->rx16_rms, &q16, &z16, NULL, NULL);
                 dqp = (z16 - s->rx16_z) & 3;
                 s->rx16_z = z16;
                 nbits = 4;
@@ -3369,6 +3384,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 if (__builtin_popcountll(s->jph_hist[jj] & 0xffffULL) >= 14) {
                     int rr3;
                     s->JP_received = 1; s->jp_hunt = 0;
+                    if (srx_rx16()) {
+                        /* SIPFAX: the caller's Phase 4 is 16-point from here. The taps are
+                           frozen from a 4-point Phase 3, so restart adaptation with the
+                           16-point Godard radius rather than carrying them over. */
+                        s->cma_phase = 0; s->cma_phn = 0;
+                        s->cma_c4i = 0; s->cma_c4q = 0;
+                        s->rx16_rms = 0;
+                        { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[cma] 16-point Phase 4 -> restart adaptation\n"); }
+                    }
                     { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] caller J' detected at sym %ld (phase %d) -> Phase 4 anchored\n", s->cma_qn, jj); }
                     s->p4_mode = 1; s->srx_locked = 0;
                     for (rr3 = 0; rr3 < 4; rr3++) { s->srx_reg4[rr3] = 0; s->srx_hist4[rr3] = 0; }
@@ -3425,7 +3449,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
     if (s->p4_mode == 2) {   /* MP/data: decision-FREE CMA tap tracking. DD decisions are
                                 wrong once timing drifts, so DD-LMS can't recover; CMA holds
                                 constant modulus (4-point) and tracks slow channel/clock drift. */
-        double m2 = oi*oi + oq*oq, g = 1.0 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
+        double r2t2 = srx_rx16() ? 1.32 : 1.0;                        /* SIPFAX: 16-pt Godard radius */
+        double m2 = oi*oi + oq*oq, g = r2t2 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
     }
     for (i = 0; i < CMANT; i++) {
         double gi = ei*s->cma_bufi[i] + eq*s->cma_bufq[i];

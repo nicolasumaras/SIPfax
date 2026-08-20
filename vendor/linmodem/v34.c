@@ -1352,7 +1352,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         }
     }
     /* now we transmit the buffer */
-    V34_mod_MP(s, buf, p - buf, s->is_16states);
+    V34_mod_MP(s, buf, p - buf, s->mp_16point);
 }
 
 /* send E sequence */
@@ -1376,7 +1376,7 @@ static void V34_send_J(V34DSPState *s, int length)
     int i,val;
     u8 buf[16],*p;
 
-    if (s->is_16states) 
+    if (s->mp_16point)
         val = J16POINTS;
     else
         val = J4POINTS;
@@ -1557,7 +1557,8 @@ static void V34_mod_init(V34DSPState *s, V34State *p)
     s->state = V34_STARTUP3_S1;
     s->JP_received = 1;
     //    s->state = V34_DATA;
-    s->is_16states = 0; /* use 16 states */
+    s->is_16states = 0; /* TRN stays 4-point: the caller trains on this */
+            s->mp_16point = 1;  /* SIPFAX: but MP/J are 16-point, like slmodem */
 }
 
 /*****************************************************/

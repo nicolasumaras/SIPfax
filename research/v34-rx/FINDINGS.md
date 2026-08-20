@@ -440,3 +440,66 @@ work rather than signal analysis: walking V.34 section 11.4 (the Phase-4 state m
 its timing rules) against linmodem's implementation, since the failure is that a caller which
 sends us valid MP will not acknowledge ours - a state-machine or timing condition rather
 than anything measurable in the waveform.
+
+## 14. Walking V.34 section 11.4 against linmodem's Phase-4 state machine (2026-08-20)
+
+Spec re-fetched from ITU (T-REC-V.34 02/98) and section 11.4 extracted. Note the text is
+copyrighted, so it is not committed here - re-fetch from itu.int and extract pages 52-57.
+
+### Structure: linmodem matches the spec
+
+| spec (11.4.1.2, answer modem) | linmodem |
+|---|---|
+| transmit S for 128T | `V34_send_S` = 64x2 = 128 symbols |
+| then S-bar for 16T | `V34_send_Sinv` = 8x2 = 16 symbols |
+| then TRN, >=512T, <= 2000 ms + RTT | `V34_send_TRN` in 1024T chunks, 2-6 chunks = 0.6-1.8 s |
+| then MP until the call modem's MP arrives | `STARTUP4_MP` -> on `p4_mp_rx` |
+| then MP' until MP' or E received | `STARTUP4_MPP` -> on `p4_mpp_rx \|\| p4_e_rx` |
+| then a single 20-bit E, then B1 | `V34_send_E` (20 bits), then `V34_DATA` |
+
+The state sequence, the 128T/16T lengths and the 20-bit E are all correct.
+
+### Deviation found: J' detection is stubbed
+
+**11.4.1.2.1** requires the answer modem, after sending S, to *"condition its receiver to
+detect sequence J' followed by signal TRN"*. And **11.4.2.2.1** makes it a timed condition:
+if J' is not received within 100 ms plus a round trip delay of the S-to-S-bar transition, the
+answer modem must fall back to INFOMARKSc / Tone B handling.
+
+linmodem never detects J' at all:
+
+```c
+case V34_STARTUP4_WAIT_JP:   /* unused (J' handled by RX re-hunt) */
+    s->state = V34_STARTUP4_SINV;
+```
+
+with `s->JP_received = 1` hard-coded in `V34_mod_init`. So we never anchor Phase 4 on the
+caller's J', and instead infer the caller's TRN completion by a re-hunt heuristic. This is a
+real spec deviation and it is the mechanism by which our MP could be mistimed relative to
+what the caller expects, even though every individual MP frame is valid.
+
+### A timing rule that turned out NOT to discriminate
+
+**11.4.2.1.1**: if the call modem does not detect the S-to-S-bar transition within *600 ms
+plus a round trip delay* from the start of sequence J, it transmits silence then
+**INFOMARKSc** - which would neatly explain the 1200 Hz V.8 carrier we see the caller fall
+back to. Measured from the captures:
+
+| | caller's long burst starts | we answer | delay |
+|---|---|---|---|
+| linmodem (fails) | 11.05 s | 15.05 s | **4.00 s** |
+| slmodem (works) | 9.90 s | 12.91 s | **3.01 s** |
+
+Both exceed 600 ms, and slmodem still succeeds - so either this caller is lenient about the
+deadline, or "start of sequence J" is not the burst boundary I measured against. We are ~1 s
+slower than the working reference, which is suggestive but not conclusive. **Not a confirmed
+root cause.**
+
+### Where this leaves it
+
+The best-supported remaining defect is the **stubbed J' detection**. It is a genuine
+departure from 11.4.1.2.1, it is in exactly the part of Phase 4 that establishes the timing
+relationship between the two modems, and it is consistent with the one thing every other
+test has shown: our MP frames are individually perfect, yet the caller never acknowledges
+them. Implementing real J' detection - and anchoring the TRN/MP transition on it rather than
+on a re-hunt heuristic - is the next concrete piece of work.

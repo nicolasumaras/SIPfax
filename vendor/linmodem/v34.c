@@ -1578,6 +1578,12 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
         case V34_STARTUP4_TRN:
             V34_send_TRN(s);                     /* 1024T chunks; >=512T, cap ~1.8s */
             s->p4_trn_tx++;
+            {   /* SIPFAX: one chunk is 1024T, already double the 512T minimum, so go to
+                       MP as soon as it is sent. SIPFAX_P4_TRN_CHUNKS overrides. */
+                int want = 1; char *tc = getenv("SIPFAX_P4_TRN_CHUNKS");
+                if (tc) { want = atoi(tc); if (want < 1) want = 1; }
+                if (s->p4_trn_tx >= want) s->p4_mp_hunt_rx = 1;
+            }
             if ((s->p4_mp_hunt_rx && s->p4_trn_tx >= 1) || s->p4_trn_tx >= 6) {
                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: TRN done (%d chunks) -> MP\n", s->p4_trn_tx); }
                 s->state = V34_STARTUP4_MP;
@@ -3809,12 +3815,12 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                 p4bn = keep;
             }
             for (i = 0; i < nb && p4bn < P4_MAXIN; i++) { p4b[p4bn++] = samples[i]; p4since++; }
-            if (p4bn >= 24000 && p4since >= 16000) {   /* re-read every ~2 s */
+            if (p4bn >= 12000 && p4since >= 8000) {   /* first look at ~1.5 s, then every ~1 s */
                 p4since = 0;
                 int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 1, nmp;
                 unsigned int mk = 0;
-                nmp = p4_block_run(p4b + (p4bn > 24000 ? p4bn-24000 : 0),
-                                   p4bn > 24000 ? 24000 : p4bn,
+                nmp = p4_block_run(p4b + (p4bn > 20000 ? p4bn-20000 : 0),
+                                   p4bn > 20000 ? 20000 : p4bn,
                                    &ca, &ac, &tr, &ak, &sh, &mk, &six);
                 if (nmp) {
                     s->p4_mp_rate_ca = ca; s->p4_mp_rate_ac = ac;

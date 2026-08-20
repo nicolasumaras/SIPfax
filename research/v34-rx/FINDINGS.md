@@ -557,3 +557,50 @@ themselves. Candidates not yet tested:
 (2) is worth testing first: it is a one-line change, it is invisible to all of our own
 verification (which uses the same polarity to encode and decode), and it would explain why
 everything looks perfect from our side while the caller acts as if nothing arrived.
+
+## 16. Six live tests, no acknowledgement - and what to do instead of a seventh guess
+
+The MP-hold change worked exactly as designed. Decoding our own transmission:
+
+```
+ca=28800 ac=28800 16-state ack=0  x56   <- before the caller's MP is read (unavoidable)
+ca=16800 ac=9600  64-state ack=0  x8    <- NEW: settled parameters, ack still 0
+ca=16800 ac=9600  64-state ack=1  x644  <- MP'
+```
+
+The caller now receives eight MP frames carrying our real, negotiated parameters with the
+acknowledge bit clear, exactly as intended - and still never acknowledges.
+
+### Cumulative record
+
+Six live tests. Every hypothesis tested has been eliminated, several of them by evidence
+rather than by trying:
+
+| hypothesis | outcome |
+|---|---|
+| MP parameters not negotiated | fixed; no change |
+| rx->tx parameter bridging (real bug) | fixed; no change |
+| 16-point MP like slmodem | regressed (TRN coupling), then unsupported |
+| Phase-4 J' anchoring missing (real spec gap) | fixed, works live; no change |
+| scrambler polarity | **disproved by inspection + cross-validation, no call spent** |
+| MP parameters unstable across the ack flip | fixed; no change |
+
+And these remain verified-correct: S/S-bar lengths, TRN duration, frame validity and CRC,
+signal quality, and the caller's own MP decoding for us.
+
+### Why I am stopping the guess-and-dial loop
+
+Each test above changed one variable inferred from the spec or from indirect measurement.
+That approach has now failed six times, which is itself information: the difference between
+us and slmodem is not something I have been able to *infer*. It needs to be *observed*.
+
+**The one high-information thing not yet done: decode slmodem's own MP frames and diff them
+against ours, field by field.** My MP decoder finds no frames in slmodem's transmission,
+which is unexplained and is itself the lead - either its MP is 16-point (4 bits/symbol,
+which my decoder does not handle) or its MP sits somewhere I have not looked. Writing a
+16-point MP decoder would settle the constellation question that section 12 left open *and*
+expose any field-level difference, without a single further call.
+
+That is a bounded piece of work against captures already in the repo, and unlike the last
+six attempts it cannot come back "no change with no explanation" - either slmodem's frames
+decode and can be compared, or the failure to decode localises the difference itself.

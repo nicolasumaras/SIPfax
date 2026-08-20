@@ -962,3 +962,64 @@ abstract - it is "why does the caller not accept an MP that arrives at that poin
 exchange", with a hard deadline attached. Getting our MP out substantially earlier - during
 the caller's TRN rather than after it - is the obvious thing to try, and is a pacing change
 rather than another content hypothesis.
+
+## 25. Pacing fixed - our MP now precedes the caller's, and it still is not accepted
+
+Call 10, after shortening Phase-4 TRN to one 1024T chunk and letting the block receiver
+decode at ~1.5 s:
+
+```
+caller: I.....DD444444?444mmmmmmSSSSSSSSSSSS
+us    : ??4II?........??m??aa??aa??I??aa?aI?
+                        ^ our MP at t=16.0, inside the caller's TRN
+                          the caller's own MP starts at t=17.0
+```
+
+The pacing change did exactly what it was meant to. Our MP is now on the wire **before the
+caller starts transmitting MP at all** - the same ordering slmodem has, and the ordering
+that in the working call results in the caller's very first MP already carrying ack=1.
+
+The caller still sends `mmmmmm` with ack=0 for ~2.5 s and then restarts with `SSSS`.
+
+### So ordering and timing are eliminated too
+
+The elimination list is now complete across every dimension these captures can express:
+
+| dimension | matched to slmodem? |
+|---|---|
+| INFO0a / INFO1a | identical, CRC-valid |
+| J signalling | J4POINTS, caller responds 4-point as in the working call |
+| our MP constellation | 16-point, as slmodem |
+| our MP field values | identical (16800/16800, trellis 0, shaping 1) |
+| our MP validity | 113-134 CRC-valid frames decoded from our own audio |
+| acknowledge sequencing | 0 -> 1, MP -> MP' |
+| transmit level | comparable, no clipping |
+| **ordering** | **our MP now precedes the caller's, as slmodem's does** |
+| our receiver | reads the caller's MP continuously |
+
+A note on what "matched" can and cannot prove: our MP decodes with the same decoder that
+decodes slmodem's MP, which does establish that our modulation conventions agree with
+slmodem's rather than merely being self-consistent. That was the obvious blind spot and it
+is closed.
+
+### Honest conclusion
+
+Ten calls, and every property that can be observed in these captures has been matched
+against a peer the same caller acknowledges within half a second. The acknowledgement does
+not come, and the caller's behaviour is a clean 2.5-3 s timeout followed by a Phase-4
+restart (11.4.2.1.2).
+
+What remains is by definition something these captures do not express. Candidates worth
+considering, none of them testable with the current tooling:
+
+- a property of the RTP delivery itself - packet pacing, jitter, or timestamp behaviour -
+  rather than of the decoded audio, since both engines are compared only after the audio has
+  been reassembled;
+- an aspect of the caller's own implementation that keys off something outside the V.34
+  signal;
+- a detail of the 16-point MP that survives round-tripping through a decoder built from the
+  same reading of the spec, and would only be exposed by a third implementation.
+
+The productive next step is not another content or timing hypothesis. It would be to compare
+the RTP streams themselves - packet timing, sizes, timestamps and jitter - between the two
+engines, which is a layer nothing in this investigation has yet examined.

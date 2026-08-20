@@ -1286,7 +1286,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     {
         int r_ca, r_ac, trel, mi;
         unsigned int msk;
-        if (s->p4_mp_rx) {
+        if (s->p4_mp_rx && s->p4_mp_rate_ca > 0 && s->p4_mp_rate_ac > 0 && s->p4_mp_mask != 0) {
             r_ca = s->p4_mp_rate_ca;
             r_ac = s->p4_mp_rate_ac;
             trel = s->p4_trellis;
@@ -3532,6 +3532,12 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_tx.p4_mp_rx = s->v34_rx.p4_mp_rx;
     s->v34_tx.p4_mpp_rx = s->v34_rx.p4_mpp_rx;
     s->v34_tx.p4_e_rx = s->v34_rx.p4_e_rx;
+    /* SIPFAX: bridge the negotiated MP PARAMETERS too, not just the flags -- the MP
+       decoder stores them on v34_rx while V34_send_MP builds the frame from v34_tx. */
+    s->v34_tx.p4_mp_rate_ca = s->v34_rx.p4_mp_rate_ca;
+    s->v34_tx.p4_mp_rate_ac = s->v34_rx.p4_mp_rate_ac;
+    s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
+    s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     V34_mod(&s->v34_tx, output, nb_samples);
     {   /* Phase-3 output stage: /5 level-match then optional pre-emphasis, both TUNABLE
            at runtime for level/pre-emphasis sweeps (SIPFAX_P3_GAIN, SIPFAX_P3_PREEMPH). */

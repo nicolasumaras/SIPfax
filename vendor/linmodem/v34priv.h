@@ -169,7 +169,10 @@ typedef struct V34DSPState {
     /* current V34 protocol state */
     int state;
     int is_16states;
-    int mp_16point; /* SIPFAX: MP/J constellation, independent of TRN */ /* 16 states required in the startup sequences */
+    int mp_16point;
+    unsigned long long jph_hist[8]; /* SIPFAX: J' phase scorers */
+    int jp_hunt;                    /* SIPFAX: J seen, waiting for J' */
+    long jp_since;                  /* SIPFAX: symbols since J */ /* SIPFAX: MP/J constellation, independent of TRN */ /* 16 states required in the startup sequences */
 
     /* interaction with receiver */
     int J_received;

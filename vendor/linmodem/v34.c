@@ -3123,10 +3123,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
           if (!tapdumped && cma_dumpf) { FILE *tf = fopen("/tmp/taps.txt","w"); int ti2;
             for (ti2 = 0; ti2 < CMANT; ti2++) fprintf(tf, "%.8f %.8f\n", s->cma_wi[ti2], s->cma_wq[ti2]);
             fclose(tf); tapdumped = 1; } }
-        static u8 jpat[16]; static int jpat_init = 0;
+        static u8 jpat[16]; static u8 jppat[16]; static int jpat_init = 0;
         unsigned int poly = (cma_t1 == 5) ? (1u|(1u<<18)) : (1u|(1u<<5));  /* GPA : GPC */
         double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][2]; unsigned int regsnap[4];
-        if (!jpat_init) { for (k = 0; k < 16; k++) jpat[k] = (0x0991 >> (15-k)) & 1; jpat_init = 1; }
+        if (!jpat_init) { for (k = 0; k < 16; k++) { jpat[k] = (0x0991 >> (15-k)) & 1;
+                                             jppat[k] = (0xF991 >> (15-k)) & 1; } jpat_init = 1; }
         o2i = oi*oi - oq*oq; o2q = 2*oi*oq;                 /* o^2 */
         o4i = o2i*o2i - o2q*o2q; o4q = 2*o2i*o2q;          /* o^4 */
         s->srx_s4i += o4i; s->srx_s4q += o4q;
@@ -3269,6 +3270,34 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 }
             }
         }
+        if (s->jp_hunt && !s->JP_received) {
+            /* SIPFAX: J' scorer. J' terminates J and is sent once (10.1.3.4). regD is
+               already tracking the differential dibits, so score the same 8 word phases
+               against the J' pattern. J and J' share their low 12 bits, so a genuine J
+               scores only 12/16 here -- 14/16 discriminates safely. */
+            int dq2 = (s->srx_pqd - qd) & 3, jb0 = dq2 & 1, jb1 = (dq2 >> 1) & 1, jj;
+            unsigned int rA = s->srx_regD, rB;
+            rB = (rA << 1) & 0x7fffff; if (jb0) rB ^= poly;
+            for (jj = 0; jj < 8; jj++) {
+                int p0 = (int)((rA >> 22) & 1) ^ (int)jppat[s->jh_bitpos[jj] & 15];
+                int p1 = (int)((rB >> 22) & 1) ^ (int)jppat[(s->jh_bitpos[jj]+1) & 15];
+                s->jph_hist[jj] = (s->jph_hist[jj] << 2) | ((unsigned long long)(p0 == jb0) << 1) | (unsigned long long)(p1 == jb1);
+                if (__builtin_popcountll(s->jph_hist[jj] & 0xffffULL) >= 14) {
+                    int rr3;
+                    s->JP_received = 1; s->jp_hunt = 0;
+                    { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] caller J' detected at sym %ld (phase %d) -> Phase 4 anchored\n", s->cma_qn, jj); }
+                    s->p4_mode = 1; s->srx_locked = 0;
+                    for (rr3 = 0; rr3 < 4; rr3++) { s->srx_reg4[rr3] = 0; s->srx_hist4[rr3] = 0; }
+                    break;
+                }
+            }
+            if (s->jp_hunt && (s->cma_qn - s->jp_since) > 600) {
+                int rr3;   /* J' missed: fall back to the old behaviour rather than hang */
+                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] J' not seen within 600 syms -> falling back to TRN re-hunt\n"); }
+                s->jp_hunt = 0; s->p4_mode = 1; s->srx_locked = 0;
+                for (rr3 = 0; rr3 < 4; rr3++) { s->srx_reg4[rr3] = 0; s->srx_hist4[rr3] = 0; }
+            }
+        }
         if (s->srx_locked && !s->J_received && s->p4_mode == 0) {
             /* (spawn-based J bank replaced by always-on regD phase scorers below) */
             {   /* Always-on J detector: regD is a second scrambler register updated with
@@ -3290,6 +3319,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             int rr2;
                             s->J_received = 1;
                             { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[srx] caller J detected at sym %ld (phase %d, %d/32) -> J_received\n", s->cma_qn, j, mj); }
+                            {   /* SIPFAX: 11.4.1.2.1 wants J' (Table 19) detected before TRN.
+                                   SIPFAX_JP=1 waits for it; otherwise keep the old behaviour. */
+                                char *jpe = getenv("SIPFAX_JP");
+                                if (jpe && atoi(jpe)) {
+                                    s->jp_hunt = 1; s->jp_since = s->cma_qn;
+                                    for (rr2 = 0; rr2 < 8; rr2++) s->jph_hist[rr2] = 0;
+                                    break;   /* stay locked; the J' scorer runs below */
+                                }
+                            }
                             /* Phase 4: re-hunt the caller's post-J' TRN */
                             s->p4_mode = 1; s->srx_locked = 0;
                             for (rr2 = 0; rr2 < 4; rr2++) { s->srx_reg4[rr2] = 0; s->srx_hist4[rr2] = 0; }

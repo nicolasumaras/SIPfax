@@ -3790,21 +3790,37 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
            run the block chain once; its parameters feed the same p4_* fields the transmit
            state machine already keys on, so MP -> MP' -> E proceeds normally. */
         static short p4b[P4_MAXIN];
-        static int p4bn = 0, p4b_done = 0;
-        if (s->p4_mode == 0) { p4bn = 0; p4b_done = 0; }
-        else if (srx_rx16() && !s->p4_mp_rx && !p4b_done) {
+        static int p4bn = 0, p4b_done = 0, p4since = 0;
+        if (s->p4_mode == 0) { p4bn = 0; p4b_done = 0; p4since = 0; }
+        else if (srx_rx16() && !s->p4_e_rx && !s->p4_mpp_rx) {
+            /* SIPFAX: keep re-reading. The caller sets its acknowledge bit only after it
+               has received OUR MP, so its MP' arrives strictly later than the first MP we
+               decode. Reading once would mean never seeing the acknowledgement that gates
+               our E. Re-run on a sliding window until MP' or E is seen. */
             unsigned int i;
-            for (i = 0; i < nb && p4bn < P4_MAXIN; i++) p4b[p4bn++] = samples[i];
-            if (p4bn >= 24000) {              /* ~3 s of Phase 4 */
+            unsigned int j;
+            if (p4bn >= P4_MAXIN) {           /* slide: keep the most recent ~3 s */
+                int keep = 24000, off2 = p4bn - keep;
+                for (j = 0; j < (unsigned int)keep; j++) p4b[j] = p4b[off2 + j];
+                p4bn = keep;
+            }
+            for (i = 0; i < nb && p4bn < P4_MAXIN; i++) { p4b[p4bn++] = samples[i]; p4since++; }
+            if (p4bn >= 24000 && p4since >= 16000) {   /* re-read every ~2 s */
+                p4since = 0;
                 int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 1, nmp;
                 unsigned int mk = 0;
-                nmp = p4_block_run(p4b, p4bn, &ca, &ac, &tr, &ak, &sh, &mk, &six);
-                p4b_done = 1;
+                nmp = p4_block_run(p4b + (p4bn > 24000 ? p4bn-24000 : 0),
+                                   p4bn > 24000 ? 24000 : p4bn,
+                                   &ca, &ac, &tr, &ak, &sh, &mk, &six);
                 if (nmp) {
                     s->p4_mp_rate_ca = ca; s->p4_mp_rate_ac = ac;
                     s->p4_trellis = tr; s->p4_mp_mask = mk;
                     s->p4_mp_crcok = 1; s->p4_mp_rx = 1;
-                    if (ak) s->p4_mpp_rx = 1;
+                    if (ak && !s->p4_mpp_rx) {
+                        s->p4_mpp_rx = 1;
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[p4blk] CALLER MP-PRIME (ack=1) -> E\n"); }
+                    }
                     { extern int v34_dbg; if (v34_dbg)
                         fprintf(stderr, "[p4blk] LIVE MP READ: %d frames %s ca=%d ac=%d trel=%d ack=%d\n",
                                 nmp, six ? "16pt" : "4pt", ca*2400, ac*2400, tr, ak); }

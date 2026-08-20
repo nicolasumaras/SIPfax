@@ -771,3 +771,49 @@ The honest reading is that these may be the same problem: we have never once bee
 where we could *see* the caller's MP and acknowledge it while also sending an MP it accepts.
 Porting 16-point TRN and MP to the C receiver is what makes that state reachable for the
 first time, and it is the necessary next step regardless.
+
+## 21. The receiver gate is open - and the problem is now provably elsewhere (2026-08-20)
+
+Two live calls with the block receiver produced the first forward motion on this gate.
+
+**Call 7** - `[p4blk] LIVE MP READ: 68 frames 16pt ca=16800 ac=9600 trel=2 ack=0`, followed
+by `TX: caller MP in -> holding MP(ack=0)`. **The transmit state machine advanced for the
+first time in seven calls.** But the block receiver read only once, and the caller sets its
+acknowledge bit only *after* receiving our MP - so its MP' necessarily arrives later than
+the first MP we decode. Reading once could never see it.
+
+**Call 8** - after making the receiver re-read on a sliding window: **three MP reads across
+the call** (68, 72, 62 frames, all 16-point), every one `ack=0`. So we now demonstrably
+receive the caller's MP *continuously*, and it still never acknowledges.
+
+### Everything measurable now matches the peer that this caller does acknowledge
+
+Decoding our own transmission from the same call:
+
+| | ours (never acknowledged) | slmodem (acknowledged) |
+|---|---|---|
+| MP frames decoded from our audio | **113-134 per window, CRC valid** | - |
+| constellation | 16-point | 16-point |
+| ca / ac | 16800 / 16800 | 16800 / 16800 |
+| trellis / shaping | 0 / 1 | 0 / 1 |
+| ack progression | 0 -> 1 (MP -> MP') | 0 -> 1 |
+| transmit rms / peak | 2325 / 6908, no clipping | 2184 / 7932, no clipping |
+
+Our MP is well-formed, carries slmodem's exact field values, progresses its acknowledge bit
+correctly, and is transmitted at a comparable level. The receiver reads the caller
+throughout. And the acknowledgement still does not come.
+
+### What this eliminates, and what is left
+
+This closes out the receiver as a suspect: the earlier symptom - "we never see the caller's
+MP" - is fixed and demonstrably so. It also closes out MP frame content, constellation,
+field values, acknowledge sequencing and transmit level, each by direct measurement against
+a working reference rather than by inference.
+
+What has never been examined is **Phase 2**. Our MP now advertises `ca=16800 ac=16800`,
+16-state trellis and expanded shaping, but our INFO sequences - sent long before, and never
+decoded or verified in this work - advertise whatever linmodem hard-codes there. A peer that
+cross-checks the MP against the capabilities established during INFO would reject a
+mismatch, and that is exactly the shape of the symptom: valid frames, correct parameters,
+politely ignored. The INFO exchange is the last part of the startup never inspected, and the
+captures needed to inspect it are already in the repo.

@@ -3857,6 +3857,66 @@ static double p4_trn_score(const double *si, const double *sq, int ns, int sixte
     return best;
 }
 
+
+/* MP frames from equalised Phase-4 symbols.
+   MP uses DIFFERENTIAL rotation (10.1.3.3: Zn = In + Zn-1), unlike TRN which is absolute,
+   so the receiver phase ambiguity cancels and no rotation search is needed. Bits per symbol
+   are I1,I2 from the differential rotation and, for 16-point, Q1,Q2 from the base index. */
+static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen, int poly,
+                        int *out_ca, int *out_ac, int *out_trel, int *out_ack,
+                        int *out_shape, unsigned int *out_mask)
+{
+    static int raw[P4_MAXSY*4], db[P4_MAXSY*4];
+    double pw = 0, scale;
+    unsigned int reg = 0;
+    int i, nb = 0, pz = -1, found = 0;
+    if (ns < 200) return 0;
+    for (i = 0; i < ns; i++) pw += si[i]*si[i] + sq[i]*sq[i];
+    if (pw <= 0) return 0;
+    scale = sqrt((sixteen ? 10.0 : 2.0)*ns/pw);
+    for (i = 0; i < ns; i++) {
+        int q2, z2, dz;
+        p4_slice(si[i]*scale, sq[i]*scale, sixteen, &q2, &z2, NULL, NULL);
+        if (pz >= 0) {
+            dz = (z2 - pz) & 3;
+            raw[nb++] = dz & 1; raw[nb++] = (dz >> 1) & 1;
+            if (sixteen) { raw[nb++] = q2 & 1; raw[nb++] = (q2 >> 1) & 1; }
+        }
+        pz = z2;
+    }
+    for (i = 0; i < nb; i++) {          /* self-synchronising descramble */
+        db[i] = (int)((reg >> 22) & 1) ^ raw[i];
+        reg = (reg << 1) & 0x7fffff;
+        if (raw[i]) reg ^= (unsigned int)poly;
+    }
+    for (i = 0; i + 190 < nb; i++) {    /* hunt the 17-bit all-ones sync, then verify CRC */
+        int k, ok = 1, type, L, co, cn = 0, rxc = 0;
+        static u8 cov[200];
+        for (k = 0; k < 17; k++) if (!db[i+k]) { ok = 0; break; }
+        if (!ok) continue;
+        type = db[i+18]; L = type ? 188 : 88; co = type ? 171 : 69;
+        if (i + L > nb) break;
+        for (k = 17; k < co; k++) {
+            int st = (k == 17 || k == 34) ||
+                     (type ? (k >= 51 && ((k-51) % 17) == 0) : (k == 51 || k == 68));
+            if (!st) cov[cn++] = (u8)db[i+k];
+        }
+        for (k = 0; k < 16; k++) rxc |= db[i+co+k] << (15-k);
+        if (calc_crc(cov, cn) != rxc) continue;
+        found++;
+        if (found == 1) {
+            if (out_ca)  *out_ca  = (db[i+20]<<3)|(db[i+21]<<2)|(db[i+22]<<1)|db[i+23];
+            if (out_ac)  *out_ac  = (db[i+24]<<3)|(db[i+25]<<2)|(db[i+26]<<1)|db[i+27];
+            if (out_trel) *out_trel = (db[i+29]<<1)|db[i+30];
+            if (out_shape) *out_shape = db[i+32];
+            if (out_ack) *out_ack = db[i+33];
+            if (out_mask) { unsigned int m = 0; for (k = 0; k < 15; k++) m |= (unsigned int)db[i+35+k] << k; *out_mask = m; }
+        }
+        i += L - 1;
+    }
+    return found;
+}
+
 /* SIPFAX_P4BLOCK=<file.s16> : run the block receiver over a raw 8 kHz capture and report,
    for each window, the 4-point and 16-point TRN scores. Acceptance: the 16-point Phase-4
    TRN window should score ~0.99, matching research/v34-rx. */
@@ -3878,6 +3938,7 @@ void V34_p4block_test(void)
     for (; t0 < tend; t0 += wsec) {
         int n, nz, ns;
         double off, s4, s16;
+        int sixteen_mp = 1;
         if (fseek(f, (long)(t0*8000.0)*2, SEEK_SET) != 0) break;
         n = (int)fread(x, 2, (size_t)(wsec*8000.0), f);
         if (n < 4000) break;
@@ -3898,8 +3959,22 @@ void V34_p4block_test(void)
             s16 = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC);
         }
         if (0) ns = p4_equalize(zi, zq, nz, off, 0, 2, 3, si, sq);
-        fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s\n", t0, s4, s16,
-                (s16 >= 0.90) ? "   <== 16-POINT TRN" : (s4 >= 0.90 ? "   <== 4-point TRN" : ""));
+        {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp;
+            unsigned int mk = 0;
+            nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC,
+                               &ca, &ac, &tr, &ak, &sh, &mk);
+            if (!nmp) {
+                int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, si, sq);
+                nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, V34_GPC,
+                                   &ca, &ac, &tr, &ak, &sh, &mk);
+                if (nmp) sixteen_mp = 0;
+            } else sixteen_mp = 1;
+            fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s", t0, s4, s16,
+                    (s16 >= 0.90) ? "   <== 16-POINT TRN" : (s4 >= 0.90 ? "   <== 4-point TRN" : ""));
+            if (nmp) fprintf(stderr, "   MP: %d frames %s ca=%d ac=%d trel=%d shape=%d ACK=%d mask=0x%04x",
+                             nmp, sixteen_mp ? "16pt" : "4pt", ca*2400, ac*2400, tr, sh, ak, mk);
+            fprintf(stderr, "\n");
+        }
     }
     fclose(f);
 }

@@ -723,3 +723,51 @@ four points of linmodem's energy-sorted data constellation, whereas 10.1.3.6 spe
 "points 0-3 of the quarter-superconstellation of Figure 5", which has not been verified
 against the figure - or that region is the caller's 16-point *MP* (differential) rather than
 TRN. Resolving this is the next step, and the 0.998 control gives a trustworthy test for it.
+
+## 20. Quarter-superconstellation settled; the caller's whole Phase 3-4 now decodes (2026-08-20)
+
+**The constellation question is closed.** Page 19 defines the labelling: points are numbered
+by increasing magnitude, ties broken by *greatest imaginary component first*, and the full
+superconstellation is the union of four 90-degree rotations of the quarter. That makes the
+quarter exactly the 4Z+1 grid (rotating it lands on the other three cosets), so:
+
+| magnitude | point |
+|---|---|
+| 2 | (1,1) -> **0** |
+| 10 | (-3,1) -> **1** (imag 1 > -3) |
+| 10 | (1,-3) -> **2** |
+| 18 | (-3,-3) -> **3** |
+
+which is exactly what `mp_decode.BASE` already used, and what linmodem builds. **Our
+16-point signal set was correct all along** - the earlier failures were sampling windows
+that straddled signal transitions.
+
+### The Python receiver now decodes the caller's entire startup
+
+Scanning the 16-point call with the validated absolute-rotation TRN detector:
+
+| time | content | score |
+|---|---|---|
+| 13-14 s | **4-point TRN** (Phase 3) | 1.00 |
+| 16 s | **16-point TRN** (Phase 4) | 0.99, EVM 7% |
+| 17.5-18.2 s | **16-point MP** | 54-77 CRC-valid frames |
+
+The caller's Phase-4 MP reads `ca=16800 ac=9600 trel=2 shape=1 mask=0x3ffe` - **and ack=0**.
+
+### What this means
+
+Two separate facts, and it is worth keeping them apart:
+
+1. **Our receiver is the reason the 16-point call stalls early.** The caller does reach
+   Phase-4 TRN and MP and transmits perfectly valid 16-point frames; our C receiver is
+   4-point only, so it sees none of it, never enters MP hunt, and never gets the chance to
+   acknowledge. That is a definite, fixable defect with a validated reference implementation
+   now sitting in `mp_decode.py`.
+2. **The caller still does not acknowledge us**, even when we send the 16-point MP that
+   matches slmodem field for field. So 16-point is necessary for our receiver to follow the
+   conversation, but it is not on its own sufficient to earn the acknowledgement.
+
+The honest reading is that these may be the same problem: we have never once been in a state
+where we could *see* the caller's MP and acknowledge it while also sending an MP it accepts.
+Porting 16-point TRN and MP to the C receiver is what makes that state reachable for the
+first time, and it is the necessary next step regardless.

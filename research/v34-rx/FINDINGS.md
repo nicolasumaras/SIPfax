@@ -875,3 +875,47 @@ remaining candidates are things content comparison cannot see:
 
 Both are dynamic rather than static properties, which is consistent with everything static
 having now been eliminated.
+
+## 23. Timing comparison: found the J/MP asymmetry, matched it, still no acknowledgement
+
+Measuring the *dynamics* of the working call rather than its contents produced the sharpest
+structural finding of this work:
+
+**In the slmodem call the caller acknowledges 0.50 s after slmodem's MP begins** - and the
+two directions use *different* constellations:
+
+| | slmodem call | our call (before the fix) |
+|---|---|---|
+| answer modem's own MP | **16-point** | 16-point |
+| caller's MP | **4-point** | **16-point** |
+
+So slmodem sends **J4POINTS** - J tells the *caller* which constellation to use for **its**
+transmissions - while independently choosing 16-point for its **own** MP. The two are
+separate decisions. We had J following `mp_16point`, so requesting 16-point MP also pushed
+the caller onto 16-point: the opposite of slmodem, and it forced the caller onto a
+constellation the streaming receiver cannot read. (The block receiver was built to work
+around a problem we had created.)
+
+Fixed: J now follows `is_16states` (J4POINTS, caller stays 4-point) while `mp_16point`
+governs only our own MP. Live call 9 confirms the prediction exactly - the caller switched
+back to 4-point (`LIVE MP READ: 38 / 65 frames 4pt`) - and decoding our own transmission
+confirms we sent 16-point MP throughout with slmodem's exact fields
+(`ca=16800 ac=16800 trel=0 shape=1`, ack progressing 0 -> 1).
+
+**The caller still never acknowledges.**
+
+### Where this leaves the investigation
+
+We now match the peer this caller acknowledges on every dimension that has been measurable:
+INFO0a and INFO1a byte-identical, J4POINTS, 16-point own MP with identical field values,
+correct acknowledge sequencing, comparable transmit level, and a receiver that reads the
+caller's MP continuously throughout the call. The acknowledgement still does not come, and
+in the working call it arrives within half a second.
+
+That is a meaningful boundary: everything observable in the exchange has been matched
+against a working reference, so whatever remains is not visible in the frames, the
+constellations, the parameters, the levels or the sequence of stages. The most likely
+remaining candidates are fine-grained timing within Phase 4 - our stages run several times
+longer than slmodem's - or a property of how the audio reaches the caller that the two
+engines drive differently. Both would require instrumenting the *process* rather than the
+*content*, which is a different kind of investigation from everything done so far.

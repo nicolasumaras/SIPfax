@@ -346,3 +346,56 @@ Comparing the two Phase-4 streams - S / Sbar lengths, TRN duration, when MP star
 to the caller's, frame cadence, level and constellation - should show directly what we do
 differently. That is a concrete, bounded comparison against a known-good reference, and it
 needs no further live calls.
+
+## 12. Offline pcap mining: what it settled and what it did not (2026-08-20)
+
+With both directions of a working (slmodem) and a failing (linmodem) call persisted, the
+Phase-4 choreography is directly comparable. Classifying each 0.3 s window by kurtosis
+(`.`=silent, `4`=constant-modulus/4-point, `m`=16-point-ish, `D`=dense/data):
+
+```
+slmodem  (WORKS)   caller->us: mmmmmmmmDDDDDDDDDDDDDDDDDDDD...
+                   us->caller: ...mmmmmmmDDDDDDDDDDDDDDDDDD...   both reach DATA ~15 s
+
+linmodem (fails)   caller->us: mmmmmmmmmmmmmmmmmmmmmmmmmmD4444444444444
+                   us->caller: ..........m44444444444444444444444444444   we stay 4-point
+```
+
+That looked like a clean answer - slmodem sends 16-point MP, we send 4-point - and it is
+what motivated the `is_16states=1` test. **But the follow-up measurements do not support it,
+and two of my own classifiers turned out to be invalid:**
+
+- **Kurtosis is unreliable here.** It is only meaningful on a window containing a single
+  signal type; the MP windows in these calls mix TRN, MP and (for slmodem) data, giving
+  values from 1.39 to 7.99 that classify nothing.
+- **The frame-period test is invalid.** MP frames repeat, so the symbol sequence should
+  repeat every 94 symbols (4-point) or 47 (16-point). It does not - not even in our own
+  transmission, which is known to repeat. The self-synchronising scrambler carries state
+  across frames, so identical bits produce different symbols. No periodicity exists to find.
+
+**The strongest evidence actually points the other way.** Our C MP decoder reads the
+*caller's* MP at 2 bits/symbol (rotation dibits only) and gets CRC OK 152 times per call. A
+16-point MP carries 4 bits/symbol, so a 2-bit decode could not produce a valid CRC. **The
+caller's own MP is therefore 4-point** - which makes it unlikely that 4-point MP is what it
+objects to.
+
+### State
+
+`mp_16point` now defaults to 0 (4-point, the configuration under which the caller reliably
+sends us valid MP), with `SIPFAX_MP16=1` to try 16-point without a rebuild. The TRN/MP
+decoupling is kept regardless: `is_16states` driving both `V34_send_TRN` and the MP/J
+constellation was a real latent bug, and it is what made the 16-point test regress so badly
+(our TRN went 16-point, the caller stopped training, and the MP exchange vanished entirely).
+
+### Honest status after four live tests
+
+The caller has never acknowledged our MP. Conclusively ruled out: MP frame content and
+parameters, MP validity/CRC/scrambling (our own transmission decodes at 653 frames CRC OK),
+signal quality (1.7-2.9% EVM), and Phase-4 preamble length (2373 symbols vs 656 minimum).
+Not yet explained, and not resolvable from these captures alone: why a caller that sends us
+valid 4-point MP will not acknowledge our valid 4-point MP.
+
+The most promising remaining avenue is the part of Phase 4 not yet compared in detail - the
+exact S / Sbar sequences we emit before TRN, and the E sequence - since those are what mark
+the phase boundaries the caller's state machine keys on. Unlike constellation guesses, those
+can be checked against the spec tables directly and verified offline from our own TX audio.

@@ -1558,7 +1558,13 @@ static void V34_mod_init(V34DSPState *s, V34State *p)
     s->JP_received = 1;
     //    s->state = V34_DATA;
     s->is_16states = 0; /* TRN stays 4-point: the caller trains on this */
-            s->mp_16point = 1;  /* SIPFAX: but MP/J are 16-point, like slmodem */
+            {   /* SIPFAX: MP/J constellation. Default 4-point: the caller's OWN MP is
+                       4-point (our decoder reads it at 2 bits/symbol with CRC OK), so
+                       4-point is clearly acceptable on this link. SIPFAX_MP16=1 selects
+                       16-point to test that lead without a rebuild. */
+                char *m16 = getenv("SIPFAX_MP16");
+                s->mp_16point = (m16 && atoi(m16)) ? 1 : 0;
+            }
 }
 
 /*****************************************************/

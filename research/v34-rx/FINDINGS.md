@@ -103,3 +103,42 @@ most likely CMA collapsing after repeated passes.
 3. Train the equalizer on Phase-3 TRN rather than blind CMA (blind adaptation on a dense
    constellation has been unreliable throughout this work).
 4. Correct the measured 44.5 ppm symbol-clock offset with a tracking loop.
+
+## 7. Control experiment: slmodem reference capture (2026-08-20)
+
+Captured slmodem's own receive audio on the same path minutes later (it connects at 33.6),
+persisted as `test/fixtures/v34-captures/live-datamode-slmodem-ref-rx.s16` - 46.5 s with a
+**36 s uninterrupted data segment** (vs linmodem's 8 s before the caller gives up).
+
+Identical pipeline over both:
+
+| | slmodem REF (works @33.6) | linmodem (fails) |
+|---|---|---|
+| path SNR (silence vs data) | 46.7 dB | 45.2 dB |
+| symbol rate (cyclostationary line) | 3428.4 Hz | 3428.4 Hz |
+| symbol-clock offset | +46.3 ppm | +44.5 ppm |
+| **kurtosis** | **1.677** | **1.390** |
+| data segment | 36 s, no dropout | 8 s, then 1200 Hz retry tone |
+
+Conclusions:
+
+- **The path is identical and excellent in both cases** (~46 dB), and the ~45 ppm symbol-clock
+  offset is a property of the path/caller clock, not of linmodem - slmodem tracks it fine.
+  So neither the line nor the clock explains linmodem's failure.
+- **Kurtosis separates them exactly as the negotiated rates predict.** 1.677 is near-Gaussian,
+  the signature of the large shell-shaped constellation used at 33.6k; 1.390 matches a small
+  (~48-point) constellation. So when linmodem is the answer modem the caller really is
+  sending 16800-class data, confirming the constellation model - the remaining ~30 dB gap
+  between 46 dB path SNR and ~13 dB slicer SNR is still unexplained.
+
+**Pipeline limitation found:** `front_end()` hard-codes 3429 baud / 1959 Hz carrier, so it
+cannot lock *startup* in either capture - the cyclostationary line during Phase 2/3 reads
+2000-2570 Hz, and 4-point EVM sits at the no-lock value (~44%) in every startup window of
+both files. That blocks the obvious validation (lock the known 4-point TRN in real audio)
+**and** it blocks TRN-trained equalization, which is what a real V.34 receiver does and what
+section 6 already identified as the way off blind adaptation.
+
+**Next: make the front end rate/carrier agnostic** (drive it from the negotiated S and carrier
+rather than constants), then lock Phase-3 TRN in the slmodem reference. That single change
+both validates the pipeline against a known constellation on real audio and unlocks
+TRN-trained equalization for data mode.

@@ -1344,7 +1344,19 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
                expanded shaping, mask 0x3fff. */
             char *sl = getenv("SIPFAX_MP_SLCOMPAT");
             if (sl && atoi(sl)) {
-                r_ca = 7; r_ac = 7; trel = 0; msk = 0x3fff;
+                /* SIPFAX: ca is the rate we ask the CALLER to transmit at, i.e. our
+                   RECEIVE rate. 7 (=16800) is what slmodem advertises, but this line
+                   cannot carry it: measured on the caller's own Phase-4 TRN the channel
+                   plus our equaliser delivers 22.4-24.9 dB, and the 48/56-point
+                   constellation R=16800 uses needs >=24 dB - no margin, on a 4-point
+                   signal that is far easier to equalise than data mode. Dropping to
+                   9600 (r_ca=4) takes the constellation from L=56 to L=12, worth about
+                   6.7 dB, which turns a marginal link into a comfortable one. The caller
+                   reached the same conclusion independently: it proposes ac=9600 for our
+                   direction. SIPFAX_MP_CA / SIPFAX_MP_AC override (units of 2400 bit/s). */
+                r_ca = 4; r_ac = 7; trel = 0; msk = 0x3fff;
+                { char *mc = getenv("SIPFAX_MP_CA"); if (mc) r_ca = atoi(mc);
+                  char *ma = getenv("SIPFAX_MP_AC"); if (ma) r_ac = atoi(ma); }
                 /* SIPFAX: the shaping bit we advertise. slmodem sends 1, and the caller
                    obliges - its transmitted distribution measures kurtosis 1.71 against
                    1.48 unshaped / 1.60 shaped for our own encoder. Setting this to 0 is

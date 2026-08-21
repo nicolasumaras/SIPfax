@@ -1307,3 +1307,63 @@ slmodem's, the full Phase-2 exit ladder, INFO1c field decode and the meaning of 
 delta, the caller's exact decision instant (is it reacting to our INFO1a or to the first
 milliseconds of our Phase-3 S?), and fix design including a recovery path so a caller
 INFO0c during Phase 3 can no longer deadlock us.
+
+## 31. CONNECTED — the V.34 handshake completes on linmodem
+
+Call 28, 2026-08-21 18:18. The full ITU-T V.34 startup ran to completion against the real
+modem, with linmodem as the answer modem and no slmodem anywhere in the path:
+
+```
+[v34p2] L2 done (caller Tone B) -> Tone A         reactive L2 termination
+[v34p2] Tone A reversal #3 (11.2.1.2.6)           contiguous with our probe
+[v34p2] modem probe RECEIVED (580ms) -> symrate 5
+[v34p2] caller INFO1c arriving
+[v34p2] caller INFO1c done -> INFO1a NOW          40 ms, was 930 ms
+[v34p3] Phase 3: S/Sbar/PP/TRN -> J
+[v34p3] CALLER TRANSMITTING in Phase 3
+[srx]   caller J detected at sym 3519 (28/32)
+[srx]   J variant vote: J4=192 J16=180 -> J4POINTS
+[p4]    caller commanded 4-point -> TRN/MP/E all 4-point
+[p4]    caller TRN 512T done -> MP
+[p4]    TX: TRN done (6 chunks) -> MP
+[p4]    MP READ (consensus): ca=16800 ac=9600 trellis=64state ack=1   <-- THE ACK
+[p4]    MP-prime READ (consensus)
+[p4]    TX: E sent -> DATA (B1)
+[p4]    E received at sym 12424                                       <-- both directions
+```
+
+Data mode held for ~64 s until the caller hung up. The acknowledgement that 27 calls
+chased arrived 20 ms after our MP' went out.
+
+### What actually unlocked it
+
+The blocker was never Phase 4. It was **INFO1a latency**: V.34 11.2.2.1.6 budgets 700 ms
+between the end of the caller's INFO1c and the start of the answer modem's INFO1a
+(the round trip cancels in a tap measurement). slmodem answers in 22-27 ms. We answered
+in 929-934 ms, because we went silent and waited instead of doing what 11.2.1.2.8-9
+requires - hold Tone A while receiving INFO1c and reply immediately. The caller lawfully
+abandoned Phase 2 and restarted with INFO0c, every single call, and everything we saw in
+Phases 3 and 4 was that restart playing out downstream.
+
+The second unlock followed within one call: once Phase 2 completed properly the caller's
+J changed from J16POINTS to **J4POINTS** - it had been demanding 16-point only because it
+had never seen a working INFO exchange. Our bridge handled only the J16 branch, so
+`mp_16point` stayed pinned by SIPFAX_MP16/SLCOMPAT and we answered J4POINTS with a
+16-point MP. Making the caller's J the authority for both flags produced the ack.
+
+### Negotiated parameters
+
+`ca=16800 ac=9600 trellis=64-state`, 4-point Phase 4, S=3429 carrier 1959 Hz. Note the
+caller still rates our direction 9600 (section 30's ac anomaly) - worth revisiting now
+that Phase 2 is correct, since its INFO1c asks us for 4 dB of power reduction which we do
+not currently apply.
+
+### Next wall: data-mode demodulation
+
+Data mode is entered but no bytes are produced: no PPP traffic reached the bridge. The
+V.34 data-mode receiver (48-point QAM at 16800, 4D trellis decoding, shell demapping,
+precoder) is the remaining work - the Viterbi table and mapper groundwork from sections
+1-9 feed directly into it.
+
+Fixture saved: `test/fixtures/v34-captures/live-linmodem-connect.pcap` - the first capture
+of a complete linmodem V.34 connection.

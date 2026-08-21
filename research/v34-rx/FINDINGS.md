@@ -1254,3 +1254,56 @@ between the engines (linmodem's Phase 3 is also structurally nonstandard: a hand
 comparison, Phase-3 structure, spec ack-conditions (may a strict caller lawfully withhold
 ack from an MP whose rates exceed its own proposal?), a free wire diff, and the
 provenance of ac=9600 across all captures.
+
+## 30. Phase 2 now completes - and the caller restarts it anyway
+
+The reactive-ranging work (section 29 follow-on) moved the failure four stages earlier and
+uncovered a chain of defects, each hidden behind the last:
+
+| # | defect | evidence | fix |
+|---|---|---|---|
+| 1 | Phase-3 output muted whenever the caller transmitted first | caller reached Phase 3 at p3n=40 ms once ranging was correct; our S/PP/TRN/J went out silent; deadlock, line quiet 47 s | 11.3 Phase 3 is DUPLEX - yield only after our block is sent |
+| 2 | Tone A raised at our L2 end, before the caller's probe | Tone A is its probe-TERMINATE signal; it aborted its probe at 240 ms and no white-noise phase happened at all | silence after L2; Tone A only once its probe is >=450 ms in |
+| 3 | B-reversal detector latch-storm | 32 false latches in 180 ms at cos=-1.00 (DPSK blocks slipping past the INFOC gate) | 200 ms refractory + reference rebuild |
+| 4 | classify() could not see the caller's INFO at all | INFO is 600 bps DPSK on 1200 Hz and **the carrier is suppressed**: mag@1200 measured 3..578 against rms 1750, far under the rms*0.4 gate, so INFO fell through to OTHR/WIDE | band test on 900+1050+1350+1500 (measured 1644..2283 vs threshold ~880) |
+| 5 | we never waited for the caller's INFO1c | a fixed 1.5 s wait for a 2nd B-reversal pushed our INFO1a 1.4 s past its INFO1c; it re-sent INFO1c for 16 s | R_PRX waits for INFO1c + 100 ms quiet; R_INFO1A then does 0.5 s silence, 0.3 s Tone A, one INFO1a, 70 ms gap |
+| 6 | the mute also swallowed our **J** | V34_send_J queues symbols and the state machine reaches WAIT_J in the same call, so the mute zeroed the very J the caller waits for (J at 10.712, WAIT_J 10.732, then silence) | p3go mute removed entirely |
+
+Phase 2 now runs to completion live: ranging reactive, probe intact, `caller INFO1c
+arriving` / `caller INFO1c done -> our INFO1a`, INFO1a sent, Phase 3 transmitting
+continuously.
+
+### The current wall
+
+**The caller restarts Phase 2 ~180 ms after our INFO1a**, sending INFO0c (CRC-valid,
+byte-identical to the INFO0c from the start of the call) every ~80 ms for the rest of the
+call, while we sit in Phase 3 transmitting S/Sbar/PP/TRN/J. Neither side advances.
+
+And the decisive measurement: **our INFO1a is BIT-IDENTICAL to slmodem's** -
+
+```
+1111011100100000000000000001101001101101000000000011010011011100001111
+```
+
+decoded from both wires, 70 bits, no differences. So content is not the defect.
+
+Timing is comparable too (each stream in its own clock; in the working capture the caller
+flow leads the answer flow by 0.759 s):
+
+| | caller INFO1c | our/slmodem INFO1a | gap | caller's next act |
+|---|---|---|---|---|
+| working | 7.22 | 8.22 | 1.00 s | silent 1.7 s, then its Phase 3 |
+| failing | 7.73 | 8.84 | 1.11 s | **INFO0c at 9.14, forever** |
+
+The caller's INFO1c itself differs between the calls in exactly **2 bits** (frame indices
+13 and 14: working 1,0 - failing 0,1), everything else identical.
+
+Note a measurement trap found here: zero-padding one stream to align clocks destroys
+`info_bits()`' DPSK phase reference, which is why an earlier scan "could not find"
+slmodem's INFO1a at all. Work in each stream's own clock and convert times.
+
+A five-lens forensics workflow is now on the question - INFO1a delivery properties vs
+slmodem's, the full Phase-2 exit ladder, INFO1c field decode and the meaning of the 2-bit
+delta, the caller's exact decision instant (is it reacting to our INFO1a or to the first
+milliseconds of our Phase-3 S?), and fix design including a recovery path so a caller
+INFO0c during Phase 3 can no longer deadlock us.

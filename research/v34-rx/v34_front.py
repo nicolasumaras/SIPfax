@@ -199,8 +199,25 @@ def evm_to(alphabet, s, nrot=180, sub=5):
     return best
 
 
+def data_constellation(n=48):
+    """V.34 DATA-MODE constellation: the n lowest-energy points of the ODD-INTEGER
+    (2Z+1) lattice -- coordinates +-1,+-3,+-5,+-7 at n=48.
+
+    Verified against linmodem's own encoder output at R=16800 (L=48, K=28, M=12): the
+    two sets agree except for a 2-point tie-break at energy 58, where four points
+    (+-3,+-7)/(+-7,+-3) are equal-energy and V.34 selects a specific pair.
+
+    NOTE this is NOT constellation_16800() below, which builds the 4Z+1
+    quarter-superconstellation used by TRN and MP. Fitting data-mode symbols against the
+    4Z+1 set silently inflates EVM -- that mistake cost a full measurement pass.
+    """
+    c = sorted((x*x + y*y, x, y)
+               for x in range(-15, 16, 2) for y in range(-15, 16, 2))
+    return np.array([complex(x, y) for _, x, y in c[:n]])
+
+
 def constellation_16800():
-    """48-pt V.34 mapper output for R=16800,S=3429 (48 lowest-energy 4Z+1 points)."""
+    """48-pt 4Z+1 QUARTER-superconstellation (TRN/MP only -- see data_constellation)."""
     pts = []
     for a in range(-6, 7):
         for b in range(-6, 7):

@@ -1367,3 +1367,80 @@ precoder) is the remaining work - the Viterbi table and mapper groundwork from s
 
 Fixture saved: `test/fixtures/v34-captures/live-linmodem-connect.pcap` - the first capture
 of a complete linmodem V.34 connection.
+
+## 32. Data mode, session 1: the codec is done; the receive chain is the work
+
+Starting the data-mode demodulator. The first thing to establish was how much of it
+already exists — and the answer is: most of the hard part.
+
+### The codec round-trips
+
+`SIPFAX_DATALOOP` drives linmodem's own shell mapper, 4D trellis encoder/decoder,
+precoder and scramblers TX→RX with no channel. At the parameters we actually negotiated
+(R=16800, S=3429, 64-state) it returns **100.0% bit match**, likewise at 19200 and 9600.
+So the shaping/coding/framing stack is not the work; the receive chain and its wiring is.
+
+Two harness bugs had to be fixed before that number meant anything:
+
+- **Symbol scale.** `put_sym` carries `coordinate × 128` in data mode — verified on the
+  wire, lattice coordinates (1,5) arrive as (128,640) — which is exactly the contract
+  `tcm_decision()` assumes (it reads a coordinate back as `(sample>>8)*2+1`). The harness
+  was multiplying by 128 a second time.
+- **Noise model.** It assumed raw lattice units, making the injected noise 128× too weak.
+  Every "100% at 0 dB SNR" reading was noise rounding away to nothing.
+
+A zero-input control (`SIPFAX_DL_ZERO`) pins the failure floor at 50.4%, which is what
+separates "the decoder is working" from "the harness is measuring itself".
+
+### The number that matters: ≥24 dB
+
+With both fixed, the waterfall at R=16800 (deterministic LCG noise, so runs compare):
+
+| SNR | 40 | 30 | 26 | 24 | 22 | 20 | 18 | 16 | 14 |
+|---|---|---|---|---|---|---|---|---|---|
+| bit match | 100% | 100% | 100% | 100% | 99.6% | 95.1% | 80.3% | 61.4% | 50.1% |
+
+**The receiver must deliver ≥24 dB.** For reference our CMA/DD chain measured 2.91% EVM
+(30.7 dB) on the caller's real Phase-3 TRN, so the margin exists in principle.
+
+### The data-mode constellation is NOT the TRN/MP one
+
+At R=16800 the encoder emits L=48, K=28, M=12 — 48 points on the **odd-integer (2Z+1)**
+lattice, coordinates ±1,±3,±5,±7. `constellation_16800()` in `v34_front.py` builds the
+**4Z+1 quarter-superconstellation** (coordinates 1,5,9,-3,-7…), which is correct for TRN
+and MP and wrong for data mode. Fitting data symbols against it silently inflates EVM;
+that mistake cost a full measurement pass. `data_constellation(n)` now provides the right
+set (it matches linmodem's encoder except for a 2-point tie-break at energy 58, where
+four equal-energy points exist and V.34 picks a specific pair).
+
+### The captured data-mode signal does not fit a clean lattice
+
+`live-linmodem-connect.pcap` holds 48 s of the caller transmitting in data mode. Against
+the correct 48-point set our receiver plateaus at **14.8% EVM (16.6 dB)** — below the
+24 dB required — and the figure is flat to ±0.05% across the whole 48 s, independent of
+pass count (1→6 CMA, 1→14 DD) and step size.
+
+The control proves the metric is sound: a clean synthetic 48-point signal through the
+same chain fits its own set at **1.92%** and gets monotonically *worse* with larger sets
+(11.7% at 64 points), the signature of a correct fit. The real signal shows no such
+minimum — it improves monotonically out to ~192 points (12.0%) with no clean lattice
+anywhere.
+
+So the received symbols genuinely are not on the 48-point lattice. The leading explanation
+is **precoding** (V.34 §9.6): if the caller precodes, its transmitted symbols are
+deliberately spread within Voronoi cells and only collapse onto the lattice after the
+receiver applies the matched channel response — which our receiver does not implement.
+The caller's MP did carry non-zero h coefficients (noted as "always wild, never repeating"
+back in section 30's cross-call survey), consistent with precoding being active.
+
+### Next steps, in order
+
+1. Determine whether the caller is precoding — decode the h coefficients from its MP in
+   `live-linmodem-connect.pcap` and check whether applying that response collapses the
+   received cloud onto the 48-point set.
+2. Wire `V34_demod_cma` → `baseband_decode_impl` at data-mode entry (`p4_e_rx`), feeding
+   symbols at coordinate×128 with the equalizer taps carried over from Phase-4 TRN rather
+   than re-acquired — CMA cannot converge on a shaped 48-point set (our own control shows
+   it degrading with more passes).
+3. Verify against the loopback waterfall: the live chain must show ≥24 dB before PPP can
+   run.

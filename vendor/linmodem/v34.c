@@ -4163,6 +4163,91 @@ static void p4_block_reset(void)
     p4_stage = 0; p4_pass = 0; p4_six = 0; p4_nz = 0; p4_ns = 0;
 }
 
+/* SIPFAX: (9.6) the precoder coefficients are computed by the RECEIVER, from the residual
+   ISI it still sees after its own equaliser, and handed to the far TRANSMITTER in MP so
+   that IT pre-cancels them. We have advertised h = 0,0,0 in every call to date - telling
+   the caller "my channel is flat, do not precode" - while the caller sends us real
+   coefficients (0.285, 0.167, 0.102) because it measured real ISI on its side.
+
+   Our equaliser is trained on Phase-4 TRN and then frozen: CMA has no usable error signal
+   on a multi-ring shaped constellation and decision-directed adaptation has no gradient
+   until the decisions are already mostly right. So whatever ISI is left at the end of TRN
+   stays there for the whole of data mode. Precoding is the mechanism the spec provides for
+   exactly this situation, and we have been declining it.
+
+   Estimate the post-cursor ISI from TRN, whose 4-point symbols the slicer recovers
+   reliably (measured 8.7% EVM), by correlating the slicer error with delayed decisions:
+
+       y(n) = d(n) + SUM_k h_k d(n-k) + noise
+       e(n) = y(n) - d(n)   =>   h_k = E{ e(n) d*(n-k) } / E{|d|^2}
+
+   If the h_k come out at the noise floor the residual is additive noise and precoding
+   cannot help; if they are well above it the residual is ISI and it can. */
+static s16 p4_hest[3][2];
+static int p4_have_h;
+
+static void p4_est_precoder(const double *si, const double *sq, int ns, int sixteen)
+{
+    double scale = sixteen ? sqrt(10.0) : sqrt(2.0);
+    double ar[3] = {0,0,0}, ai[3] = {0,0,0}, pw = 0, ep = 0;
+    double dhi[4] = {0,0,0,0}, dhq[4] = {0,0,0,0};
+    int i, k, nn = 0;
+    if (ns < 600) return;
+    for (i = 200; i < ns; i++) {
+        double yi = si[i]*scale, yq = sq[i]*scale, dx, dy, ei, eq;
+        int q2, z2;
+        p4_slice(yi, yq, sixteen, &q2, &z2, &dx, &dy);
+        ei = yi - dx; eq = yq - dy;
+        for (k = 3; k >= 1; k--) { dhi[k] = dhi[k-1]; dhq[k] = dhq[k-1]; }
+        dhi[0] = dx; dhq[0] = dy;
+        if (nn >= 3) {
+            for (k = 1; k <= 3; k++) {            /* e(n) * conj(d(n-k)) */
+                ar[k-1] += ei*dhi[k] + eq*dhq[k];
+                ai[k-1] += eq*dhi[k] - ei*dhq[k];
+            }
+            pw += dx*dx + dy*dy;
+            ep += ei*ei + eq*eq;
+        }
+        nn++;
+    }
+    if (pw <= 0 || nn < 400) return;
+    fprintf(stderr, "[p4] precoder estimate from TRN (%d syms, residual %.1f%% rms):\n",
+            nn, 100.0*sqrt(ep/pw));
+    {   /* SIPFAX: is that residual stationary noise, or drift? p4_equalize advances its
+           read pointer by a FIXED P4_SPS/2 with no timing-recovery loop, so any sample
+           clock offset between the caller and us accumulates; a fractionally-spaced
+           equaliser absorbs some of that by sliding its taps, but only slowly and only
+           within its span. Stationary EVM across the burst means additive noise and a
+           genuinely poor line; EVM that ramps, or a phase that walks, means we are
+           losing the margin ourselves. */
+        int b, nb = nn/500;
+        for (b = 0; b < nb && b < 16; b++) {
+            double be = 0, bp = 0, sr = 0, si2 = 0;
+            int j0 = 200 + b*500, j;
+            for (j = j0; j < j0+500 && j < ns; j++) {
+                double yi = si[j]*scale, yq = sq[j]*scale, dx, dy, e1, e2;
+                int q2, z2;
+                p4_slice(yi, yq, sixteen, &q2, &z2, &dx, &dy);
+                e1 = yi - dx; e2 = yq - dy;
+                be += e1*e1 + e2*e2; bp += dx*dx + dy*dy;
+                sr += yi*dx + yq*dy; si2 += yq*dx - yi*dy;   /* mean residual rotation */
+            }
+            if (bp <= 0) continue;
+            fprintf(stderr, "[p4]   block %2d: EVM %5.1f%%  resid-phase %+6.2f deg\n",
+                    b, 100.0*sqrt(be/bp), atan2(si2, sr)*180.0/M_PI);
+        }
+    }
+    for (k = 0; k < 3; k++) {
+        double hr = ar[k]/pw, hi = ai[k]/pw;
+        /* a tap driven only by white noise lands near sqrt(ep/pw/nn) - the floor */
+        fprintf(stderr, "[p4]   h%d = %+.4f %+.4fj  |h|=%.4f  (noise floor %.4f)\n",
+                k+1, hr, hi, sqrt(hr*hr+hi*hi), sqrt(ep/pw/(double)nn));
+        p4_hest[k][0] = (s16)lrint(hr * 16384.0);
+        p4_hest[k][1] = (s16)lrint(hi * 16384.0);
+    }
+    p4_have_h = 1;
+}
+
 static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
                          int *shape, unsigned int *mask, int *sixteen_out, short *hout)
 {
@@ -4181,7 +4266,9 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
         return 0;
     }
     {                                          /* decode what the passes produced */
-        int nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
+        int nmp;
+        if (!p4_have_h) p4_est_precoder(p4_si, p4_sq, p4_ns, p4_six);
+        nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
                                p4_six, V34_GPC, ca, ac, trel, ack, shape, mask, hout);
         if (nmp) {
             if (sixteen_out) *sixteen_out = p4_six;

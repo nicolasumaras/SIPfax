@@ -1757,3 +1757,95 @@ comfortable. It points instead at the **receive equalisation**:
 The equaliser is good enough for the 4-point set it was trained on (the caller's TRN decodes
 at 8.7% EVM) and not good enough for data mode, at any rate. Rate was worth eliminating, and
 is now eliminated: **the next work is adaptive equalisation in data mode, not link budget.**
+
+## 38. The real blocker: we never track the symbol clock
+
+§37 ended by blaming the equaliser's inability to adapt in data mode. That was wrong, and
+the test that was supposed to confirm it refuted it instead.
+
+### Precoding, measured directly this time
+
+§9.6 makes the RECEIVER compute the precoder coefficients and hand them to the far
+TRANSMITTER in MP. We have advertised `h = 0,0,0` in every call ever placed - `s->h` is
+never assigned anywhere in `v34.c` - which tells the caller "my channel is flat, do not
+precode", while the caller sends us real coefficients because it measured real ISI on its
+side. The §9.6.2 precoder itself is fully implemented in linmodem; it has simply been
+running as a no-op.
+
+So the obvious hypothesis was that we were declining the one mechanism the spec provides
+for residual ISI. The way to test it is to estimate what we would have sent. Phase-4 TRN
+has known 4-point symbols the slicer recovers reliably, so correlate the slicer error with
+delayed decisions:
+
+    y(n) = d(n) + SUM_k h_k d(n-k) + noise
+    e(n) = y(n) - d(n)   =>   h_k = E{ e(n) d*(n-k) } / E{|d|^2}
+
+Measured on the caller's TRN:
+
+    residual 15.7% rms
+    h1 = +0.0050 +0.0015j   |h| = 0.0053   (noise floor 0.0022)
+    h2 = -0.0017 -0.0005j   |h| = 0.0018   (floor 0.0022)
+    h3 = +0.0012 +0.0007j   |h| = 0.0014   (floor 0.0022)
+
+h2 and h3 are at the floor; h1 is barely above it. Total ISI energy is 0.58% of a 15.7%
+residual. **Our equaliser leaves essentially no ISI** - precoding on the receive direction
+would buy nothing, and this is now measured rather than inferred (contrast §33 and §36,
+which reached the same verdict by less direct routes).
+
+That leaves 15.7% rms of something else. 15.7% EVM is 16.1 dB SNR - and slmodem carries
+33 600 on this exact line every day, which needs about 28 dB. The line is not the problem.
+
+### The residual is not stationary
+
+Splitting the same burst into 500-symbol blocks:
+
+| block | EVM   | residual phase |
+|-------|-------|----------------|
+| 0     | 37.6% | -1.37°         |
+| 1     | 17.8% | +0.46°         |
+| 2     | 11.8% | +0.30°         |
+| 3     |  7.8% | +0.11°         |
+| 4     |  4.3% | -0.00°         |
+| 5     |**3.6%**| +0.03°        |
+| 6     |  6.1% | -0.08°         |
+| 7     |  9.0% | +0.14°         |
+| 8     | 12.7% | +0.12°         |
+| 9     | 15.6% | -0.38°         |
+
+A clean V, minimum mid-burst, rising symmetrically either side. The residual phase is flat
+at ±0.4° throughout, so this is **not** carrier drift.
+
+It is the sampling instant. `p4_equalize` computes one timing estimate at the top of the
+burst and then advances its read pointer by a fixed `P4_SPS/2.0` forever - there is no
+timing-recovery loop anywhere in the Phase-4 or data-mode receiver. Any sample-clock offset
+between the caller and us accumulates linearly. A fractionally-spaced equaliser hides some
+of it by sliding its taps, which is exactly why the minimum sits in the middle: the taps
+settle on the burst's *average* timing, and the ends pay for it.
+
+Slope is roughly 3% EVM per 500 symbols on each arm, which puts the offset near **20 ppm** -
+entirely ordinary for two independent clocks either side of an RTP path.
+
+### What this explains
+
+- **At the minimum the EVM is 3.6%, i.e. 28.9 dB.** That is the real line quality, and it is
+  comfortably enough for 33 600. Every margin figure in §36 and §37 was measuring our own
+  drift, not the channel.
+- **Data mode never had a chance.** TRN at least gets a fresh timing estimate at the start of
+  each burst; data mode inherits frozen taps and a fixed clock and then runs for tens of
+  seconds. The drift never stops growing.
+- **Our own loopback signal scores 0.130 and decodes at 100%** because encoder and decoder
+  share one clock. There is no offset to track, so the missing loop costs nothing. Every
+  synthetic test we built was structurally blind to this bug.
+- The V shape also retro-explains §36's "22.4-24.9 dB" spread: those were single-window
+  measurements landing at different points on this curve.
+
+### Next
+
+Add a timing-error detector and a clock loop - Gardner is the natural fit for a T/2
+fractionally-spaced front end and needs no knowledge of the constellation, so it works in
+TRN and data mode alike. Drive the interpolation phase from it instead of the fixed
+`P4_SPS/2.0` increment, and carry the recovered clock across the Phase-4 -> data-mode
+boundary along with the taps.
+
+Rate is not the blocker (§37), equaliser adaptivity is not the blocker, precoding is not the
+blocker. The symbol clock is.

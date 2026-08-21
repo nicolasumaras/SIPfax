@@ -1341,7 +1341,14 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
             char *sl = getenv("SIPFAX_MP_SLCOMPAT");
             if (sl && atoi(sl)) {
                 r_ca = 7; r_ac = 7; trel = 0; msk = 0x3fff;
-                shape = 1;
+                /* SIPFAX: the shaping bit we advertise. slmodem sends 1, and the caller
+                   obliges - its transmitted distribution measures kurtosis 1.71 against
+                   1.48 unshaped / 1.60 shaped for our own encoder. Setting this to 0 is
+                   the experiment that establishes whether OUR MP controls the caller's
+                   transmit shaping; if its distribution moves toward 1.48 it does, which
+                   tells us the same is likely true of precoding (the live suspect for the
+                   missing 4th-power line in its data mode). SIPFAX_MP_SHAPE overrides. */
+                { char *ms = getenv("SIPFAX_MP_SHAPE"); shape = ms ? atoi(ms) : 1; }
                 goto mp_params_done;
             }
         }

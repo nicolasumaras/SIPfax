@@ -4426,7 +4426,17 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                per symbol at 8 kHz) so S is the first thing on the wire. */
             /* (stale-J handling moved to the bridge: the queued symbols are zeroed
                in place, so no output muting is needed here any more) */
-            if (yielding || (s->p3go && !s->v34_rx.J_received)) {
+            /* SIPFAX: Phase 3 is FULL DUPLEX (11.3): both modems transmit S, S-bar, PP,
+               TRN and J simultaneously - that is what the Phase-2 echo cancellers are
+               for. This mute zeroed our ENTIRE Phase-3 block whenever the caller began
+               transmitting first, which is exactly what happened once reactive ranging
+               let the caller reach its Phase 3 promptly: it started at p3n=40ms, our
+               S/PP/TRN/J went out silent, it had nothing to train on and never sent J,
+               and we sat in WAIT_J - a deadlock, each side waiting for the other.
+               Yield only once our own block is fully transmitted (state WAIT_J), which
+               preserves the original intent of not spamming J over the caller. */
+            if (yielding || (s->p3go && !s->v34_rx.J_received
+                             && s->v34_tx.state == V34_STARTUP3_WAIT_J)) {
                 int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
                 if (yielding && cyc < 2300 + (nb_samples*1000/8000) + 1)
                     { fprintf(stderr, "[v34p3] yielding the floor (silent ~2s for caller S) at %ldms\n", ms); fflush(stderr); }

@@ -297,7 +297,15 @@ void V8_init(V8State *sm, int calling, int mod_mask)
         sm_set_timer(&sm->v8_start_timer, 1000);
     } else {
         /* wait 200 ms */
-        sm_set_timer(&sm->v8_connect_timer, 200);
+        {   /* SIPFAX: V.25 requires the answering DCE to hold 1.8-2.5 s of silence after
+           connection before the answer tone; the old 200 ms violated it (slmodem waits
+           2.03 s). ANSam's phase reversals are also the network echo-canceller disable
+           signal, so its placement matters to path equipment, not just the peer.
+           SIPFAX_ANSAM_DELAY_MS overrides. */
+        int d = 1900; char *e = getenv("SIPFAX_ANSAM_DELAY_MS");
+        if (e && atoi(e) > 0) d = atoi(e);
+        sm_set_timer(&sm->v8_connect_timer, d);
+    }
         sm->state = V8_WAIT;
     }
     sm_init_fifo(&sm->rx_fifo, sm->rx_buf, sizeof(sm->rx_buf));

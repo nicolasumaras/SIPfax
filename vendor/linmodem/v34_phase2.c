@@ -57,9 +57,13 @@ typedef struct {
     int txmode;
     unsigned char info0a[49], info1a[70];
     int info_bit, info_n, info_lastsym; long info_t; double info_symphase;
-    long tx_t; double tonea_extra; int tx_rev_at;
+    long tx_t;
+    long l1_t;       /* SIPFAX: samples into the current probe; <160ms => L1 (+6dB) */ double tonea_extra; int tx_rev_at;
     /* observation */
     int toneb_run, wide_run, info_run, saw_wide, got_brev, rev_sent;
+    /* SIPFAX reactive ranging (11.2.1.2.4-6): sub-block Tone-B reversal tracking */
+    double bref_re, bref_im; int bref_n, brev_cnt, brev_base, rseq_ph;
+    long brev_at, rev2_due;
     double tb_ph; int tb_have;
     short probe[24000]; int probe_len;
     int symrate;
@@ -99,7 +103,7 @@ static void p2_emit(V34Phase2 *p, short *out, int n){
                 v=3000*cos(2*M_PI*2400.0*t/SR+p->info_symphase)+1300*cos(2*M_PI*1800.0*t/SR);
             p->info_t++;
         } else if(p->txmode==TX_TONEA){
-            if(p->tx_rev_at>=0 && (p->tstate+k)==p->tx_rev_at) p->tonea_extra+=M_PI;
+            if(p->tx_rev_at>=0 && (p->tstate+k)>=p->tx_rev_at){ p->tonea_extra+=M_PI; p->tx_rev_at=-1; }
             /* PURE 2400 Hz, matched to slmodem (rms~3009, amp~4254). The 1800 Hz guard
                tone was spurious — real Tone A is a single tone; the modem's Tone A /
                phase-reversal detector needs it clean. */
@@ -107,8 +111,18 @@ static void p2_emit(V34Phase2 *p, short *out, int n){
         } else if(p->txmode==TX_SILENCE){
             v=0;   /* half-duplex turnaround — let the modem transmit */
         } else if(p->txmode==TX_L1L2){
-            /* matched to slmodem L1/L2 rms~2898 (was ~2388, 2dB low) */
-            int j;for(j=0;j<21;j++) v+=cos(2*M_PI*PF[j]*t/SR+PPh[j]*M_PI/180); v=v/21*4*4850;
+            /* matched to slmodem L1/L2 rms~2898 (was ~2388, 2dB low).
+               SIPFAX: spec 10.1.3.4 - L1 is the FIRST 160 ms of probing at 6 dB ABOVE
+               nominal; the rest (L2) is nominal. This generator used one amplitude for
+               everything, so our probe had no L1 marker at all: wire-measured dead flat
+               rms 2989 in every call, while slmodem and the caller both transmit a
+               160 ms head at +5.8-6.0 dB. A receiver that windows its per-tone L2
+               measurement relative to the L1 level step gets garbage from us. Keep the
+               reverse-engineered slot timing exactly as it is (the caller's ranging
+               interactions are tuned to it) and add the boost to the head only. */
+            double a = (p->l1_t < (long)(0.160*SR)) ? 2.0 : 1.0;
+            int j;for(j=0;j<21;j++) v+=cos(2*M_PI*PF[j]*t/SR+PPh[j]*M_PI/180); v=v/21*4*4850*a;
+            p->l1_t++;
         }
         out[k]=(short)v;
     }
@@ -119,6 +133,44 @@ static void p2_emit(V34Phase2 *p, short *out, int n){
 static void set_tx(V34Phase2 *p, int mode){
     p->txmode=mode;
     if(mode==TX_INFO1A){ p->info_n=70; p->info_bit=-1; p->info_lastsym=-1; p->info_t=0; p->info_symphase=0; }
+}
+
+/* SIPFAX: sub-block Tone-B reversal detector (V.34 11.2.1.2.4/.6). The caller keeps
+   Tone B only ~10 ms after it reverses, so the whole-block phase latch (got_brev)
+   catches the flip at ~25% of block alignments and 0% when L1 follows - measured on
+   real call audio. 20-sample windows are exactly 3 cycles of 1200 Hz at 8 kHz, so each
+   yields a clean phase: windows coherent with the running reference extend it, one in
+   anti-phase latches a reversal (brev_cnt++, brev_at = sample time) and re-references,
+   so the SECOND reversal after our rev#3 is caught the same way. Callers must gate this
+   off WIDE/INFOC blocks - a 2.5 ms window cannot separate 1200 Hz from the probe comb's
+   1050/1350 neighbours or from INFO0c DPSK. */
+static void brev_scan(V34Phase2 *p, short *in, int n){
+    long base = p->tstate - n;
+    int w, i;
+    for(w = 0; w + 20 <= n; w += 20){
+        double re = 0, im = 0, a;
+        for(i = 0; i < 20; i++){
+            a = 2*M_PI*3.0*(double)((base + w + i) % 20)/20.0;
+            re += in[w+i]*cos(a); im -= in[w+i]*sin(a);
+        }
+        {
+            double mag = sqrt(re*re + im*im)/20.0;
+            if(mag < 300) continue;
+            if(p->bref_n < 6){ p->bref_re += re; p->bref_im += im; p->bref_n++; continue; }
+            {
+                double dot = re*p->bref_re + im*p->bref_im;
+                double nm  = sqrt((re*re + im*im)*(p->bref_re*p->bref_re + p->bref_im*p->bref_im));
+                double c   = nm > 0 ? dot/nm : 0;
+                if(c > 0.6){ p->bref_re = 0.9*p->bref_re + re; p->bref_im = 0.9*p->bref_im + im; }
+                else if(c < -0.6){
+                    p->brev_cnt++; p->brev_at = base + w;
+                    p->bref_re = re; p->bref_im = im;
+                    fprintf(stderr,"[v34p2] caller B-REVERSAL #%d (sub-block, cos=%.2f)\n", p->brev_cnt, c);
+                    fflush(stderr);
+                }
+            }
+        }
+    }
 }
 
 /* main process: returns 0 running, 1 done, -1 fail */
@@ -141,6 +193,7 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
         if(p->tb_have){double d=ph-p->tb_ph;while(d>M_PI)d-=2*M_PI;while(d<-M_PI)d+=2*M_PI;if(fabs(fabs(d)-M_PI)<0.6)p->got_brev=1;}
         p->tb_ph=ph; p->tb_have=1;
     } else p->tb_have=0;
+    if(p->state==R_SEQ && cls!=WIDE && cls!=INFOC) brev_scan(p, in, n);
 
     /* ================= REACTIVE Phase-2 DIALOGUE =================
        Each step WAITS for the modem's actual signal (via the classifier) before
@@ -164,51 +217,83 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                        Locking on a blip ran our sequence ~1.7s early and missed the modem's probe. */
             fprintf(stderr,"[v34p2] modem locked Tone B (run=%d) -> ranging sequence\n",p->toneb_run);fflush(stderr);
             p->state=R_SEQ; p->tstate=0; p->rev_sent=0; set_tx(p,TX_TONEA); p->probe_len=0; p->saw_wide=0;
+            p->rseq_ph=0; p->rev2_due=-1; p->bref_re=p->bref_im=0; p->bref_n=0; p->brev_cnt=0; p->brev_base=0;
         } else if(p->tstate>(long)(10.0*S)){          /* never locked -> try the sequence anyway */
             fprintf(stderr,"[v34p2] no Tone B lock (%.1fs) -> ranging anyway\n",p->tstate/S);fflush(stderr);
             p->state=R_SEQ; p->tstate=0; p->rev_sent=0; set_tx(p,TX_TONEA); p->probe_len=0; p->saw_wide=0;
+            p->rseq_ph=0; p->rev2_due=-1; p->bref_re=p->bref_im=0; p->bref_n=0; p->brev_cnt=0; p->brev_base=0;
         }
         if(p->tstate>(long)(15.0*S)) return -1;
         break;
-    case R_SEQ: {   /* slmodem's MEASURED choreography, replayed at its real tempo.
-                       Timings taken from the working sl-down.s16 (relative to Tone B):
-                         0.00-0.30 ToneA + reversal #1   (slmodem rev @ +0.30)
-                         0.30-0.70 L1 probe
-                         0.70-1.05 ToneA + reversal #2   (slmodem rev @ +1.05)
-                         1.05-1.65 L2 probe (hot)
-                         1.65-2.25 silence turnaround    (hear the modem's probe -> symrate)
-                         2.25-2.55 ToneA
-                         2.55+     hand to Phase 3 training */
+    case R_SEQ: {   /* SIPFAX: REACTIVE ranging per V.34 11.2.1.2.3-7, replacing a scripted
+           replay of a MISIDENTIFIED recording (its "L1 at 0.30-0.70" was actually
+           INFO0a; the real slmodem probes only after the second B-reversal). The old
+           scripted rev#2 fired from a wall-clock fallback 914 ms after the caller's
+           B-reversal instead of the spec's 40+/-1 ms - and that interval IS the
+           caller's round-trip-delay estimate (11.2.1.1.4), which places its far-echo
+           canceller. Every failing call handed it RTDEc ~ 960 ms vs ~67 ms in the
+           working call; its recovery timing proves it operates on the corrupted value.
+           Spec sequence (verified against slmodem's working wire): ToneA + rev#1 ->
+           caller B-rev -> OUR rev#2 exactly 40 ms after receiving it -> ToneA 10 ms ->
+           L1(160 ms, +6 dB)+L2 contiguous -> ToneA 50 ms -> rev#3 -> 10 ms -> silence
+           -> caller's 2nd B-rev -> its probe (R_PRX). Timeout fallbacks on every wait
+           so a missed detection can never outlast the caller's 2000 ms 11.2.2.1.3
+           restart. */
         long ms=(long)(p->tstate*1000/(long)S);
-        /* Two Tone A phase reversals (like slmodem). Flip tonea_extra DIRECTLY on the
-           threshold-crossing block — robust to block size; the old sample-exact arm
-           window was skipped by block aliasing. Reversals sit mid-Tone-A so the modem
-           has clean carrier before & after to detect the flip. tonea_extra persists
-           across the L1 gap (continuous phase), so the carrier stays reversed. */
-        /* REVERSAL TIMING (from golden-call diff): the caller must see our Tone A reversal
-           WHILE it is transmitting Tone B (that's the RTD measurement). Its Tone B bursts
-           are short — fire rev #1 IMMEDIATELY at lock (we locked BECAUSE it's on Tone B
-           right now; +180ms was 60ms too late), and gate rev #2 on Tone B being present. */
-        if(ms<350){            if(p->txmode!=TX_TONEA){set_tx(p,TX_TONEA);}
-                               if(p->rev_sent==0){p->tonea_extra+=M_PI;p->rev_sent=1;fprintf(stderr,"[v34p2] Tone A reversal #1 @%ldms (toneb_run=%d)\n",ms,p->toneb_run);fflush(stderr);} }
-        else if(ms<750){       if(p->txmode!=TX_L1L2){set_tx(p,TX_L1L2);} }
-        else if(ms<1100){      if(p->txmode!=TX_TONEA){set_tx(p,TX_TONEA);}
-                               if(p->rev_sent==1 && (p->toneb_run>=1 || ms>=1060)){p->tonea_extra+=M_PI;p->rev_sent=2;fprintf(stderr,"[v34p2] Tone A reversal #2 @%ldms (toneb_run=%d)\n",ms,p->toneb_run);fflush(stderr);} }
-        else if(ms<1700){      if(p->txmode!=TX_L1L2){set_tx(p,TX_L1L2);} }
-        else if(ms<2300){      if(p->txmode!=TX_SILENCE){set_tx(p,TX_SILENCE);} }
-        else if(ms<2600){      if(p->txmode!=TX_TONEA){set_tx(p,TX_TONEA);} }
-        /* Capture the modem's L1/L2 probe whenever it appears (its probe timing is its own;
-           it landed AFTER our old narrow turnaround window). `in` is only the modem's signal,
-           so accumulating WIDE here can't pick up our own TX. */
-        if(ms>=1100 && cls==WIDE && p->probe_len+n<24000){ memcpy(p->probe+p->probe_len,in,n*sizeof(short)); p->probe_len+=n; }
-        if(ms>=2600){
-            /* Our probes are out. Captured call (lm-*.118089) shows the modem then takes ITS
-               turn: silent while we probed, its ranging Tone B, its 1.7s L1/L2 probe, then it
-               HOLDS Tone B (up to 18s!) waiting for our INFO1a. So: go SILENT and WAIT for its
-               probe — do not barrel into Phase 3. */
-            fprintf(stderr,"[v34p2] our probes sent -> waiting for modem's probe\n");fflush(stderr);
-            p->state=R_PRX; p->tstate=0; set_tx(p,TX_SILENCE);
+        switch(p->rseq_ph){
+        case 0:     /* Tone A on; rev#1 immediately at lock (spec-legal; caller reacts) */
+            if(p->txmode!=TX_TONEA) set_tx(p,TX_TONEA);
+            if(p->rev_sent==0){ p->tonea_extra+=M_PI; p->rev_sent=1;
+                fprintf(stderr,"[v34p2] Tone A reversal #1 @%ldms\n",ms);fflush(stderr); }
+            p->brev_base=p->brev_cnt; p->rseq_ph=1;
+            break;
+        case 1:     /* wait for the caller's B-reversal; rev#2 sample-exact +40 ms */
+            if(p->brev_cnt>p->brev_base && p->rev2_due<0){
+                p->rev2_due = p->brev_at + (long)(0.040*S);
+                p->tx_rev_at = p->rev2_due;
+                fprintf(stderr,"[v34p2] B-rev at t=%ld -> reactive rev#2 armed for t=%ld (+40ms)\n",
+                        p->brev_at, p->rev2_due);fflush(stderr);
+            }
+            if(p->rev2_due>=0 && p->tstate >= p->rev2_due + 160){
+                p->rev_sent=2; p->seg=(int)p->tstate; p->rseq_ph=2;
+            } else if(ms>=1800){    /* fallback: never hang ranging */
+                p->tonea_extra+=M_PI; p->rev_sent=2; p->seg=(int)p->tstate; p->rseq_ph=2;
+                fprintf(stderr,"[v34p2] rev#2 FALLBACK @%ldms (no B-reversal seen)\n",ms);fflush(stderr);
+            }
+            break;
+        case 2:     /* Tone A 10 ms after rev#2, then L1+L2 contiguous */
+            if(p->tstate >= p->seg + (long)(0.010*S)){
+                set_tx(p,TX_L1L2); p->l1_t=0; p->seg=(int)p->tstate; p->rseq_ph=3;
+                fprintf(stderr,"[v34p2] L1(160ms,+6dB)+L2 after reversals (11.2.1.2.5)\n");fflush(stderr);
+            }
+            break;
+        case 3:     /* L1 160 ms + L2 600 ms */
+            if(p->tstate >= p->seg + (long)(0.760*S)){
+                set_tx(p,TX_TONEA); p->seg=(int)p->tstate; p->rseq_ph=4;
+            }
+            break;
+        case 4:     /* Tone A 50 ms -> rev#3 (11.2.1.2.6, the exchange we never sent) */
+            if(p->tstate >= p->seg + (long)(0.050*S)){
+                p->tonea_extra+=M_PI; p->rev_sent=3; p->seg=(int)p->tstate; p->rseq_ph=5;
+                fprintf(stderr,"[v34p2] Tone A reversal #3 (11.2.1.2.6)\n");fflush(stderr);
+            }
+            break;
+        case 5:     /* 10 ms Tone A, then silence; arm for the caller's 2nd B-reversal */
+            if(p->tstate >= p->seg + (long)(0.010*S)){
+                set_tx(p,TX_SILENCE); p->brev_base=p->brev_cnt;
+                p->seg=(int)p->tstate; p->rseq_ph=6;
+            }
+            break;
+        case 6:     /* wait its 2nd B-rev (or 1.5 s) then its probe turn */
+            if(p->brev_cnt>p->brev_base || p->tstate >= p->seg + (long)(1.5*S)){
+                fprintf(stderr,"[v34p2] ranging complete (%s) -> waiting for modem's probe\n",
+                        p->brev_cnt>p->brev_base ? "B-rev#2 seen" : "timeout");fflush(stderr);
+                p->state=R_PRX; p->tstate=0; set_tx(p,TX_SILENCE);
+            }
+            break;
         }
+        /* capture the modem's probe whenever it appears; `in` is only the modem's signal */
+        if(cls==WIDE && p->probe_len+n<24000){ memcpy(p->probe+p->probe_len,in,n*sizeof(short)); p->probe_len+=n; }
         break;
     }
     case R_PRX:     /* capture the modem's L1/L2 probe. TIMING (from the working call): the

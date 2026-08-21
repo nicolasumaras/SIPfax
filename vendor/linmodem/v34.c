@@ -1511,6 +1511,15 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
 
             /* phase 3 */
         case V34_STARTUP3_S1:
+            {   /* SIPFAX: the tx interpolation filter starts with a zeroed history at
+                   Phase-3 entry, and its warmup eats ~20T of the burst head: wire
+                   measurement shows our S at 108T in all five captured calls, vs
+                   slmodem's spec-nominal 128T. Pad 24 extra S symbols in front so a
+                   full 128T of clean S reaches the wire. */
+                int pi_;
+                s->tx_amp = CALC_AMP(S_POWER);
+                for (pi_ = 0; pi_ < 12; pi_++) { put_sym(s, 128, 128); put_sym(s, -128, 128); }
+            }
             V34_send_S(s);
             s->state = V34_STARTUP3_SINV1;
             break;

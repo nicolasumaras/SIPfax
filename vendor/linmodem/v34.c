@@ -4435,8 +4435,15 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                and we sat in WAIT_J - a deadlock, each side waiting for the other.
                Yield only once our own block is fully transmitted (state WAIT_J), which
                preserves the original intent of not spamming J over the caller. */
-            if (yielding || (s->p3go && !s->v34_rx.J_received
-                             && s->v34_tx.state == V34_STARTUP3_WAIT_J)) {
+            /* SIPFAX: the p3go mute is GONE. Restricting it to WAIT_J still killed the
+               J itself: V34_send_J queues its symbols and the state machine moves to
+               WAIT_J in the same call, so the mute zeroed the very J the caller is
+               waiting for - measured live, our J never reached the wire and the caller
+               never answered with its own. 11.3 makes Phase 3 duplex: the answer modem
+               transmits S, S-bar, PP, TRN and then J continuously until it detects the
+               call modem's J. Only the pre-p3go yield cycle remains, which just gives
+               the caller a clear window to START. */
+            if (yielding) {
                 int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
                 if (yielding && cyc < 2300 + (nb_samples*1000/8000) + 1)
                     { fprintf(stderr, "[v34p3] yielding the floor (silent ~2s for caller S) at %ldms\n", ms); fflush(stderr); }

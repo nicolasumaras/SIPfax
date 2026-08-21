@@ -359,10 +359,13 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
             p->retries=1; set_tx(p,TX_SILENCE);
         }
         if(p->retries==1 && cls==INFOC){
-            p->retries=2;
+            p->retries=2; p->seg=0;
             fprintf(stderr,"[v34p2] caller INFO1c arriving\n");fflush(stderr);
         }
-        if(p->retries==2 && p->info_run==0){
+        /* one stray non-INFO block ended this 20ms into the caller's INFO1c live, so we
+           answered while it was still speaking; require 100ms of quiet instead. */
+        if(p->retries==2 && cls==INFOC) p->seg=0;
+        if(p->retries==2 && p->info_run==0 && ++p->seg >= 5){
             fprintf(stderr,"[v34p2] caller INFO1c done -> our INFO1a\n");fflush(stderr);
             p->state=R_INFO1A; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
         }

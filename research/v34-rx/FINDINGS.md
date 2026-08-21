@@ -1517,3 +1517,49 @@ So the next step is unchanged but now better justified: wire `V34_demod_cma` →
 phase continuously from Phase-4 TRN rather than re-acquiring, feed symbols at
 coordinate×128, and read the answer off the decoder's own bit output against the ≥24 dB
 waterfall from section 32.
+
+## 34. The shape=0 experiment: our MP does steer the caller, but shaping is not the cause
+
+Advertised `shape=0` in our MP (`SIPFAX_MP_SHAPE=0`) with the receiver matched
+(`SIPFAX_SHAPE=0`, L=48), everything else unchanged, to establish whether our MP controls
+the caller's transmit configuration.
+
+The handshake completed exactly as before — `MP READ ... ack=1` → `E sent -> DATA (B1)` →
+`E received` — so shaping is not load-bearing for the handshake.
+
+Measured on the caller's data-mode transmission, three windows per call:
+
+| we advertised | caller kurtosis | caller 4th moment |
+|---|---|---|
+| shape=1 | 1.707, 1.703 | 0.0083, 0.0097 |
+| **shape=0** | **1.669, 1.647, 1.647** | **0.0133, 0.0121, 0.0172** |
+| *our own encoder, shape=1* | *1.597* | *0.1023* |
+| *our own encoder, shape=0* | *1.479* | *0.1475* |
+
+**Our MP does steer the caller's transmitter.** The shift is real and reproducible — the
+two groups do not overlap and each is self-consistent across windows — and it is in the
+predicted direction (toward the unshaped distribution).
+
+But it is only partial: the caller moved 1.705 → 1.654, about 40% of the 1.597 → 1.479
+that the same bit produces in our own encoder, and its 4th moment stays around 0.014
+against our 0.10-0.15. The data-mode trellis metric was unmoved (172.1 vs 171.5).
+
+So shaping is under our control and is *not* what is destroying the phase structure.
+Something else whitens the caller's transmission — its signal keeps ring structure
+(3 modulus peaks, kurtosis ~1.65) while carrying essentially no 4-fold symmetry
+(4th moment ~0.014 against 0.10-0.15 for a comparable QAM), which is the signature of a
+per-symbol phase scramble rather than of amplitude shaping.
+
+Precoding remains the leading explanation and is now better supported by elimination:
+our MP demonstrably steers the caller, we send h=0 and nonlin=0, and yet its transmission
+is whitened. Either it is not honouring those two fields the way it honours `shape`, or
+the whitening has a different origin we have not identified.
+
+### Where this leaves the demodulator
+
+The receive chain is wired, instrumented and calibrated (section 33): symbols reach the
+decoder, and the trellis metric says ≤33 is needed where we deliver ~172. Carrier
+tracking, constellation size and shaping have each now been tested and eliminated as the
+cause. The next candidate that would actually explain a missing 4th-power line is the
+V.34 receive-side precoder (§9.6), which is real work rather than a configuration change:
+the receiver must apply the channel response and a modulo reduction before slicing.

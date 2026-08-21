@@ -41,6 +41,8 @@ static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq);
+static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
+                          int *shape, unsigned int *mask, int *sixteen_out, short *hout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
@@ -1383,8 +1385,16 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     if (type == 1) {
         for(i=0;i<3;i++) {
             for(j=0;j<2;j++) {
+                int hb;
                 put_bits(&p, 1, 0); /* start bit */
-                put_bits(&p, 16, s->h[i][j]); /* precoding coef */
+                /* SIPFAX: LSB-first, like the mask field a few lines above - NOT
+                   put_bits()' MSB-first order. Decoding the caller's own h both ways
+                   settles it: MSB-first gives |h| = 1.83, 0.50, 1.38, non-decaying, with
+                   H(z) zeros at 1.865 and 1.000 (non-minimum-phase - impossible for a
+                   channel estimate), while LSB-first gives 0.285, 0.167, 0.102,
+                   monotonically decaying, all zeros inside the unit circle. */
+                for (hb = 0; hb < 16; hb++)
+                    put_bits(&p, 1, (s->h[i][j] >> hb) & 1);
             }
         }
     }
@@ -3916,7 +3926,7 @@ static double p4_trn_score(const double *si, const double *sq, int ns, int sixte
    are I1,I2 from the differential rotation and, for 16-point, Q1,Q2 from the base index. */
 static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen, int poly,
                         int *out_ca, int *out_ac, int *out_trel, int *out_ack,
-                        int *out_shape, unsigned int *out_mask)
+                        int *out_shape, unsigned int *out_mask, short *out_h)
 {
     static int raw[P4_MAXSY*4], db[P4_MAXSY*4];
     double pw = 0, scale;
@@ -3968,6 +3978,19 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
             if (out_shape) *out_shape = db[i+32];
             if (out_ack) { if (found == 1) *out_ack = db[i+33]; else *out_ack |= db[i+33]; }
             if (out_mask) { unsigned int m = 0; for (k = 0; k < 15; k++) m |= (unsigned int)db[i+35+k] << k; *out_mask = m; }
+            if (out_h && type == 1) {
+                /* SIPFAX: the peer's precoder coefficients, at frame bit offsets
+                   52/69/86/103/120/137 (each preceded by a start bit), LSB-first. These
+                   are computed by the PEER'S RECEIVER for OUR TRANSMITTER (9.6), so they
+                   belong to the transmit path, not to ours. */
+                static const int hoff[6] = { 52, 69, 86, 103, 120, 137 };
+                int hi2, hb2;
+                for (hi2 = 0; hi2 < 6; hi2++) {
+                    int v = 0;
+                    for (hb2 = 0; hb2 < 16; hb2++) v |= db[i + hoff[hi2] + hb2] << hb2;
+                    out_h[hi2] = (short)v;
+                }
+            }
         }
         i += L - 1;
     }
@@ -4002,7 +4025,7 @@ static void p4_block_reset(void)
 }
 
 static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
-                         int *shape, unsigned int *mask, int *sixteen_out)
+                         int *shape, unsigned int *mask, int *sixteen_out, short *hout)
 {
     if (p4_stage == 0) {                       /* snapshot: front end + symbol timing */
         if (n < 8000) return 0;
@@ -4020,7 +4043,7 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
     }
     {                                          /* decode what the passes produced */
         int nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
-                               p4_six, V34_GPC, ca, ac, trel, ack, shape, mask);
+                               p4_six, V34_GPC, ca, ac, trel, ack, shape, mask, hout);
         if (nmp) {
             if (sixteen_out) *sixteen_out = p4_six;
             p4_stage = 0;                      /* next window */
@@ -4134,7 +4157,7 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                     clock_gettime(CLOCK_MONOTONIC, &ta);
                     nmp = p4_block_step(p4b + (p4bn > 20000 ? p4bn-20000 : 0),
                                         p4bn > 20000 ? 20000 : p4bn,
-                                        &ca, &ac, &tr, &ak, &sh, &mk, &six);
+                                        &ca, &ac, &tr, &ak, &sh, &mk, &six, s->peer_h);
                     clock_gettime(CLOCK_MONOTONIC, &tb);
                     ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
                     if (ms > worst) {
@@ -4449,12 +4472,12 @@ void V34_p4step_test(void)
         for (i = 0; i < n && bn < P4_MAXIN; i++) { buf[bn++] = frame[i]; fed++; }
         if (bn >= 12000) {
             int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 0, nmp;
-            unsigned int mk = 0;
+            unsigned int mk = 0; short hh[6];
             struct timespec ta, tb;
             double ms;
             clock_gettime(CLOCK_MONOTONIC, &ta);
             nmp = p4_block_step(buf + (bn > 20000 ? bn-20000 : 0), bn > 20000 ? 20000 : bn,
-                                &ca, &ac, &tr, &ak, &sh, &mk, &six);
+                                &ca, &ac, &tr, &ak, &sh, &mk, &six, hh);
             clock_gettime(CLOCK_MONOTONIC, &tb);
             ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
             total += ms; calls++;
@@ -4462,6 +4485,12 @@ void V34_p4step_test(void)
             if (ms > 20.0) over++;
             if (nmp) {
                 reads++;
+                { static int shown=0;
+                  if (!shown) { shown=1;
+                    fprintf(stderr,"[p4] peer precoder h (LSB-first, /16384): "
+                            "h1=(%+.4f,%+.4f) h2=(%+.4f,%+.4f) h3=(%+.4f,%+.4f)\n",
+                            hh[0]/16384.0, hh[1]/16384.0, hh[2]/16384.0,
+                            hh[3]/16384.0, hh[4]/16384.0, hh[5]/16384.0); } }
                 fprintf(stderr, "  t=%6.2fs  MP READ: %d frames %s ca=%d ac=%d trel=%d ack=%d\n",
                         t0 + (double)fed/8000.0, nmp, six ? "16pt" : "4pt",
                         ca*2400, ac*2400, tr, ak);
@@ -4517,11 +4546,11 @@ void V34_p4block_test(void)
         {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp;
             unsigned int mk = 0;
             nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC,
-                               &ca, &ac, &tr, &ak, &sh, &mk);
+                               &ca, &ac, &tr, &ak, &sh, &mk, NULL);
             if (!nmp) {
                 int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, 1, si, sq);
                 nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, V34_GPC,
-                                   &ca, &ac, &tr, &ak, &sh, &mk);
+                                   &ca, &ac, &tr, &ak, &sh, &mk, NULL);
                 if (nmp) sixteen_mp = 0;
             } else sixteen_mp = 1;
             fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s", t0, s4, s16,

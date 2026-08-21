@@ -163,8 +163,17 @@ static void brev_scan(V34Phase2 *p, short *in, int n){
                 double c   = nm > 0 ? dot/nm : 0;
                 if(c > 0.6){ p->bref_re = 0.9*p->bref_re + re; p->bref_im = 0.9*p->bref_im + im; }
                 else if(c < -0.6){
+                    /* refractory: a real ranging reversal happens once; DPSK blocks that
+                       sneak past the INFOC gate (<3 jumps) alternate every window and
+                       produced a 32-latch storm live. One latch per 200 ms, and the
+                       reference must be rebuilt from 6 fresh coherent windows before the
+                       detector can fire again. */
+                    if(base + w - p->brev_at < (long)(0.200*SR) && p->brev_cnt > 0){
+                        p->bref_n = 0; p->bref_re = p->bref_im = 0;
+                        continue;
+                    }
                     p->brev_cnt++; p->brev_at = base + w;
-                    p->bref_re = re; p->bref_im = im;
+                    p->bref_n = 0; p->bref_re = p->bref_im = 0;
                     fprintf(stderr,"[v34p2] caller B-REVERSAL #%d (sub-block, cos=%.2f)\n", p->brev_cnt, c);
                     fflush(stderr);
                 }
@@ -267,25 +276,28 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                 fprintf(stderr,"[v34p2] L1(160ms,+6dB)+L2 after reversals (11.2.1.2.5)\n");fflush(stderr);
             }
             break;
-        case 3:     /* L1 160 ms + L2 600 ms */
+        case 3:     /* L1 160 ms + L2 600 ms, then SILENCE - the caller's probe follows */
             if(p->tstate >= p->seg + (long)(0.760*S)){
-                set_tx(p,TX_TONEA); p->seg=(int)p->tstate; p->rseq_ph=4;
-                fprintf(stderr,"[v34p2] Tone A up - terminate-L2 signal, waiting for caller probe end\n");fflush(stderr);
+                set_tx(p,TX_SILENCE); p->seg=(int)p->tstate; p->probe_len=0; p->saw_wide=0; p->rseq_ph=4;
+                fprintf(stderr,"[v34p2] L2 done -> silent, waiting for caller probe\n");fflush(stderr);
             }
             break;
-        case 4:     /* Hold Tone A THROUGH the caller's probe; rev#3 at its probe END.
-                       Call 21 measured why: firing rev#3 50 ms after our L2 put it BEFORE
-                       the caller's probe (its schedule lags ours), we then sat silent
-                       through its whole probe (which ran long - our Tone A is its
-                       terminate-L2 signal), and it held Tone B afterwards waiting for a
-                       reversal we had already spent - then sulked silent, no INFO1c.
-                       The working call's geometry: slmodem's Tone A + rev#3 land AT the
-                       caller's probe end, its B-rev#2 answers ~100 ms later. */
-            if((p->saw_wide && p->wide_run==0 && cls!=WIDE && p->probe_len>(int)(0.30*S))
-               || p->tstate >= p->seg + (long)(2.5*S)){
+        case 4:     /* The caller probes next. Tone A is its probe-TERMINATE signal, so it
+                       must rise only once the probe is well underway (>=450ms, matching
+                       slmodem/R_PRX) - raising it at our L2 end made the caller abort its
+                       probe at 240ms and the handshake died with no white-noise phase.
+                       rev#3 fires at the probe end (11.2.1.2.6) with >=50ms of Tone A
+                       already up; the caller's B-rev#2 answers ~100ms later. */
+            if(p->txmode==TX_SILENCE && p->wide_run>0 && p->probe_len>(int)(0.45*S)){
+                set_tx(p,TX_TONEA); p->seg=(int)p->tstate;
+                fprintf(stderr,"[v34p2] Tone A during caller probe (terminate-L2)\n");fflush(stderr);
+            }
+            if((p->txmode==TX_TONEA && p->tstate >= p->seg + (long)(0.050*S)
+                && p->saw_wide && p->wide_run==0 && cls!=WIDE && p->probe_len>(int)(0.45*S))
+               || p->tstate >= p->seg + (long)(4.0*S)){
+                if(p->txmode!=TX_TONEA){ set_tx(p,TX_TONEA); p->seg=(int)p->tstate; break; }
                 p->tonea_extra+=M_PI; p->rev_sent=3; p->seg=(int)p->tstate; p->rseq_ph=5;
-                fprintf(stderr,"[v34p2] Tone A reversal #3 at caller probe end (%s, probe %dms)\n",
-                        p->wide_run==0&&p->saw_wide?"reactive":"timeout",
+                fprintf(stderr,"[v34p2] Tone A reversal #3 at caller probe end (probe %dms)\n",
                         (int)(p->probe_len*1000/(int)S));fflush(stderr);
             }
             break;

@@ -307,11 +307,17 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                 p->seg=(int)p->tstate; p->rseq_ph=6;
             }
             break;
-        case 6:     /* wait its 2nd B-rev (or 1.5 s) then its probe turn */
-            if(p->brev_cnt>p->brev_base || p->tstate >= p->seg + (long)(1.5*S)){
-                fprintf(stderr,"[v34p2] ranging complete (%s) -> waiting for modem's probe\n",
-                        p->brev_cnt>p->brev_base ? "B-rev#2 seen" : "timeout");fflush(stderr);
-                p->state=R_PRX; p->tstate=0; set_tx(p,TX_SILENCE);
+        case 6:     /* Ranging is over the moment the caller's probe has ended or its
+                       INFO1c starts. Waiting a fixed 1.5s for a 2nd B-reversal pushed
+                       our INFO1a 1.4s past the caller's INFO1c, so it never got the
+                       reply it was waiting for and re-sent INFO1c for 16s. */
+            if(p->brev_cnt>p->brev_base || cls==INFOC
+               || (p->saw_wide && p->wide_run==0 && p->probe_len>(int)(0.30*S))
+               || p->tstate >= p->seg + (long)(0.40*S)){
+                fprintf(stderr,"[v34p2] ranging complete (%s) -> caller's turn\n",
+                        p->brev_cnt>p->brev_base ? "B-rev#2" : (cls==INFOC ? "INFO1c" : "probe end"));
+                fflush(stderr);
+                p->state=R_PRX; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
             }
             break;
         }
@@ -325,22 +331,34 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                        old silent wait), then INFO1a lands 0.15s after probe end. Raise Tone A
                        once we've captured enough probe; go to INFO1a the moment it ends. */
         if(cls==WIDE && p->probe_len+n<24000){ memcpy(p->probe+p->probe_len,in,n*sizeof(short)); p->probe_len+=n; }
-        if(p->txmode==TX_SILENCE && p->probe_len>(int)(0.45*S)){
+        if(p->retries==0 && p->txmode==TX_SILENCE && p->wide_run>0 && p->probe_len>(int)(0.45*S)){
             set_tx(p,TX_TONEA);
             fprintf(stderr,"[v34p2] Tone A during modem probe (terminate-L2 signal)\n");fflush(stderr);
         }
-        if(p->saw_wide && p->wide_run==0 && p->probe_len>(int)(0.30*S)){
+        if(p->retries==0 && p->saw_wide && p->wide_run==0 && p->probe_len>(int)(0.30*S)){
             double mx=0,top=0;int j;
             for(j=0;j<21;j++){double m=mag_at(p->probe,p->probe_len,PF[j]);if(m>mx)mx=m;}
             for(j=0;j<21;j++){double m=mag_at(p->probe,p->probe_len,PF[j]);if(m>mx*0.25&&PF[j]>top)top=PF[j];}
             p->symrate=(top>=3600)?5:(top>=3300)?4:(top>=3000)?3:(top>=2850)?2:(top>=2700)?1:0;
-            fprintf(stderr,"[v34p2] modem probe RECEIVED (%dms, top %.0fHz) -> symrate %d; INFO1a now\n",
+            fprintf(stderr,"[v34p2] modem probe RECEIVED (%dms, top %.0fHz) -> symrate %d; awaiting INFO1c\n",
                     (int)(p->probe_len*1000/(int)S),top,p->symrate);fflush(stderr);
-            p->state=R_INFO1A; p->tstate=0; p->retries=0; if(p->txmode!=TX_TONEA)set_tx(p,TX_TONEA);
-        } else if(p->tstate>(long)(8.0*S)){
+            /* SIPFAX: the caller sends INFO1c next and WAITS for our INFO1a. Go silent
+               and let it speak - firing INFO1a before/over its INFO1c left it re-sending
+               INFO1c indefinitely while we sat muted in Phase-3 WAIT_J. */
+            p->retries=1; set_tx(p,TX_SILENCE);
+        }
+        if(p->retries==1 && cls==INFOC){
+            p->retries=2;
+            fprintf(stderr,"[v34p2] caller INFO1c arriving\n");fflush(stderr);
+        }
+        if(p->retries==2 && p->info_run==0){
+            fprintf(stderr,"[v34p2] caller INFO1c done -> our INFO1a\n");fflush(stderr);
+            p->state=R_INFO1A; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
+        }
+        if(p->tstate>(long)(2.5*S)){
             if(p->symrate<0)p->symrate=5;
-            fprintf(stderr,"[v34p2] no modem probe in 8s -> default symrate %d; INFO1a now\n",p->symrate);fflush(stderr);
-            p->state=R_INFO1A; p->tstate=0; p->retries=0; if(p->txmode!=TX_TONEA)set_tx(p,TX_TONEA);
+            fprintf(stderr,"[v34p2] no INFO1c in 2.5s -> default symrate %d; INFO1a now\n",p->symrate);fflush(stderr);
+            p->state=R_INFO1A; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
         }
         break;
     case R_RANGE2:  /* the modem holds Tone B after its probe when ranging is incomplete
@@ -370,9 +388,15 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                        INFO1a listen loop. Every earlier attempt filled that window with
                        INFO1a repeats and delivered training signal only after the modem
                        had given up. Get TRN on the wire inside the window. */
-        if(p->txmode==TX_TONEA && p->tstate>(long)(0.20*S)){   /* slmodem: INFO1a 0.15s after probe end */
+        /* SIPFAX: slmodem's measured reply to INFO1c - 0.5s silence, then Tone A
+           0.3s, then ONE INFO1a, then the 70ms gap into Phase 3. */
+        if(p->txmode==TX_SILENCE && p->rev_sent!=99 && p->tstate>(long)(0.50*S)){
+            set_tx(p,TX_TONEA);
+            fprintf(stderr,"[v34p2] Tone A 0.3s before INFO1a (slmodem shape)\n");fflush(stderr);
+        }
+        if(p->txmode==TX_TONEA && p->tstate>(long)(0.80*S)){
             set_tx(p,TX_INFO1A);
-            fprintf(stderr,"[v34p2] INFO1a x2 then Phase 3\n");fflush(stderr);
+            fprintf(stderr,"[v34p2] INFO1a -> Phase 3\n");fflush(stderr);
         }
         if(p->txmode==TX_INFO1A && p->info_bit>=p->info_n){
             /* INFO1a is sent ONCE (spec; slmodem's burst = exactly 1 frame). Our old 2nd

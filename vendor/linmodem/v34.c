@@ -4339,14 +4339,25 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
        acknowledges in 0.5 s - complies; ignoring it left the caller training against a
        4-point TRN it was told would be 16-point, and it never read our MP at all.
        One flag drives all three signals; SIPFAX_J16_OBEY=0 restores the old behaviour. */
-    if (s->v34_rx.J_received && s->v34_rx.rx_j16 && !s->v34_tx.is_16states) {
-        static int obey = -1;
-        if (obey < 0) { char *e = getenv("SIPFAX_J16_OBEY"); obey = e ? atoi(e) : 1; }
-        if (obey) {
-            s->v34_tx.is_16states = 1;
-            s->v34_tx.mp_16point = 1;
-            { extern int v34_dbg; if (v34_dbg)
-                fprintf(stderr, "[p4] caller commanded 16-point -> TRN/MP/E all 16-point\n"); }
+    {   /* SIPFAX: this used to fire only for rx_j16==1, leaving mp_16point at whatever
+           SIPFAX_MP16/SIPFAX_MP_SLCOMPAT had forced when the caller commanded 4-point -
+           so we answered J4POINTS with a 16-point MP. That mattered the moment Phase 2
+           began completing properly: with a correct INFO exchange this caller asks for
+           J4POINTS (vote J4=192 J16=180), not the J16 it demanded when it had only ever
+           seen our broken Phase 2. The caller's J is the authority for BOTH flags. */
+        static int applied = 0;
+        if (s->v34_rx.J_received && !applied) {
+            static int obey = -1;
+            if (obey < 0) { char *e = getenv("SIPFAX_J16_OBEY"); obey = e ? atoi(e) : 1; }
+            if (obey) {
+                applied = 1;
+                s->v34_tx.is_16states = s->v34_rx.rx_j16 ? 1 : 0;
+                s->v34_tx.mp_16point  = s->v34_rx.rx_j16 ? 1 : 0;
+                { extern int v34_dbg; if (v34_dbg)
+                    fprintf(stderr, "[p4] caller commanded %s -> TRN/MP/E all %s\n",
+                            s->v34_rx.rx_j16 ? "16-point" : "4-point",
+                            s->v34_rx.rx_j16 ? "16-point" : "4-point"); }
+            }
         }
     }
     s->v34_tx.p4_mp_hunt_rx = (s->v34_rx.p4_mode == 2);

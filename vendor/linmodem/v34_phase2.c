@@ -270,12 +270,23 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
         case 3:     /* L1 160 ms + L2 600 ms */
             if(p->tstate >= p->seg + (long)(0.760*S)){
                 set_tx(p,TX_TONEA); p->seg=(int)p->tstate; p->rseq_ph=4;
+                fprintf(stderr,"[v34p2] Tone A up - terminate-L2 signal, waiting for caller probe end\n");fflush(stderr);
             }
             break;
-        case 4:     /* Tone A 50 ms -> rev#3 (11.2.1.2.6, the exchange we never sent) */
-            if(p->tstate >= p->seg + (long)(0.050*S)){
+        case 4:     /* Hold Tone A THROUGH the caller's probe; rev#3 at its probe END.
+                       Call 21 measured why: firing rev#3 50 ms after our L2 put it BEFORE
+                       the caller's probe (its schedule lags ours), we then sat silent
+                       through its whole probe (which ran long - our Tone A is its
+                       terminate-L2 signal), and it held Tone B afterwards waiting for a
+                       reversal we had already spent - then sulked silent, no INFO1c.
+                       The working call's geometry: slmodem's Tone A + rev#3 land AT the
+                       caller's probe end, its B-rev#2 answers ~100 ms later. */
+            if((p->saw_wide && p->wide_run==0 && cls!=WIDE && p->probe_len>(int)(0.30*S))
+               || p->tstate >= p->seg + (long)(2.5*S)){
                 p->tonea_extra+=M_PI; p->rev_sent=3; p->seg=(int)p->tstate; p->rseq_ph=5;
-                fprintf(stderr,"[v34p2] Tone A reversal #3 (11.2.1.2.6)\n");fflush(stderr);
+                fprintf(stderr,"[v34p2] Tone A reversal #3 at caller probe end (%s, probe %dms)\n",
+                        p->wide_run==0&&p->saw_wide?"reactive":"timeout",
+                        (int)(p->probe_len*1000/(int)S));fflush(stderr);
             }
             break;
         case 5:     /* 10 ms Tone A, then silence; arm for the caller's 2nd B-reversal */

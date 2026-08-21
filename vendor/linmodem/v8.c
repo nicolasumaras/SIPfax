@@ -323,21 +323,20 @@ static void cm_send(V8State *s, int mod_mask)
     if (mod_mask & V8_MOD_V34)
         val |= V8_MODN0_V34;
     v8_put_byte(s, val);
-    v8_put_byte(s, V8_EXT);
-    val = V8_EXT;
-    if (mod_mask & V8_MOD_V23)
-        val |= V8_MODN2_V23;
-    if (mod_mask & V8_MOD_V21)
-        val |= V8_MODN2_V21;
-    v8_put_byte(s, val);
-    
-    /* for now, no LAPM */
-    //v8_put_byte(s, V8_DATA_LAPM);
-    
-    /* We are not on celullar connection. What is that,
-       anyway? GSM?  Don't send this - we don't what it is
-       for, anyway. */
-    //v8_put_byte(s, V8_DATA_NOCELULAR);
+    /* SIPFAX: make our JM byte-identical to slmodem's, which this caller accepts and
+       completes a call against: wire C1 45 11 10 2A 0D. Bit-exact V.8 forensics of the
+       working vs failing captures showed our old JM (C1 45 10 94) differed in three
+       ways - no V.32/V.32bis claim, spurious V.23/V.21 claims, and, the meaningful
+       ones, NO protocols octet (LAPM/V.42) and NO GSTN-access octet, both commented
+       out below since Bellard's day. A caller firmware that gates post-handshake
+       behaviour on "answerer declared V.42" would explain a Phase-4 refusal that
+       survives every signal-level comparison. v8_put_byte transmits LSB-first, so code
+       constants are the bit-reverse of the wire octets (V8_DATA_LAPM=0x54 -> wire 2A,
+       V8_DATA_NOCELULAR=0xB0 -> wire 0D, checked against slmodem's decoded JM). */
+    v8_put_byte(s, V8_EXT | 0x80);      /* wire 0x11: V.32/V.32bis, as slmodem */
+    v8_put_byte(s, V8_EXT);             /* wire 0x10: no second-ext claims, as slmodem */
+    v8_put_byte(s, V8_DATA_LAPM);       /* wire 0x2A: LAPM (V.42) */
+    v8_put_byte(s, V8_DATA_NOCELULAR);  /* wire 0x0D: GSTN standard analogue */
 }
 
 /* selection the modulation according to V8 priority from the bits in 'mask' */

@@ -38,7 +38,18 @@ static int classify(const short*x,int n){
     double m1200=mag_at(x,n,1200.0);
     double hi=mag_at(x,n,3000.0)+mag_at(x,n,3300.0)+mag_at(x,n,3600.0)+mag_at(x,n,2700.0);
     double mid=mag_at(x,n,1950.0)+mag_at(x,n,2250.0);
-    if(hi>300||(mid>300&&m1200<rms*0.3))return WIDE;
+    /* SIPFAX: the caller's INFO (INFO0c/INFO1c) is 600bps DPSK on a 1200Hz carrier, so
+       its energy sits in ~900-1500Hz and the CARRIER ITSELF IS SUPPRESSED - measured
+       m1200 = 3..578 against rms 1750, far under the rms*0.4 gate below. It therefore
+       fell through to OTHR (or to WIDE via the mid test) and we never saw INFO1c at all:
+       we talked over it, the caller re-sent it for 16s, and the handshake stalled. The
+       band sum is decisive - measured 1644..2283 vs a 0.5*rms threshold of ~880 - and
+       the probe comb is excluded first by hi (it omits 900/1200/1800/2400 but carries
+       3000/3300/3600). */
+    double inf=mag_at(x,n,900.0)+mag_at(x,n,1050.0)+mag_at(x,n,1350.0)+mag_at(x,n,1500.0);
+    if(hi>300)return WIDE;
+    if(inf>rms*0.5)return INFOC;
+    if(mid>300&&m1200<rms*0.3)return WIDE;
     if(m1200>rms*0.4){int sub=48,j,jumps=0;double prev=0;int have=0;
         for(j=0;j+sub<=n;j+=sub){double p=ph1200(x,j,sub);if(have){double d=p-prev;while(d>M_PI)d-=2*M_PI;while(d<-M_PI)d+=2*M_PI;if(fabs(d)>1.5)jumps++;}prev=p;have=1;}
         return(jumps>=3)?INFOC:TONEB;}

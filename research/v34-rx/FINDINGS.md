@@ -1635,3 +1635,56 @@ into.
   phase is right (it is implemented and gated off, `SIPFAX_DATA_AGC`).
 - Then re-run this harness: it must reach the loopback's 8.6 before any live call is worth
   placing.
+
+## 36. Precoding eliminated for real, and the actual answer: the link has no margin at 16800
+
+### Precoding, tested properly at last
+
+Both earlier attempts were invalid. The first used coefficients decoded MSB-first
+(|h| = 1.83/0.50/1.38, non-decaying and non-minimum-phase — physically impossible); the
+second ran through a receiver that scored 179 on a *perfect* signal and so could not have
+detected anything. With the correct LSB-first coefficients (|h| = 0.285/0.167/0.102) and
+the validated receiver:
+
+| filter applied to the caller's data-mode symbols | lattice score |
+|---|---|
+| none | 0.5711 |
+| × H(z) | 0.5720 |
+| × 1/H(z) | 0.5715 |
+| *our own known-good signal, same code* | *0.131* |
+| *no-lock floor* | *0.577* |
+
+Precoding does not explain the caller's signal. Eliminated.
+
+### What does explain it
+
+Measured on the caller's Phase-4 TRN — where the 4-point alphabet is known, so the number
+is trustworthy — the channel plus our equalizer delivers **22.4–24.9 dB**. The 48-point
+data constellation needs **≥24 dB** (calibrated: 24 dB → 100% bits, 22 dB → 99.6%,
+20 dB → 95.1%). Our own synthetic signal with no channel measures 34.5 dB and decodes at
+metric 17.3.
+
+**The link is sitting exactly on the threshold for 16800 with no margin**, on a 4-point
+signal that is far easier to equalise than the 48-point data constellation, with taps that
+are frozen after TRN and cannot adapt in data mode (CMA cannot converge on a multi-ring
+set, and decision-directed adaptation has no gradient there).
+
+That is precisely the condition V.34 precoding exists to remove — and it also makes the
+rest of the picture consistent:
+
+- the caller measured *our* direction and proposed **ac=9600**, backing off from 16800;
+- we proposed **ca=16800** for *its* direction, at or beyond what this channel supports;
+- and we advertised **h=0**, telling it not to precode — removing the one mechanism that
+  would have closed the gap.
+
+### Next, cheapest first
+
+1. **Advertise a lower ca.** One field in our MP. If the channel supports ~9600–12000, the
+   caller switches to a smaller constellation with real margin and data should simply
+   work. This is a single-flag live experiment and the fastest route to bits.
+2. **Compute and advertise real precoder coefficients**, so the caller pre-compensates and
+   our receiver only handles the residual. The full V.34 answer, and the way to reach
+   16800+ on this line.
+3. Honour the caller's own request (it asks us to precode and to use the non-linear
+   encoder; we do neither) — a confirmed protocol violation, and plausibly why it rates
+   our direction 9600.

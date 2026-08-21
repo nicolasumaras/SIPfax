@@ -1444,3 +1444,76 @@ back in section 30's cross-call survey), consistent with precoding being active.
    it degrading with more passes).
 3. Verify against the loopback waterfall: the live chain must show ≥24 dB before PPP can
    run.
+
+## 33. Precoding: refuted. Shaping: a real bug, found and fixed.
+
+Checking the section-32 precoding hypothesis directly.
+
+### What the MPs actually say
+
+Decoded from `live-linmodem-connect.pcap`, both CRC-valid and stable across every frame:
+
+| | ca | ac | trellis | nonlin | shape | h coefficients |
+|---|---|---|---|---|---|---|
+| caller's MP | 16800 | 9600 | 64-state | **1** | 1 | **all 6 non-zero**, identical in all 18 frames |
+| our MP | 16800 | 16800 | 0 | 0 | **1** | all zero |
+
+Per V.34 §9.6 the MP's precoder coefficients are computed by the *receiver* for the far
+*transmitter*, so the caller's non-zero h and nonlin=1 instruct **our** transmitter, while
+our h=0 tells the caller not to precode.
+
+### The direct test refutes it
+
+Filtering the received data-mode symbols by the caller's own
+`H(z) = 1 + h1 z^-1 + h2 z^-2 + h3 z^-3`, and by its inverse, at every plausible
+fixed-point interpretation (2^-12 … 2^-16, giving |h1| from 0.46 to 7.3), leaves the
+symbols exactly as unstructured as before (0.576-0.580 against a 0.577 structureless
+reference; the IIR inverse diverges for the larger scalings). **Precoding does not explain
+the received signal**, consistent with our own h=0 instructing the caller not to use it.
+
+### A real bug found on the way: expanded shaping
+
+`expanded_shape` scales the constellation by 1.25 — `M = rint(1.25·2^(K/8))` instead of
+`ceil(2^(K/8))` — so at R=16800:
+
+```
+expanded_shape=0  ->  K=28 q=0 M=12 L=48
+expanded_shape=1  ->  K=28 q=0 M=14 L=56     (loopback: 100% bit match either way)
+```
+
+Our MP advertises **shape=1** and the caller obliges, but `V34_init()` hard-coded
+`expanded_shape = 0`, so our constellation builder produced **L=48 while the caller
+transmits L=56**. Now defaulted to 1 to match what we advertise (`SIPFAX_SHAPE`
+overrides); the codec round-trips at 100% with shaping on, and Phase-2/3/4 regression is
+unchanged (14 MP reads, worst step 11.1 ms).
+
+This is a genuine defect, but on its own it does not account for the measurements: L=56
+does not collapse the captured symbols either.
+
+### A caution about the offline metrics
+
+Several constellation-fitting results in section 32 and here proved unreliable, and the
+control that exposed it is worth recording: the caller's **Phase-4 TRN** — which
+demonstrably decodes at 8.7% EVM as 4-point — scores 0.574 on the same lattice metric that
+scored data mode 0.577. The metric only means anything when the assumed constellation
+matches the signal, so it cannot be used as a general "is there structure here" detector,
+and the "no lattice fit at any size" framing of section 32 overstates what was shown.
+
+What survives from those measurements is narrower and still useful: the data-mode signal
+has kurtosis 1.71 against 1.335 for an unshaped 48-point QAM and 2.02 for Gaussian noise,
+so it is a real modulated signal with a Gaussian-ised (shaped) amplitude distribution —
+which is exactly what `shape=1` should produce.
+
+### Conclusion and next step
+
+Offline constellation fitting has reached its useful limit here: it re-acquires from
+scratch in the middle of data mode, where V.34 provides no training signal, and its
+verdicts depend on constellation assumptions that have been wrong twice. The reliable
+oracle is the decoder itself, which already knows L, K, M, shaping and the trellis and
+round-trips at 100%.
+
+So the next step is unchanged but now better justified: wire `V34_demod_cma` →
+`baseband_decode_impl` at data-mode entry, carrying the equalizer taps, timing and carrier
+phase continuously from Phase-4 TRN rather than re-acquiring, feed symbols at
+coordinate×128, and read the answer off the decoder's own bit output against the ≥24 dB
+waterfall from section 32.

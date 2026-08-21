@@ -1688,3 +1688,72 @@ rest of the picture consistent:
 3. Honour the caller's own request (it asks us to precode and to use the non-linear
    encoder; we do neither) — a confirmed protocol violation, and plausibly why it rates
    our direction 9600.
+
+## 37. Dropping to 9600 helps, and proves the caller honours the negotiated rate
+
+Section 36 ended with the link sitting on its margin at 16800. The cheapest test of that
+conclusion is to ask for less: advertise `ca=4` (9600) in our MP so the negotiated rate,
+which is the **minimum** of the two proposals, drops even though the caller keeps offering
+16800. A 12-point constellation needs roughly 10 dB less SNR than a 56-point one, so if
+margin is the problem the caller's signal should suddenly become decodable.
+
+### Two bugs surfaced before the experiment could be read
+
+**The negotiated rate is the minimum, and we were not taking it.** We configured the
+receiver from the caller's MP proposal alone. It proposed 16800, we asked for 9600, and it
+correctly transmitted 9600 - while we decoded as though it were 16800, i.e. L=56 instead of
+L=12. The experiment was measuring our own bug. Fixed:
+
+```c
+their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
+R = (their_ca < our_ca ? their_ca : our_ca) * 2400;
+```
+
+**The gain search could collapse the constellation.** The acquisition minimises rms distance
+to the odd-integer lattice, and that objective is trivially minimised by *shrinking*: squash
+every symbol onto the innermost ring and the distance goes to zero with all information
+destroyed. That is exactly what it did - a beautiful-looking `lattice-rms 0.121` in which
+100% of symbols landed on just **4 points (±1,±1)** of a 12-point set. The gain is now
+constrained so the scaled mean power stays at least a quarter of the constellation's uniform
+mean; shell mapping legitimately lowers it (measured 0.2x at R=16800) but never to one ring.
+
+This is the third time in this work that a metric has been gamed by the thing it was meant
+to measure (cf. §32's `SIPFAX_DL_SCALE` double-scaling and its 128x-too-weak noise model).
+The pattern is always the same: a score with no ground truth attached.
+
+### The result
+
+With both fixed, the same 25.1 s capture of the caller's data-mode audio, decoded under each
+possible rate hypothesis:
+
+| decode as | L  | gain   | phase   | lattice-rms | metric |
+|-----------|----|--------|---------|-------------|--------|
+| **9600**  | 12 | x0.569 | +17.25° | **0.271**   | 138.4  |
+| 12000     | 20 | x0.596 | +80.75° | 0.364       | 227.4  |
+| 14400     | 32 | x0.562 | +25.00° | 0.420       | 150.6  |
+| 16800     | 56 | x0.589 | +35.25° | 0.482       | 156.4  |
+
+Monotonic in constellation size, best at exactly the rate we asked for. **The caller does
+honour the minimum-rate rule** - this is the first direct confirmation of it on the wire, and
+it means our MP is being read and acted on in full.
+
+Against the 0.564 measured at 16800 in the previous call, dropping the rate is a real
+improvement: the signal has moved off the 0.577 no-lock floor and is now partially locked.
+
+### But it is not enough, and that is informative
+
+Our own known-good signal through the same receiver scores 0.130 with metric 17.2. The
+caller at 9600 scores 0.271 with metric 138.4 - four times the error-free threshold of 33.
+
+A 10 dB reduction in required SNR bought an improvement, but not a lock. That is not what a
+pure margin shortfall looks like; if the only problem were noise, 12 points would have been
+comfortable. It points instead at the **receive equalisation**:
+
+- the taps are trained on 4-point Phase-4 TRN and then frozen at data-mode entry;
+- CMA has no useful error signal on a multi-ring shaped constellation, so it cannot continue;
+- decision-directed adaptation needs decisions that are already mostly right, which they are
+  not, so it has no gradient to descend.
+
+The equaliser is good enough for the 4-point set it was trained on (the caller's TRN decodes
+at 8.7% EVM) and not good enough for data mode, at any rate. Rate was worth eliminating, and
+is now eliminated: **the next work is adaptive equalisation in data mode, not link budget.**

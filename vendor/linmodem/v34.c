@@ -3380,7 +3380,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                (sample>>8)*2+1. rx16_rms tracks mean symbol POWER, and the target mean
                power is <|c|^2>*128^2 over the negotiated constellation. */
             if (!s->data_on) {
-                int R = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca * 2400 : 16800;
+                /* SIPFAX: V.34 resolves each direction's rate as the MINIMUM of the two
+                   MP proposals. We were configuring the receiver from the CALLER's
+                   proposal alone, so when we asked it for 9600 and it offered 16800 it
+                   duly transmitted 9600 while we decoded as if it were 16800 (L=56 rather
+                   than L=12). SIPFAX_MP_CA is the same value our MP advertised. */
+                int our_ca = 4, their_ca, R;
+                { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
+                their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
+                R = (their_ca < our_ca ? their_ca : our_ca) * 2400;
                 s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
                 v34_rx_data_params(s, R);
                 {   /* mean |c|^2 of the negotiated constellation, in lattice units */
@@ -3458,8 +3466,24 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     } else
                     {
                         double bg = 1.0, be = 1e30, bp = 0.0, gdb, th2;
+                        double pw0 = 0, pwmin; int qi;
+                        for (qi = 0; qi < s->data_acq_n; qi++)
+                            pw0 += s->data_acq_i[qi]*s->data_acq_i[qi]
+                                 + s->data_acq_q[qi]*s->data_acq_q[qi];
+                        pw0 /= s->data_acq_n;
+                        /* SIPFAX: the lattice score alone is minimised by SHRINKING - squash
+                           every symbol onto the innermost ring (+-1,+-1) and the distance to
+                           the nearest lattice point goes to zero while all information is
+                           destroyed. That is exactly what happened: the search picked a gain
+                           that put 100% of symbols on just 4 points of a 12-point
+                           constellation. Constrain the gain so the scaled mean power stays
+                           at least a quarter of the constellation's uniform mean - shaping
+                           lowers it (measured 24.3 against a uniform 122.3 at R=16800, i.e.
+                           0.2x) but never collapses it to a single ring. */
+                        pwmin = 0.25 * s->data_meanc2;
                         for (gdb = -14.0; gdb <= 6.0; gdb += 0.1) {
                             double g2 = pow(10.0, gdb/20.0), em = 1e30, t2;
+                            if (pw0*g2*g2 < pwmin) continue;
                             for (t2 = 0; t2 < 90.0; t2 += 3.0) {
                                 double e2 = data_lattice_rms(s->data_acq_i, s->data_acq_q,
                                                              s->data_acq_n, g2,

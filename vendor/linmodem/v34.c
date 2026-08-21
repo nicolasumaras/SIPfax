@@ -4081,7 +4081,44 @@ void V34_datacfg_dump(void)
 
 
 static V34DSPState *g_rx_state;
-static void dataloop_symsink(int si, int sq) { extern void baseband_decode_pub(V34DSPState*,int,int); baseband_decode_pub(g_rx_state, si, sq); }
+/* SIPFAX: the decoder's input contract is sample = lattice_coordinate * 128 -
+   tcm_decision() reads a coordinate back as (sample>>8)*2+1. The loopback used to hand
+   over the raw +-1..+-7 coordinates, 128x too small; that still scored 100% only because
+   the channel was noiseless. SIPFAX_DL_SCALE sets the scale (default 128, the real one)
+   and SIPFAX_DL_SNR adds white noise in dB relative to the mean symbol power, so the
+   trellis decoder can be characterised the way a real receiver will drive it. */
+static double dl_scale = -1, dl_sigma = 0;
+static unsigned int dl_rng = 12345;
+static double dl_gauss(void)
+{   /* Box-Muller from a cheap LCG - deterministic across runs */
+    double u1, u2;
+    dl_rng = dl_rng*1103515245u + 12345u; u1 = ((dl_rng>>8)&0xffffff)/16777216.0;
+    dl_rng = dl_rng*1103515245u + 12345u; u2 = ((dl_rng>>8)&0xffffff)/16777216.0;
+    if (u1 < 1e-12) u1 = 1e-12;
+    return sqrt(-2.0*log(u1))*cos(2*M_PI*u2);
+}
+static void dataloop_symsink(int si, int sq)
+{
+    extern void baseband_decode_pub(V34DSPState*,int,int);
+    if (dl_scale < 0) {
+        char *e = getenv("SIPFAX_DL_SCALE"); dl_scale = e ? atof(e) : 1.0;   /* put_sym already carries *128 */
+        e = getenv("SIPFAX_DL_SNR");
+        if (e) {
+            /* put_sym already carries coordinate*128 (verified on the wire:
+               coordinates (1,5) arrive as (128,640)), so the per-component rms is
+               ~3.5*128 at R=16800. */
+            double ps = 2.0*(3.5*128.0)*(3.5*128.0)*dl_scale*dl_scale;
+            dl_sigma = sqrt(ps/2.0/pow(10.0, atof(e)/10.0));
+        }
+    }
+    {
+        double a = si*dl_scale, b = sq*dl_scale;
+        { static int z=-1; if(z<0){char*e=getenv("SIPFAX_DL_ZERO");z=e?atoi(e):0;}
+          if(z){ a=0; b=0; } }
+        if (dl_sigma > 0) { a += dl_sigma*dl_gauss(); b += dl_sigma*dl_gauss(); }
+        baseband_decode_pub(g_rx_state, (int)lrint(a), (int)lrint(b));
+    }
+}
 static unsigned int g_prbs;
 static u8 g_txb[200000], g_rxb[200000]; static int g_txn, g_rxn;
 static int dataloop_src(void *o) { int b = ((g_prbs>>21)^(g_prbs>>20))&1; g_prbs=((g_prbs<<1)|b)&0x7fffff; if(!g_prbs)g_prbs=1; if(g_txn<200000)g_txb[g_txn++]=(u8)b; return b; }

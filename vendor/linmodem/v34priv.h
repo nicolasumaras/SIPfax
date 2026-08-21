@@ -213,6 +213,7 @@ typedef struct V34DSPState {
     int data_on; long data_n; double data_pw_target;  /* SIPFAX: data-mode feed */
     double data_mse_acc; long data_mse_n;             /* SIPFAX: decode-quality metric */
     double data_th, data_frq, data_meanc2;            /* SIPFAX: DD carrier loop */
+    int rx_precode;                                  /* SIPFAX: invert 9.6.2 precoding */
     int rx_j16;      /* SIPFAX: caller's J requested 16-point Phase 4 from US (0x0D91) */
     int jvar_wait, jvar_phase, jvar_c4, jvar_c16;  /* SIPFAX: J-variant vote in progress */
     int p4_key, p4_keyn, p4_mp_crcok, p4_trellis;

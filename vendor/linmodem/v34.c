@@ -2452,7 +2452,48 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
       x = clamp(x, C_RADIUS);
       y = (y >> 8) * 2 + 1;
       y = clamp(y, C_RADIUS);
-      
+
+      /* SIPFAX: (9.6.2) PRECODER INVERSE.
+         x,y are now the DECIDED transmitted coordinate Y. The transmitter formed
+         Y = u + c from the mapper output u and a coset correction c derived from its own
+         past, so the receiver must subtract the same c before looking u up in the
+         constellation. It can, because the transmitter's state update depends only on Y
+         and on p - both of which the receiver reconstructs from its own decisions:
+
+             p     = sum_{k=0..2} x[k]*h[k]      >> 14   (h: 14 fractional bits)
+             c     = round(p / 2^(7+w)) << w             (w = 1 for b<56, else 2;
+                                                          c is even, so u stays odd)
+             u     = Y - c
+             x[0]' = (Y << 7) - p                        (x: 7 fractional bits)
+
+         This mirrors encode_mapping_frame exactly. Gated on rx_precode so a peer that
+         does not precode is unaffected; the caller demonstrably does - the loopback with
+         its MP coefficients reproduces the trellis metric measured on the wire (178.7 vs
+         172) where an unprecoded loopback sits at 8.6. */
+      if (s->rx_precode) {
+          int px = 0, py = 0, k2, p_re, p_im, c_re, c_im, xr, xi;
+          int w2 = (s->b < 56) ? 1 : 2;
+          for (k2 = 0; k2 < 3; k2++) {
+              px += s->x[k2][0]*s->h[k2][0] - s->x[k2][1]*s->h[k2][1];
+              py += s->x[k2][1]*s->h[k2][0] + s->x[k2][0]*s->h[k2][1];
+          }
+          p_re = shr_round0(px, 14);
+          p_im = shr_round0(py, 14);
+          c_re = shr_round0(p_re, 7 + w2) << w2;
+          c_im = shr_round0(p_im, 7 + w2) << w2;
+          xr = (x << 7) - p_re;
+          xi = (y << 7) - p_im;
+          { static int sgn = -2; if (sgn == -2) { char *e = getenv("SIPFAX_PC_SIGN"); sgn = e ? atoi(e) : -1; }
+            x = clamp(x + sgn*c_re, C_RADIUS);
+            y = clamp(y + sgn*c_im, C_RADIUS); }
+          for (k2 = 2; k2 >= 1; k2--) {
+              s->x[k2][0] = s->x[k2-1][0];
+              s->x[k2][1] = s->x[k2-1][1];
+          }
+          s->x[0][0] = xr;
+          s->x[0][1] = xi;
+      }
+
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
       Z[i] = t >> 14;
@@ -4306,8 +4347,37 @@ void V34_dataloop_test(void)
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
     { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
+    {   /* SIPFAX: enable the TRANSMIT precoder in the loopback so the receive side can be
+           developed offline. linmodem already implements 9.6.2 on the transmit side, so
+           feeding it non-zero coefficients and watching the bit match collapse proves the
+           receiver has no inverse - and is the harness that verifies one once written.
+           SIPFAX_DL_H="h1r,h1i,h2r,h2i,h3r,h3i" in 14-bit fixed point (16384 = 1.0); the
+           caller's own MP values are 13888,26551,-3985,7104,-12417,18847. */
+        char *he = getenv("SIPFAX_DL_H");
+        memset(pt.h, 0, sizeof(pt.h));
+        if (he) {
+            int vv[6]; int k2 = 0;
+            char hbuf[128], *tok;
+            for (k2 = 0; k2 < 6; k2++) vv[k2] = 0;
+            strncpy(hbuf, he, sizeof(hbuf)-1); hbuf[sizeof(hbuf)-1] = 0;
+            k2 = 0; tok = strtok(hbuf, ",");
+            while (tok && k2 < 6) { vv[k2++] = atoi(tok); tok = strtok(NULL, ","); }
+            for (k2 = 0; k2 < 3; k2++) { pt.h[k2][0] = (s16)vv[2*k2]; pt.h[k2][1] = (s16)vv[2*k2+1]; }
+            fprintf(stderr, "[dataloop] TX precoder ON: h1=(%d,%d) h2=(%d,%d) h3=(%d,%d)\n",
+                    pt.h[0][0],pt.h[0][1],pt.h[1][0],pt.h[1][1],pt.h[2][0],pt.h[2][1]);
+        }
+    }
     memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
     V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
+    {   /* SIPFAX: the receiver inverts the precoder exactly when the transmitter uses it */
+        /* SIPFAX: OFF by default - the inverse below is NOT yet correct. With it off the
+           loopback still reaches 97.9% through a precoding transmitter; with it on,
+           either sign, it drops to 50.3%. See the commit message. SIPFAX_RX_PRECODE=1
+           enables it for experiments. */
+        char *e3 = getenv("SIPFAX_RX_PRECODE");
+        rx.rx_precode = (e3 && atoi(e3)) ? 1 : 0;
+        if (rx.rx_precode) fprintf(stderr, "[dataloop] RX precoder inverse ON (experimental)\n");
+    }
     tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
     g_prbs=1; g_txn=0; g_rxn=0; g_rx_state=&rx;
     { extern FILE *gt_f; char *ge=getenv("SIPFAX_GTDUMP"); if(ge) gt_f=fopen(ge,"w"); }

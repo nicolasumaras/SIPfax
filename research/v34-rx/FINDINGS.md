@@ -1563,3 +1563,75 @@ tracking, constellation size and shaping have each now been tested and eliminate
 cause. The next candidate that would actually explain a missing 4th-power line is the
 V.34 receive-side precoder (§9.6), which is real work rather than a configuration change:
 the receiver must apply the channel response and a modulo reduction before slicing.
+
+## 35. The receiver was the problem all along — isolated to scale and carrier phase
+
+The self-test the whole data-mode investigation was missing: close the loop through the
+real chain with a signal we generate ourselves.
+
+`SIPFAX_SYMDUMP` dumps linmodem's own encoder symbols; those are modulated to 8 kHz audio
+in Python (3429 baud, 1959 Hz, RRC β=0.15), preceded by 2 s of 4-point Phase-4 TRN so the
+CMA can acquire the way it does on a real call; `SIPFAX_FORCE_DATA` / `SIPFAX_FORCE_DATA_AT`
+switch the receiver into data mode at the TRN/data boundary. That gives a **pristine,
+noiseless signal with ground truth for every symbol**.
+
+### Result: our own perfect signal scores the same as the caller's
+
+| signal | trellis metric |
+|---|---|
+| loopback, symbols fed directly | **8.6** |
+| **our own encoder → audio → our receiver** | **175** |
+| the caller's live data mode | 172 |
+
+A signal with no channel, no noise, no clock offset and correctly acquired taps scores as
+badly as the live one. **The receive chain is the defect.** Every conclusion drawn earlier
+about the caller's signal — whitened, precoded, anomalous — was measuring our own receiver.
+
+### And the chain is closer to working than any of that suggested
+
+Comparing the symbols the receiver hands the decoder against the encoder's ground truth,
+at a fixed alignment (lag 376):
+
+```
+  rx index    |corr|   gain    phase
+       0      0.999    2.244   +108
+    1000      0.999    2.246    +69
+    3000      0.999    2.248    +90
+    5750      0.999    2.274    +91
+```
+
+Correlation is **0.996-0.999 for the entire 9-second run**. The front end, symbol timing
+and equalizer are all correct; the symbols are recovered essentially perfectly. Two
+defects sit between that and a working decode:
+
+1. **Gain is 2.244× too large.** The receiver scales to the *uniform* mean over the
+   constellation (mean |c|² = 122.3), but the shell mapper is a shaping code that favours
+   inner points — the encoder's actual transmitted mean is 24.3. √(122.3/24.3) = 2.243,
+   matching the measurement to three digits. Correcting it by hand (`SIPFAX_DATA_PW`)
+   brings the gain to 0.945.
+2. **A residual carrier rotation** of roughly 40-130°, unstable across runs and windows,
+   which is *not* a multiple of 90° and therefore genuinely misplaces every symbol
+   (residual 1.68 lattice units per axis against a spacing of 2).
+
+An earlier reading of this data — "tracking is lost after ~1000 symbols" — was an artifact
+of letting each analysis window pick its own correlation lag; with the lag held fixed
+there is no loss at all.
+
+### Why every decision-directed fix failed
+
+Both a DD carrier loop (kp/ki swept over two decades) and a DD AGC make things *worse*
+(the AGC takes the metric from 175 to 300). The reason is ordering: with the gain 2.24×
+wrong every decision is wrong, so neither loop has a usable error signal — and once the
+gain is corrected, a ~42° phase error on a 48-point constellation still gives a
+decision-directed detector no gradient to climb. Phase has to be acquired, not tracked
+into.
+
+### Next
+
+- Acquire the data-mode carrier phase properly rather than inheriting `srx_th` from the
+  4th-power estimator (which has a 90° ambiguity and no reference on a dense set) — the
+  natural source is the Phase-4 TRN/MP phase, carried forward exactly.
+- Derive the shaped mean power rather than the uniform one, or enable the DD AGC once the
+  phase is right (it is implemented and gated off, `SIPFAX_DATA_AGC`).
+- Then re-run this harness: it must reach the loopback's 8.6 before any live call is worth
+  placing.

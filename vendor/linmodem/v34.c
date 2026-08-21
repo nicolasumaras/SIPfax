@@ -40,6 +40,7 @@ void print_bit_vector(char *str, u8 *tab, int n)
 static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
+static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
@@ -3319,19 +3320,46 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 }
                 s->phase_4d = 0; s->sync_count = 0; s->half_data_frame_count = 0;
                 s->phase_mse = 0; s->phase_mse_cnt = 0;
+                s->data_meanc2 = s->data_pw_target / (128.0*128.0);
+                s->data_th = s->srx_th; s->data_frq = 0.0;   /* inherit Phase-4 phase */
                 s->data_on = 1; s->data_n = 0;
                 { extern int v34_dbg; if (v34_dbg)
                     fprintf(stderr, "[data] entering data mode: target mean power %.0f (rx16_rms %.0f)\n",
                             s->data_pw_target, s->rx16_rms); }
             }
             if (s->rx16_rms > 0) {
-                double g = sqrt(s->data_pw_target / s->rx16_rms);
-                int si2 = (int)lrint(pi_ * g), sq2 = (int)lrint(pq_ * g);
+                /* SIPFAX: DECISION-DIRECTED carrier loop.
+                   Phase C derotates with a 4th-power estimator, which is well matched to
+                   the 4- and 16-point Phase-3/4 signals but nearly blind on a dense data
+                   constellation - measured |E[x^4]|/E|x|^4 is 0.355 on the caller's TRN
+                   and 0.006-0.014 in its data mode, a 25-50x weaker phase reference. So
+                   in data mode we derotate with our own loop, seeded from the Phase-4
+                   phase and driven by decisions against the negotiated constellation.
+                   SIPFAX_DD_KP / SIPFAX_DD_KI override the loop constants. */
+                static double kp = -1, ki = -1;
+                double gc, ct2, st2, xi, xq, di, dq, pe, nrm2;
+                if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 8e-3;
+                              char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 2e-4; }
+                gc = sqrt(s->data_meanc2 / s->rx16_rms);        /* -> lattice coordinates */
+                ct2 = cos(-s->data_th); st2 = sin(-s->data_th);
+                xi = (oi*ct2 - oq*st2) * gc;
+                xq = (oi*st2 + oq*ct2) * gc;
+                data_slice(s, xi, xq, &di, &dq);
+                nrm2 = di*di + dq*dq;
+                if (nrm2 > 0) {
+                    pe = atan2(xq*di - xi*dq, xi*di + xq*dq);
+                    if (pe >  0.8) pe =  0.8;                   /* clamp: a wrong decision
+                                                                   must not kick the loop */
+                    if (pe < -0.8) pe = -0.8;
+                    s->data_frq += ki*pe;
+                    s->data_th  += s->data_frq + kp*pe;
+                }
                 s->data_n++;
-                baseband_decode_impl(s, si2, sq2);
-                { extern int v34_dbg; if (v34_dbg && (s->data_n % 500) == 0)
-                    fprintf(stderr, "[data] %ld symbols decoded (gain %.3f, mse %d)\n",
-                            s->data_n, g, s->phase_mse); }
+                baseband_decode_impl(s, (int)lrint(xi*128.0), (int)lrint(xq*128.0));
+                { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
+                    fprintf(stderr, "[data] %ld syms, metric %.1f, freq %.2e rad/sym\n",
+                            s->data_n, s->data_mse_n ? s->data_mse_acc/s->data_mse_n : 0.0,
+                            s->data_frq); }
             }
         }
         for (r = 0; r < 4; r++) {
@@ -3962,6 +3990,23 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
    symbol timing and carrier phase we spent all of Phase 3/4 acquiring, which is exactly
    the state a V.34 receiver must carry into data mode (there is no training signal there
    to re-acquire from). Mirrors the parameter block in V34_init_low. */
+/* SIPFAX: nearest point of the negotiated data constellation, in lattice-coordinate
+   units. L is 48-56 here, so the linear search costs ~50 distance evaluations per symbol
+   at 3429 baud - negligible, and it avoids duplicating the shell-mapping geometry. */
+static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq)
+{
+    int i, best = 0; double bd = 1e30;
+    for (i = 0; i < s->L; i++) {
+        double dx = xi - (double)s->constellation[i][0];
+        double dy = xq - (double)s->constellation[i][1];
+        double d = dx*dx + dy*dy;
+        if (d < bd) { bd = d; best = i; }
+    }
+    *di = (double)s->constellation[best][0];
+    *dq = (double)s->constellation[best][1];
+    return best;
+}
+
 static void v34_rx_data_params(V34DSPState *s, int R)
 {
     int S = s->S, d, e;
@@ -4220,6 +4265,21 @@ static void dataloop_symsink(int si, int sq)
         }
     }
     {
+        {   /* SIPFAX: distribution of OUR OWN transmitted data-mode symbols, so the
+               caller's can be compared like for like (kurtosis of |x|^2 and the
+               4th-moment line, the two statistics that distinguish shaping). */
+            static double s2 = 0, s4 = 0, m4r = 0, m4i = 0; static long nn = 0;
+            double pw = (double)si*si + (double)sq*sq;
+            double r2 = (double)si*si - (double)sq*sq, i2 = 2.0*si*sq;
+            double r4 = r2*r2 - i2*i2, i4 = 2.0*r2*i2;
+            s2 += pw; s4 += pw*pw; m4r += r4; m4i += i4; nn++;
+            if (nn == 20000) {
+                double mp = s2/nn;
+                fprintf(stderr, "[txdist] kurtosis %.3f  4th-moment %.4f\n",
+                        (s4/nn)/(mp*mp), sqrt(m4r*m4r + m4i*m4i)/nn/(s4/nn));
+                fflush(stderr);
+            }
+        }
         double a = si*dl_scale, b = sq*dl_scale;
         { static int z=-1; if(z<0){char*e=getenv("SIPFAX_DL_ZERO");z=e?atoi(e):0;}
           if(z){ a=0; b=0; } }

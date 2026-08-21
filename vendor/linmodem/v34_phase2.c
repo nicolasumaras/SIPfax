@@ -287,48 +287,31 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                 fprintf(stderr,"[v34p2] L1(160ms,+6dB)+L2 after reversals (11.2.1.2.5)\n");fflush(stderr);
             }
             break;
-        case 3:     /* L1 160 ms + L2 600 ms, then SILENCE - the caller's probe follows */
-            if(p->tstate >= p->seg + (long)(0.760*S)){
-                set_tx(p,TX_SILENCE); p->seg=(int)p->tstate; p->probe_len=0; p->saw_wide=0; p->rseq_ph=4;
-                fprintf(stderr,"[v34p2] L2 done -> silent, waiting for caller probe\n");fflush(stderr);
+        case 3:     /* L1 160 ms + L2, then Tone A CONTIGUOUSLY (11.2.1.2.6). The caller
+                       raises Tone B to terminate our L2; slmodem stops 65 ms after that,
+                       we used to run a fixed 760 ms and overshoot it by 260 ms. */
+            if((cls==TONEB && p->toneb_run>=3) || p->tstate >= p->seg + (long)(0.760*S)){
+                set_tx(p,TX_TONEA); p->seg=(int)p->tstate; p->rseq_ph=4;
+                fprintf(stderr,"[v34p2] L2 done (%s) -> Tone A\n",
+                        cls==TONEB?"caller Tone B":"timer");fflush(stderr);
             }
             break;
-        case 4:     /* The caller probes next. Tone A is its probe-TERMINATE signal, so it
-                       must rise only once the probe is well underway (>=450ms, matching
-                       slmodem/R_PRX) - raising it at our L2 end made the caller abort its
-                       probe at 240ms and the handshake died with no white-noise phase.
-                       rev#3 fires at the probe end (11.2.1.2.6) with >=50ms of Tone A
-                       already up; the caller's B-rev#2 answers ~100ms later. */
-            if(p->txmode==TX_SILENCE && p->wide_run>0 && p->probe_len>(int)(0.45*S)){
-                set_tx(p,TX_TONEA); p->seg=(int)p->tstate;
-                fprintf(stderr,"[v34p2] Tone A during caller probe (terminate-L2)\n");fflush(stderr);
-            }
-            if((p->txmode==TX_TONEA && p->tstate >= p->seg + (long)(0.050*S)
-                && p->saw_wide && p->wide_run==0 && cls!=WIDE && p->probe_len>(int)(0.45*S))
-               || p->tstate >= p->seg + (long)(4.0*S)){
-                if(p->txmode!=TX_TONEA){ set_tx(p,TX_TONEA); p->seg=(int)p->tstate; break; }
+        case 4:     /* 11.2.1.2.6: Tone A 50 ms, reversal #3, 10 ms, then silence for the
+                       caller's probe. Measured on slmodem: Tone A contiguous with its own
+                       probe, 55.9 ms head, reversal, 13.3 ms tail. Ours used to wait for
+                       the caller's probe to END before reversing, giving a 140 ms head and
+                       spending the reversal after the caller had stopped listening for it. */
+            if(p->tstate >= p->seg + (long)(0.050*S)){
                 p->tonea_extra+=M_PI; p->rev_sent=3; p->seg=(int)p->tstate; p->rseq_ph=5;
-                fprintf(stderr,"[v34p2] Tone A reversal #3 at caller probe end (probe %dms)\n",
-                        (int)(p->probe_len*1000/(int)S));fflush(stderr);
+                fprintf(stderr,"[v34p2] Tone A reversal #3 (11.2.1.2.6)\n");fflush(stderr);
             }
             break;
-        case 5:     /* 10 ms Tone A, then silence; arm for the caller's 2nd B-reversal */
+        case 5:     /* 10 ms tail, then silence and hand over: the caller probes next */
             if(p->tstate >= p->seg + (long)(0.010*S)){
                 set_tx(p,TX_SILENCE); p->brev_base=p->brev_cnt;
-                p->seg=(int)p->tstate; p->rseq_ph=6;
-            }
-            break;
-        case 6:     /* Ranging is over the moment the caller's probe has ended or its
-                       INFO1c starts. Waiting a fixed 1.5s for a 2nd B-reversal pushed
-                       our INFO1a 1.4s past the caller's INFO1c, so it never got the
-                       reply it was waiting for and re-sent INFO1c for 16s. */
-            if(p->brev_cnt>p->brev_base || cls==INFOC
-               || (p->saw_wide && p->wide_run==0 && p->probe_len>(int)(0.30*S))
-               || p->tstate >= p->seg + (long)(0.40*S)){
-                fprintf(stderr,"[v34p2] ranging complete (%s) -> caller's turn\n",
-                        p->brev_cnt>p->brev_base ? "B-rev#2" : (cls==INFOC ? "INFO1c" : "probe end"));
-                fflush(stderr);
-                p->state=R_PRX; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
+                p->probe_len=0; p->saw_wide=0;
+                fprintf(stderr,"[v34p2] ranging done -> caller's probe\n");fflush(stderr);
+                p->state=R_PRX; p->tstate=0; p->retries=0;
             }
             break;
         }
@@ -353,26 +336,30 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
             p->symrate=(top>=3600)?5:(top>=3300)?4:(top>=3000)?3:(top>=2850)?2:(top>=2700)?1:0;
             fprintf(stderr,"[v34p2] modem probe RECEIVED (%dms, top %.0fHz) -> symrate %d; awaiting INFO1c\n",
                     (int)(p->probe_len*1000/(int)S),top,p->symrate);fflush(stderr);
-            /* SIPFAX: the caller sends INFO1c next and WAITS for our INFO1a. Go silent
-               and let it speak - firing INFO1a before/over its INFO1c left it re-sending
-               INFO1c indefinitely while we sat muted in Phase-3 WAIT_J. */
-            p->retries=1; set_tx(p,TX_SILENCE);
+            /* SIPFAX: 11.2.1.2.8-9 - the answer modem keeps Tone A UP while its receiver
+               takes in INFO1c, then sends INFO1a immediately. Measured: slmodem's INFO1a
+               lands 22-27 ms after the caller's INFO1c ends; going silent and waiting put
+               ours 929-934 ms late, past the 700 ms recovery deadline of 11.2.2.1.6 - so
+               the caller abandoned Phase 2 and restarted with INFO0c every single call. */
+            p->retries=1; if(p->txmode!=TX_TONEA) set_tx(p,TX_TONEA);
         }
         if(p->retries==1 && cls==INFOC){
             p->retries=2; p->seg=0;
             fprintf(stderr,"[v34p2] caller INFO1c arriving\n");fflush(stderr);
         }
-        /* one stray non-INFO block ended this 20ms into the caller's INFO1c live, so we
-           answered while it was still speaking; require 100ms of quiet instead. */
+        /* One stray non-INFO block used to end this 20 ms into INFO1c; two blocks of
+           quiet (40 ms) debounces that while still replying inside slmodem's 22-27 ms
+           class. Tone A stays up throughout - INFO1a follows immediately. */
         if(p->retries==2 && cls==INFOC) p->seg=0;
-        if(p->retries==2 && p->info_run==0 && ++p->seg >= 5){
-            fprintf(stderr,"[v34p2] caller INFO1c done -> our INFO1a\n");fflush(stderr);
-            p->state=R_INFO1A; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
+        if(p->retries==2 && p->info_run==0 && ++p->seg >= 2){
+            fprintf(stderr,"[v34p2] caller INFO1c done -> INFO1a NOW\n");fflush(stderr);
+            p->state=R_INFO1A; p->tstate=0; p->retries=0;
         }
         if(p->tstate>(long)(2.5*S)){
             if(p->symrate<0)p->symrate=5;
             fprintf(stderr,"[v34p2] no INFO1c in 2.5s -> default symrate %d; INFO1a now\n",p->symrate);fflush(stderr);
-            p->state=R_INFO1A; p->tstate=0; p->retries=0; set_tx(p,TX_SILENCE);
+            p->state=R_INFO1A; p->tstate=0; p->retries=0;
+            if(p->txmode!=TX_TONEA) set_tx(p,TX_TONEA);
         }
         break;
     case R_RANGE2:  /* the modem holds Tone B after its probe when ranging is incomplete
@@ -402,16 +389,13 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                        INFO1a listen loop. Every earlier attempt filled that window with
                        INFO1a repeats and delivered training signal only after the modem
                        had given up. Get TRN on the wire inside the window. */
-        /* SIPFAX: slmodem's measured reply to INFO1c - 0.5s silence, then Tone A
-           0.3s, then ONE INFO1a, then the 70ms gap into Phase 3. */
-        if(p->txmode==TX_SILENCE && p->rev_sent!=99 && p->tstate>(long)(0.50*S)){
-            set_tx(p,TX_TONEA);
-            fprintf(stderr,"[v34p2] Tone A 0.3s before INFO1a (slmodem shape)\n");fflush(stderr);
-        }
-        if(p->txmode==TX_TONEA && p->tstate>(long)(0.80*S)){
+        /* SIPFAX: Tone A has been up throughout the caller's INFO1c (11.2.1.2.8), so
+           INFO1a goes out immediately - slmodem's measured gap is 22-27 ms. */
+        if(p->txmode==TX_TONEA){
             set_tx(p,TX_INFO1A);
             fprintf(stderr,"[v34p2] INFO1a -> Phase 3\n");fflush(stderr);
         }
+        if(p->txmode==TX_SILENCE && p->rev_sent!=99){ set_tx(p,TX_TONEA); }
         if(p->txmode==TX_INFO1A && p->info_bit>=p->info_n){
             /* INFO1a is sent ONCE (spec; slmodem's burst = exactly 1 frame). Our old 2nd
                frame sat exactly where the caller — synced to frame 1 — expects the 70ms
@@ -419,7 +403,9 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
             set_tx(p,TX_SILENCE); p->rev_sent=99; p->tstate=0;   /* spec 11.3.1.2.2: 70±5ms silence */
             fprintf(stderr,"[v34p2] INFO1a sent (x1) -> 70ms silence -> Phase 3\n");fflush(stderr);
         }
-        if(p->rev_sent==99 && p->tstate>(long)(0.070*S)){ p->state=R_DONE; return 1; }
+        /* the 560-sample (70 ms) test only fires on the 160-sample block grid, i.e. at
+           640 = 80.0 ms; slmodem's measured gap is 64-68 ms, so aim one block lower. */
+        if(p->rev_sent==99 && p->tstate>(long)(0.055*S)){ p->state=R_DONE; return 1; }
         break;
     }
     return 0;

@@ -4066,7 +4066,7 @@ void V34_datacfg_dump(void)
     memset(&p, 0, sizeof(p)); memset(&s, 0, sizeof(s));
     e = getenv("SIPFAX_DATA_R"); if (e) R = atoi(e);
     p.S = V34_S3429; p.R = R; p.use_high_carrier = 1; p.calling = 0;
-    p.conv_nb_states = 64; p.expanded_shape = 0; p.use_non_linear = 0; p.use_aux_channel = 0;
+    p.conv_nb_states = 64; { char *se=getenv("SIPFAX_DL_SHAPE"); p.expanded_shape = se?atoi(se):0; } p.use_non_linear = 0; p.use_aux_channel = 0;
     { extern void dsp_init(void); dsp_init(); }
     V34_static_init();
     V34_init_low(&s, &p, 0);
@@ -4130,6 +4130,7 @@ void V34_dataloop_test(void)
     memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
     memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
     V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
     tx.get_bit=dataloop_src; tx.opaque=0; rx.put_bit=dataloop_sink; rx.opaque=0;
@@ -4306,7 +4307,15 @@ void V34_init(struct V34State *s, int calling)
        TODO: derive S/R from the V.34 phase-2 INFO/probing negotiation. */
     s->S = V34_S2400;
     s->R = 19200;
-    s->expanded_shape = 0;
+    /* SIPFAX: our MP advertises constellation shaping (shape=1, the slmodem-compatible
+       value) and the caller obliges - but this was hard-coded 0, so the constellation
+       builder produced L=48 while the caller transmits L=56 (expanded shaping scales the
+       set by 1.25: M = rint(1.25*2^(K/8)) instead of ceil(2^(K/8))). Demapping a 56-point
+       signal against a 48-point set is why the captured data-mode symbols fit no lattice
+       at any size (measured lattice error 0.578 = uniform, against 0.076 for a matched
+       control). The loopback round-trips at 100% with shaping on, so the codec supports
+       it. SIPFAX_SHAPE overrides. */
+    { char *e = getenv("SIPFAX_SHAPE"); s->expanded_shape = e ? atoi(e) : 1; }
     s->conv_nb_states = 16;
     s->use_non_linear = 0;
     s->use_high_carrier = 1;

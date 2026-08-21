@@ -41,6 +41,8 @@ static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq);
+static double data_lattice_rms(const double *bi, const double *bq, int n,
+                               double g, double ct, double st);
 static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
                           int *shape, unsigned int *mask, int *sixteen_out, short *hout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
@@ -3406,8 +3408,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    SIPFAX_DD_KP / SIPFAX_DD_KI override the loop constants. */
                 static double kp = -1, ki = -1;
                 double gc, ct2, st2, xi, xq, di, dq, pe, nrm2;
-                if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 8e-3;
-                              char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 2e-4; }
+                if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 0.0;   /* acquisition handles the static offset; DD drags a dense constellation */
+                              char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 0.0; }
                 /* SIPFAX: DECISION-DIRECTED AGC. The open-loop gain used the UNIFORM
                    mean over the constellation, but the shell mapper is a shaping code
                    that favours inner points: measured on the encoder's own output at
@@ -3420,6 +3422,58 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    loop pulls down. SIPFAX_DATA_AGC=0 restores the open-loop gain. */
                 if (s->data_agc <= 0) s->data_agc = sqrt(s->data_meanc2 / s->rx16_rms);
                 gc = s->data_agc;
+                if (!s->data_acq_done) {
+                    /* SIPFAX: ACQUIRE gain and carrier phase before decoding anything.
+                       Two static errors otherwise wreck the whole of data mode, and both
+                       were measured against encoder ground truth on a noiseless signal:
+                         - gain 2.244x too large, because the open-loop scale above uses
+                           the UNIFORM mean over the constellation (|c|^2 = 122.3) while
+                           the shell mapper is a shaping code whose transmitted mean is
+                           24.3 - sqrt of the ratio is 2.243;
+                         - a constant carrier rotation (measured +106.8 deg, stable to
+                           0.1 deg rms with zero drift), of which the 90 deg part is
+                           transparent to V.34's differential Z but the remainder is not.
+                       Uncorrected the symbols score 0.583 against the lattice (= the
+                       uniform floor, i.e. no information); corrected they score 0.132.
+                       Search gain first, then phase over 0..90 deg at that gain - a joint
+                       coarse search finds false minima. Both are static here, so this is
+                       one-shot; the DD loop then only has to track drift. */
+                    if (s->data_acq_n < DATA_ACQ_N) {
+                        double ct0 = cos(-s->data_th), st0 = sin(-s->data_th);
+                        s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
+                        s->data_acq_q[s->data_acq_n] = (oi*st0 + oq*ct0) * gc;
+                        s->data_acq_n++;
+                    } else
+                    {
+                        double bg = 1.0, be = 1e30, bp = 0.0, gdb, th2;
+                        for (gdb = -14.0; gdb <= 6.0; gdb += 0.1) {
+                            double g2 = pow(10.0, gdb/20.0), em = 1e30, t2;
+                            for (t2 = 0; t2 < 90.0; t2 += 3.0) {
+                                double e2 = data_lattice_rms(s->data_acq_i, s->data_acq_q,
+                                                             s->data_acq_n, g2,
+                                                             cos(-t2*M_PI/180.0), sin(-t2*M_PI/180.0));
+                                if (e2 < em) em = e2;
+                            }
+                            if (em < be) { be = em; bg = g2; }
+                        }
+                        be = 1e30;
+                        for (th2 = 0; th2 < 90.0; th2 += 0.25) {
+                            double e2 = data_lattice_rms(s->data_acq_i, s->data_acq_q,
+                                                         s->data_acq_n, bg,
+                                                         cos(-th2*M_PI/180.0), sin(-th2*M_PI/180.0));
+                            if (e2 < be) { be = e2; bp = th2; }
+                        }
+                        s->data_agc *= bg;
+                        s->data_th  += bp*M_PI/180.0;
+                        s->data_acq_done = 1;
+                        gc = s->data_agc;
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[data] acquired: gain x%.3f, phase %+.2f deg,"
+                                    " lattice-rms %.3f (0.577 = no lock, <0.2 = good)\n",
+                                    bg, bp, be); }
+                    }
+                }
+                if (s->data_acq_done) {
                 ct2 = cos(-s->data_th); st2 = sin(-s->data_th);
                 xi = (oi*ct2 - oq*st2) * gc;
                 xq = (oi*st2 + oq*ct2) * gc;
@@ -3461,6 +3515,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                         }
                         baseband_decode_impl(s, si2, sq2);
                     }
+                }
                 }
                 { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
                     fprintf(stderr, "[data] %ld syms, metric %.1f, freq %.2e rad/sym\n",
@@ -4112,6 +4167,25 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
 /* SIPFAX: nearest point of the negotiated data constellation, in lattice-coordinate
    units. L is 48-56 here, so the linear search costs ~50 distance evaluations per symbol
    at 3429 baud - negligible, and it avoids duplicating the shell-mapping geometry. */
+/* SIPFAX: rms distance of a block to the nearest ODD-INTEGER lattice point, in lattice
+   units. The data constellation is a subset of that lattice, so this scores a candidate
+   (gain, phase) without needing to know WHICH subset - which matters, because the shell
+   mapper's shaping makes the occupied subset data-dependent. Uniform/garbage scores
+   ~0.577; a correctly scaled and derotated block scores ~0.13. */
+static double data_lattice_rms(const double *bi, const double *bq, int n,
+                               double g, double ct, double st)
+{
+    double acc = 0; int i;
+    for (i = 0; i < n; i++) {
+        double xr = (bi[i]*ct - bq[i]*st) * g;
+        double xi2 = (bi[i]*st + bq[i]*ct) * g;
+        double dr = xr - (2.0*floor((xr-1.0)/2.0 + 0.5) + 1.0);
+        double di2 = xi2 - (2.0*floor((xi2-1.0)/2.0 + 0.5) + 1.0);
+        acc += dr*dr + di2*di2;
+    }
+    return sqrt(acc / (2.0*n));
+}
+
 static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq)
 {
     int i, best = 0; double bd = 1e30;

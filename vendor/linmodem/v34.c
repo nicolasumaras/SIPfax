@@ -39,6 +39,7 @@ void print_bit_vector(char *str, u8 *tab, int n)
 
 static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
+static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
@@ -2411,7 +2412,7 @@ static void put_bit(V34DSPState *s, int b)
         poly = V34_GPA;
     b = unscramble_bit(s, b, poly);
     //    fprintf(stderr, "recv: %d\n", b);
-    s->put_bit(s->opaque, b);
+    if (s->put_bit) s->put_bit(s->opaque, b);   /* SIPFAX: offline harnesses have no sink */
 }
 
 /* auxilary channel bit */
@@ -2532,6 +2533,11 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
     if (++s->phase_4d == 2) {
 
         trellis_decoder(s, y, s->yy , &mse);
+        /* SIPFAX: long-run mean of the trellis branch metric. This decoder has no
+           sync-lock flag (the sync bit is generated open-loop), so the metric is the only
+           quantitative handle on whether the symbols we feed it are decodable. Calibrated
+           against the loopback at known SNR. */
+        s->data_mse_acc += mse; s->data_mse_n++;
         s->phase_mse += mse;
         s->phase_mse_cnt++;
         if (s->phase_mse_cnt >= 8) {
@@ -3287,6 +3293,47 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             double pw = pi_*pi_ + pq_*pq_;
             s->rx16_rms = (s->rx16_rms <= 0) ? pw : (0.995*s->rx16_rms + 0.005*pw);
         }
+        if (s->p4_e_rx) {
+            /* ---- DATA MODE ----------------------------------------------------
+               Phase 4 is over; hand every symbol to Bellard's decoder. The taps,
+               symbol timing and carrier phase carried here are the ones acquired on
+               Phase-4 TRN - V.34 provides no training signal in data mode, so
+               re-acquiring is not an option (and CMA cannot converge on a shaped
+               constellation anyway).
+
+               Scale: baseband_decode_impl wants lattice coordinate * 128 - verified
+               against the encoder, where coordinates (1,5) are emitted as (128,640),
+               and matching tcm_decision(), which reads a coordinate back as
+               (sample>>8)*2+1. rx16_rms tracks mean symbol POWER, and the target mean
+               power is <|c|^2>*128^2 over the negotiated constellation. */
+            if (!s->data_on) {
+                int R = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca * 2400 : 16800;
+                s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
+                v34_rx_data_params(s, R);
+                {   /* mean |c|^2 of the negotiated constellation, in lattice units */
+                    int ci; double acc = 0;
+                    for (ci = 0; ci < s->L; ci++)
+                        acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
+                             + (double)s->constellation[ci][1]*s->constellation[ci][1];
+                    s->data_pw_target = (s->L > 0 ? acc / s->L : 30.0) * (128.0*128.0);
+                }
+                s->phase_4d = 0; s->sync_count = 0; s->half_data_frame_count = 0;
+                s->phase_mse = 0; s->phase_mse_cnt = 0;
+                s->data_on = 1; s->data_n = 0;
+                { extern int v34_dbg; if (v34_dbg)
+                    fprintf(stderr, "[data] entering data mode: target mean power %.0f (rx16_rms %.0f)\n",
+                            s->data_pw_target, s->rx16_rms); }
+            }
+            if (s->rx16_rms > 0) {
+                double g = sqrt(s->data_pw_target / s->rx16_rms);
+                int si2 = (int)lrint(pi_ * g), sq2 = (int)lrint(pq_ * g);
+                s->data_n++;
+                baseband_decode_impl(s, si2, sq2);
+                { extern int v34_dbg; if (v34_dbg && (s->data_n % 500) == 0)
+                    fprintf(stderr, "[data] %ld symbols decoded (gain %.3f, mse %d)\n",
+                            s->data_n, g, s->phase_mse); }
+            }
+        }
         for (r = 0; r < 4; r++) {
             int z = (r - qd) & 3, nb = 2; b2s[r][0] = z & 1; b2s[r][1] = (z >> 1) & 1;   /* spec CW */
             if (srx_rx16() && s->p4_mode != 0) {
@@ -3910,6 +3957,48 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
 }
 
 
+/* SIPFAX: re-derive the data-frame and constellation parameters after Phase 4 has
+   negotiated them, WITHOUT calling V34_init_low - that would wipe the equaliser taps,
+   symbol timing and carrier phase we spent all of Phase 3/4 acquiring, which is exactly
+   the state a V.34 receiver must carry into data mode (there is no training signal there
+   to re-acquire from). Mirrors the parameter block in V34_init_low. */
+static void v34_rx_data_params(V34DSPState *s, int R)
+{
+    int S = s->S, d, e;
+    s->R = R;
+    if (!s->use_high_carrier) { d = S_tab[S][2]; e = S_tab[S][3]; }
+    else                      { d = S_tab[S][4]; e = S_tab[S][5]; }
+    s->symbol_rate = 2400.0 * (float)S_tab[S][0] / (float)S_tab[S][1];
+    s->carrier_freq = s->symbol_rate * (float)d / (float)e;
+    s->J = S_tab[S][6];
+    s->P = S_tab[S][7];
+    s->N = (s->R * 28) / (s->J * 100);
+    s->b = s->N / s->P;
+    if ((s->b * s->P) < s->N) s->b++;      /* the round-up matters: b=40 not 39 */
+    s->r = s->N - (s->b - 1) * s->P;
+    s->W = 0;                               /* no aux channel */
+    s->q = 0;
+    if (s->b <= 12) s->K = 0;
+    else { s->K = s->b - 12; while (s->K >= 32) { s->K -= 8; s->q++; } }
+    { char *e2 = getenv("SIPFAX_SHAPE"); if (e2) s->expanded_shape = atoi(e2); }
+    if (!s->expanded_shape) s->M = (int) ceil(pow(2.0, s->K / 8.0));
+    else                    s->M = (int) rint(1.25 * pow(2.0, s->K / 8.0));
+    s->L = 4 * s->M * (1 << s->q);
+    build_constellation(s);
+    build_rings(s);
+    { extern int v34_dbg; if (v34_dbg) {
+        int ci; double acc=0; int mx=0;
+        for (ci=0; ci<s->L; ci++){ acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
+                                        + (double)s->constellation[ci][1]*s->constellation[ci][1];
+                                   if (abs(s->constellation[ci][0])>mx) mx=abs(s->constellation[ci][0]); }
+        fprintf(stderr,"[data] constellation: L=%d first=(%d,%d) max|x|=%d mean|c|^2=%.1f\n",
+                s->L, s->constellation[0][0], s->constellation[0][1], mx, acc/s->L); } }
+    { extern int v34_dbg; if (v34_dbg)
+        fprintf(stderr, "[data] RX params: R=%d S=%.0f J=%d P=%d N=%d b=%d r=%d K=%d q=%d M=%d L=%d shape=%d trellis=%d\n",
+                s->R, s->symbol_rate, s->J, s->P, s->N, s->b, s->r,
+                s->K, s->q, s->M, s->L, s->expanded_shape, s->conv_nb_states); }
+}
+
 void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
 {
     {   /* SIPFAX: Phase-4 block receiver. The streaming path is 4-point only, so when the
@@ -4040,6 +4129,18 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
     }
 }
 /* offline stream harness: SIPFAX_STREAM_FILE=path */
+/* SIPFAX: data-mode bit sink for the offline harness. The live path wires
+   serial_put_bit (lm.c), but V34_stream_decode_file had no sink at all, so the first
+   decoded bit jumped through a NULL pointer. Counting them here is also how the
+   data-mode receive chain gets validated against a captured call. */
+static long g_databits = 0, g_dataones = 0;
+static FILE *g_databitf = 0;
+static void stream_put_bit(void *o, int b)
+{
+    g_databits++; if (b) g_dataones++;
+    if (g_databitf) fputc('0'+(b&1), g_databitf);
+}
+
 void V34_stream_decode_file(const char *path)
 {
     extern int v34_dbg;
@@ -4048,6 +4149,8 @@ void V34_stream_decode_file(const char *path)
     p.S = V34_S3429; p.R = 33600; p.conv_nb_states = 16; p.use_high_carrier = 1; p.calling = 0;
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     rx.S = p.S; rx.use_high_carrier = 1;
+    rx.put_bit = stream_put_bit; rx.opaque = 0;
+    { char *db = getenv("SIPFAX_DATABITS"); if (db) g_databitf = fopen(db, "w"); }
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }
     cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
@@ -4055,6 +4158,11 @@ void V34_stream_decode_file(const char *path)
     while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
     fclose(f);
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
+    if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
+    fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",
+            g_databits, g_dataones, g_databits ? 100.0*g_dataones/g_databits : 0.0, rx.data_n);
+    fprintf(stderr, "[data] mean trellis metric = %.1f over %ld 4D symbols\n",
+            rx.data_mse_n ? rx.data_mse_acc/rx.data_mse_n : 0.0, rx.data_mse_n);
 }
 
 
@@ -4139,7 +4247,8 @@ void V34_dataloop_test(void)
     { extern void (*g_symtap)(int,int); g_symtap=dataloop_symsink;
       for(i=0;i<4000;i++) encode_mapping_frame(&tx);
       g_symtap=0; { extern FILE *gt_f; if(gt_f){fclose(gt_f);gt_f=0;} } }
-    fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d\n", R, g_txn, g_rxn);
+    fprintf(stderr,"[dataloop] R=%d tx_bits=%d rx_bits=%d  mean-metric=%.1f\n", R, g_txn, g_rxn,
+            rx.data_mse_n ? rx.data_mse_acc/rx.data_mse_n : 0.0);
     { FILE*ft=fopen("/tmp/dl_tx.txt","w"); for(i=0;i<g_txn;i++)fputc('0'+g_txb[i],ft); fclose(ft);
       FILE*fr=fopen("/tmp/dl_rx.txt","w"); for(i=0;i<g_rxn;i++)fputc('0'+g_rxb[i],fr); fclose(fr); }
     { int best=-1,bestlag=0,lag;

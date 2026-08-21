@@ -215,6 +215,7 @@ typedef struct V34DSPState {
     double data_th, data_frq, data_meanc2;            /* SIPFAX: DD carrier loop */
     int rx_precode;                                  /* SIPFAX: invert 9.6.2 precoding */
     short peer_h[6];   /* SIPFAX: precoder coefficients the PEER asked OUR tx to use */
+    double data_agc;   /* SIPFAX: decision-directed data-mode gain */
     int rx_j16;      /* SIPFAX: caller's J requested 16-point Phase 4 from US (0x0D91) */
     int jvar_wait, jvar_phase, jvar_c4, jvar_c16;  /* SIPFAX: J-variant vote in progress */
     int p4_key, p4_keyn, p4_mp_crcok, p4_trellis;

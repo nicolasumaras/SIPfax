@@ -3375,6 +3375,16 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                         acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
                              + (double)s->constellation[ci][1]*s->constellation[ci][1];
                     s->data_pw_target = (s->L > 0 ? acc / s->L : 30.0) * (128.0*128.0);
+                    /* SIPFAX: that is the UNIFORM average over the constellation, but the
+                       shell mapper is a SHAPING code - it uses inner points far more
+                       often, so the transmitted mean power is much lower. Measured on the
+                       encoder's own output at R=16800: mean |c|^2 = 24.3 against the
+                       uniform 122.3, so the receive gain was sqrt(122.3/24.3) = 2.24x too
+                       big and every symbol landed well outside its true point. That alone
+                       accounts for the metric sitting at 175 on a PERFECT signal.
+                       SIPFAX_DATA_PW overrides while the shaped mean is derived properly. */
+                    { char *e6 = getenv("SIPFAX_DATA_PW");
+                      if (e6) s->data_pw_target = atof(e6); }
                 }
                 s->phase_4d = 0; s->sync_count = 0; s->half_data_frame_count = 0;
                 s->phase_mse = 0; s->phase_mse_cnt = 0;
@@ -3398,7 +3408,18 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 double gc, ct2, st2, xi, xq, di, dq, pe, nrm2;
                 if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 8e-3;
                               char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 2e-4; }
-                gc = sqrt(s->data_meanc2 / s->rx16_rms);        /* -> lattice coordinates */
+                /* SIPFAX: DECISION-DIRECTED AGC. The open-loop gain used the UNIFORM
+                   mean over the constellation, but the shell mapper is a shaping code
+                   that favours inner points: measured on the encoder's own output at
+                   R=16800 the transmitted mean |c|^2 is 24.3 against the uniform 122.3,
+                   so the gain was sqrt(122.3/24.3) = 2.24x too big and every symbol
+                   landed outside its true point (verified against encoder ground truth:
+                   correlation 0.999 but gain 2.244). The shaped mean is not something
+                   the receiver can know a priori, so track it: when the gain is too big
+                   the nearest point sits inside the received sample, |d| < |y|, and the
+                   loop pulls down. SIPFAX_DATA_AGC=0 restores the open-loop gain. */
+                if (s->data_agc <= 0) s->data_agc = sqrt(s->data_meanc2 / s->rx16_rms);
+                gc = s->data_agc;
                 ct2 = cos(-s->data_th); st2 = sin(-s->data_th);
                 xi = (oi*ct2 - oq*st2) * gc;
                 xq = (oi*st2 + oq*ct2) * gc;
@@ -3412,8 +3433,35 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     s->data_frq += ki*pe;
                     s->data_th  += s->data_frq + kp*pe;
                 }
+                {   static double mu_agc = -1;
+                    if (mu_agc < 0) { char *e7 = getenv("SIPFAX_DATA_AGC");
+                                      mu_agc = e7 ? atof(e7) : 0.0;   /* OFF: needs correct phase first */ }
+                    if (mu_agc > 0 && nrm2 > 0) {
+                        double ay = sqrt(xi*xi + xq*xq), ad = sqrt(nrm2);
+                        if (ay > 1e-6) s->data_agc *= (1.0 + mu_agc*(ad/ay - 1.0));
+                    }
+                }
                 s->data_n++;
-                baseband_decode_impl(s, (int)lrint(xi*128.0), (int)lrint(xq*128.0));
+                {   /* SIPFAX: the decoder pairs consecutive symbols into 4D symbols and
+                       groups 8 into a mapping frame, but nothing aligns that grouping at
+                       data-mode entry - we start feeding at whatever symbol we happen to
+                       be on. SIPFAX_DATA_SKIP drops N symbols first so the alignment can
+                       be swept. */
+                    static int skip = -1;
+                    if (skip < 0) { char *e4 = getenv("SIPFAX_DATA_SKIP"); skip = e4 ? atoi(e4) : 0; }
+                    if (skip > 0) { skip--; }
+                    else {
+                        int si2 = (int)lrint(xi*128.0), sq2 = (int)lrint(xq*128.0);
+                        {   /* SIPFAX: dump what the receiver actually hands the decoder,
+                               so it can be diffed against the encoder ground truth. */
+                            static FILE *df = 0; static int op = 0;
+                            if (!op) { char *e5 = getenv("SIPFAX_DATASYM"); op = 1;
+                                       if (e5) df = fopen(e5, "w"); }
+                            if (df) fprintf(df, "%d %d\n", si2, sq2);
+                        }
+                        baseband_decode_impl(s, si2, sq2);
+                    }
+                }
                 { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
                     fprintf(stderr, "[data] %ld syms, metric %.1f, freq %.2e rad/sym\n",
                             s->data_n, s->data_mse_n ? s->data_mse_acc/s->data_mse_n : 0.0,
@@ -4249,7 +4297,7 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
    serial_put_bit (lm.c), but V34_stream_decode_file had no sink at all, so the first
    decoded bit jumped through a NULL pointer. Counting them here is also how the
    data-mode receive chain gets validated against a captured call. */
-static long g_databits = 0, g_dataones = 0;
+static long g_databits = 0, g_dataones = 0, g_force_at = 0;
 static FILE *g_databitf = 0;
 static void stream_put_bit(void *o, int b)
 {
@@ -4266,12 +4314,39 @@ void V34_stream_decode_file(const char *path)
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     rx.S = p.S; rx.use_high_carrier = 1;
     rx.put_bit = stream_put_bit; rx.opaque = 0;
+    {   /* SIPFAX: SIPFAX_FORCE_DATA=<rate> skips the handshake and drops the receiver
+           straight into data mode, so a known-good modulated signal can be fed through
+           the real receive chain and scored with the same trellis metric. */
+        char *fd = getenv("SIPFAX_FORCE_DATA");
+        if (fd) {
+            rx.p4_mp_rx = 1; rx.p4_mp_rate_ca = atoi(fd) / 2400;
+            rx.p4_trellis = 2; rx.p4_e_rx = 1;
+            /* let the CMA acquire timing and taps normally - forcing cma_phase=2 would
+               skip acquisition and test nothing but the decoder. SIPFAX_FORCE_DATA_AT
+               defers the data-mode switch by N seconds so the file can carry 4-point TRN
+               first (which CMA CAN acquire) and data after, mirroring the real receiver. */
+            { char *hard = getenv("SIPFAX_FORCE_HARD");
+              if (hard && atoi(hard)) { rx.srx_locked = 1; rx.p4_mode = 2; rx.cma_phase = 2; } }
+            { char *at = getenv("SIPFAX_FORCE_DATA_AT");
+              if (at) { rx.p4_e_rx = 0; g_force_at = (long)(atof(at)*8000.0);
+                        fprintf(stderr, "[stream] data mode deferred to t=%.2fs\n", atof(at)); } }
+            fprintf(stderr, "[stream] FORCE_DATA: entering data mode at R=%d\n", atoi(fd));
+        }
+    }
     { char *db = getenv("SIPFAX_DATABITS"); if (db) g_databitf = fopen(db, "w"); }
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }
     cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
-    while ((n = fread(buf, 2, 512, f)) > 0) V34_demod_cma(&rx, buf, n);
+    { long fed = 0;
+      while ((n = fread(buf, 2, 512, f)) > 0) {
+          if (g_force_at > 0 && fed >= g_force_at && !rx.p4_e_rx) {
+              rx.p4_e_rx = 1;
+              fprintf(stderr, "[stream] switching to data mode at t=%.2fs (cma_phase=%d)\n",
+                      fed/8000.0, rx.cma_phase);
+          }
+          V34_demod_cma(&rx, buf, n); fed += n;
+      } }
     fclose(f);
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
@@ -4321,9 +4396,19 @@ static double dl_gauss(void)
     if (u1 < 1e-12) u1 = 1e-12;
     return sqrt(-2.0*log(u1))*cos(2*M_PI*u2);
 }
+static FILE *g_symdumpf = 0;
 static void dataloop_symsink(int si, int sq)
 {
     extern void baseband_decode_pub(V34DSPState*,int,int);
+    {   /* SIPFAX: dump the true data-mode symbols so the FULL chain can be closed
+           offline: encoder -> these symbols -> modulate to 8 kHz audio -> our own
+           receiver -> trellis metric. That isolates the receive chain from the caller's
+           signal, which no measurement so far has done. */
+        static int opened = 0;
+        if (!opened) { char *e = getenv("SIPFAX_SYMDUMP"); opened = 1;
+                       if (e) g_symdumpf = fopen(e, "w"); }
+        if (g_symdumpf) fprintf(g_symdumpf, "%d %d\n", si, sq);
+    }
     if (dl_scale < 0) {
         char *e = getenv("SIPFAX_DL_SCALE"); dl_scale = e ? atof(e) : 1.0;   /* put_sym already carries *128 */
         e = getenv("SIPFAX_DL_SNR");

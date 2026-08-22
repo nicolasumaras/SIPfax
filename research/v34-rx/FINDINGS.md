@@ -1939,3 +1939,91 @@ coincidence matching CMA's Godard radius to two figures - made the whole edifice
 well-evidenced. It was self-consistent because a tone is a very simple signal, not because
 the analysis was sound. One `rms + dominant tone` pass per second of input, run first, would
 have cost a minute.
+
+## 40. Where the phase is lost: not in the front end
+
+Following §39, the live receive chain was bisected against real ground truth. `V34_datagen_test`
+(`SIPFAX_GEN_DATA`) generates data-mode AUDIO from our own encoder — 4-point Phase 4 first so
+CMA can acquire, then a switch to `V34_DATA` — with a passive transmit-symbol tap for ground
+truth and `SIPFAX_GEN_LEVEL` for the level.
+
+Two harness bugs first, both mine:
+
+* **`SIPFAX_FORCE_DATA` takes a RATE.** It was being passed `=1`, giving `rate_ca = 1/2400 = 0`
+  and garbage frame parameters. Reported earlier as "needs different flags"; it needed a
+  correct argument.
+* **The generator clipped.** `tx_amp = CALC_AMP(S_POWER) = 11585` and `tx_buf = (si*tx_amp)>>7`,
+  so lattice coordinate 1 alone reaches 11585 against a real line at rms 1714. Data mode ran at
+  rms 17152 with the peak pinned at 32767 on every block. Clipping is a non-linearity that
+  scrambles phase while preserving amplitude and hits large excursions hardest — i.e. it
+  manufactures the exact symptom under investigation. Fixed; **and the failure survived the
+  fix unchanged** (0.458 → 0.458), so clipping was not the cause.
+
+### The measurement that reframes everything
+
+The `V34_dataloop_test` "100% bit match" — cited throughout §32–§39 as proof the receiver was
+healthy — installs `g_symtap`, and that hook **returns before reaching the modulator**
+(`v34.c:1070`). It never calls `V34_mod` or `V34_demod_cma`. It validates encoder→decoder and
+nothing else. **The live audio path had never been tested.** Every "our own signal resolves but
+the caller's does not" comparison set a symbol-level result against an audio-level one.
+
+Through the live path, on a valid unclipped signal:
+
+| signal | lattice-rms | metric | ones |
+|---|---|---|---|
+| ours, R=9600 | 0.458 | 175.7 | 50.2% |
+| ours, R=16800 | 0.565 | 178.0 | 49.8% |
+| the caller's | 0.573 | ~173 | — |
+
+**Our own signal fails the same way as the caller's.** The caller's signal was never the anomaly.
+
+### Bisection: everything in the front end is exonerated
+
+Against ground truth, alignment is *exact and stable* — best lag constant at 21335 across 14000
+symbols (neighbouring lags score 0.007 against 0.68). Magnitudes correlate 0.66; since `|c|`
+here is binary (√2 or √10), that means the correct **ring** ~83% of the time. Phase is random:
+stdev 96°, block means flat within ±20°.
+
+| tested | result |
+|---|---|
+| symbol timing | clean parabola, minimum at offset 0 (0.464; ±1.2 samples → 0.575) |
+| equaliser | replacing with a delta makes it **worse** (0.464 → 0.571); discarded taps `\|w\|² = 0.977` |
+| resampler | pinned to exactly 7/6 (the original integer grid) → 0.464 vs 0.458 |
+| carrier tracking | riding tracked `srx_th` instead of static `data_th` → no change |
+| per-symbol rotation | searched 8000 rates, best residual 0.977 |
+| linear ISI | FIR fit from ground truth, 1→15 taps: residual 0.982 → 0.974 |
+| symbol slips | none — lag exactly constant over 14000 symbols |
+
+**No linear relationship of any length exists between transmitted and received symbols**, so no
+equaliser can fix this, and the impairment is not linear.
+
+### The transmitted symbols are verified correct
+
+From the ground-truth tap, data-mode symbols: **12 distinct points, mean |c|² = 5.621** (against
+`v34_shaped_meanc2`'s 5.62), **100% on the odd-integer lattice**, radii 1.414 ×5474 and 3.162
+×4526 — inner ring **54.7%** against the 54.75% predicted for a correctly shaped L=12 set. The
+mapper is right.
+
+### What this leaves
+
+An **independent reference demodulator** written from scratch (downconvert at 1959.184 Hz, RRC
+β=0.15 matched filter, symbol sampling with a timing sweep, gain fixed by power match) was run
+on the same audio:
+
+    our own generated 9600  : lattice-rms 0.426   (C receiver: 0.453)
+    the caller, real modem  : lattice-rms 0.568   (C receiver: 0.573)
+
+Two implementations sharing no code agree to within 0.03 on both signals. That exonerates the C
+front end — and note the reference demod **also fails on the caller's real, valid V.34 signal**.
+
+A textbook QAM demodulator should at least partially resolve a valid V.34 data signal. It does
+not. The wrong assumption is therefore in what *both* demodulators share — the signal model:
+carrier 1959.184 Hz, 3428.571 baud, RRC β=0.15 matched filter, and the mapping from symbol
+instants onto the 8 kHz grid. Something in V.34's data-mode signal format differs from that
+generic model, and every receiver-side fix attempted in §37–§39 was downstream of the error.
+
+**Next**: verify the transmit pulse shaping and any pre-emphasis V34_mod applies (V.34 selects
+one of several pre-emphasis characteristics during Phase 2), and confirm the receiver's matched
+filter is the true conjugate of it. The generator plus ground-truth tap now make that directly
+measurable: encode a KNOWN single symbol, look at the audio it produces, and compare with what
+the matched filter expects.

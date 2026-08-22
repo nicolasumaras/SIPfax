@@ -537,6 +537,10 @@ int main(int argc, char **argv)
         if (dc) { extern void V34_datacfg_dump(void); V34_datacfg_dump(); return 0; }
     }
     {
+        char *gd = getenv("SIPFAX_GEN_DATA");
+        if (gd) { extern void V34_datagen_test(const char *); V34_datagen_test(gd); return 0; }
+    }
+    {
         char *dl = getenv("SIPFAX_DATALOOP");
         if (dl) { extern void V34_dataloop_test(void); V34_dataloop_test(); return 0; }
     }

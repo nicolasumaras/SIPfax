@@ -3122,6 +3122,54 @@ static double v34_shaped_meanc2(int R, int nb_states)
     return shp_n ? shp_acc / (double)shp_n / (128.0*128.0) : 0.0;
 }
 
+/* SIPFAX: generate REAL data-mode AUDIO from our own encoder, so the live receive chain
+   can be scored against a signal we know is a valid V.34 data signal.
+
+   This gap needed closing. The dataloop harness that reports "100% bit match" installs
+   g_symtap and hands the receiver SYMBOLS directly - it never runs V34_mod or
+   V34_demod_cma at all. So the live audio path has never once been validated end to end,
+   and every conclusion of the form "our receiver resolves our own signal but not the
+   caller's" rested on a test that skipped the receiver being blamed.
+
+   The file starts with 4-point Phase-4 material, which CMA can acquire, and then switches
+   to data - mirroring a real call, and letting SIPFAX_FORCE_DATA_AT line the receiver's
+   switch up with the transmitter's. */
+void V34_datagen_test(const char *path)
+{
+    V34State p; static V34DSPState tx; s16 out[512]; FILE *f; int b, nb4, nball;
+    int R = 9600, trel = 64; double p4s = 4.0, total = 16.0;
+    char *e;
+    e = getenv("SIPFAX_GEN_R");    if (e) R = atoi(e);
+    e = getenv("SIPFAX_GEN_P4S");  if (e) p4s = atof(e);
+    e = getenv("SIPFAX_GEN_SEC");  if (e) total = atof(e);
+    e = getenv("SIPFAX_GEN_TREL"); if (e) trel = atoi(e);
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = R; p.conv_nb_states = trel;
+    p.use_high_carrier = 1; p.calling = 0;
+    V34_static_init(); { extern void dsp_init(void); dsp_init(); }
+    memset(&tx, 0, sizeof(tx));
+    V34_mod_init(&tx, &p);
+    tx.get_bit = enc_get_bit; tx.opaque = 0;
+    tx.J_received = 1; tx.is_16states = 0; tx.mp_16point = 0;
+    tx.state = V34_STARTUP4_S;
+    nb4   = (int)(p4s   * 8000 / 512);
+    nball = (int)(total * 8000 / 512);
+    f = fopen(path, "wb");
+    if (!f) { perror(path); return; }
+    fprintf(stderr, "[gen] R=%d trellis=%d : %.1fs of 4-point Phase 4, then DATA to %.1fs -> %s\n",
+            R, trel, p4s, total, path);
+    for (b = 0; b < nball; b++) {
+        if (b == nb4) {
+            tx.state = V34_DATA;
+            fprintf(stderr, "[gen] switching to DATA at t=%.2f s\n", b*512/8000.0);
+        }
+        V34_mod(&tx, out, 512);
+        fwrite(out, 2, 512, f);
+    }
+    fclose(f);
+    fprintf(stderr, "[gen] wrote %.1f s\n", nball*512/8000.0);
+}
+
 void V34_encode_test(const char *path)
 {
     extern int v34_dbg; extern long v34_ntrn, v34_nj;

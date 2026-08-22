@@ -1061,12 +1061,18 @@ static void encode_mapping_frame(V34DSPState *s)
 /* put a new baseband symbol in the tx queue */
 void (*g_symtap)(int, int) = 0;
 FILE *gt_f = 0;
+/* SIPFAX: a PASSIVE transmit-symbol tap. g_symtap below RETURNS after calling the hook, so
+   installing it bypasses the modulator entirely - which is exactly why the "100% bit match"
+   loopback never exercised V34_mod or V34_demod_cma. This one only records and lets the
+   symbol continue to the modulator, so real audio can be generated WITH ground truth. */
+FILE *g_txsymf = 0;
 /* SIPFAX: measurement tap - see v34_shaped_meanc2() */
 static double shp_acc; static long shp_n; static int shp_on;
 
 static void put_sym(V34DSPState *s, int si, int sq)
 {
     if (shp_on) { shp_acc += (double)si*si + (double)sq*sq; shp_n++; return; }
+    if (g_txsymf) fprintf(g_txsymf, "%d %d\n", si, sq);
     if (g_symtap) { g_symtap(si, sq); return; }
     s->tx_buf[s->tx_buf_ptr][0] = (si * s->tx_amp) >> 7;
     s->tx_buf[s->tx_buf_ptr][1] = (sq * s->tx_amp) >> 7;
@@ -3138,11 +3144,13 @@ void V34_datagen_test(const char *path)
 {
     V34State p; static V34DSPState tx; s16 out[512]; FILE *f; int b, nb4, nball;
     int R = 9600, trel = 64; double p4s = 4.0, total = 16.0;
+    double lvl = 10.0, acc = 0, pk = 0; long nac = 0;
     char *e;
     e = getenv("SIPFAX_GEN_R");    if (e) R = atoi(e);
     e = getenv("SIPFAX_GEN_P4S");  if (e) p4s = atof(e);
     e = getenv("SIPFAX_GEN_SEC");  if (e) total = atof(e);
     e = getenv("SIPFAX_GEN_TREL"); if (e) trel = atoi(e);
+    e = getenv("SIPFAX_GEN_LEVEL"); if (e) lvl = atof(e);
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = R; p.conv_nb_states = trel;
     p.use_high_carrier = 1; p.calling = 0;
@@ -3154,6 +3162,9 @@ void V34_datagen_test(const char *path)
     tx.state = V34_STARTUP4_S;
     nb4   = (int)(p4s   * 8000 / 512);
     nball = (int)(total * 8000 / 512);
+    { extern FILE *g_txsymf; char *ge = getenv("SIPFAX_GEN_GT");
+      if (ge) { g_txsymf = fopen(ge, "w");
+                fprintf(stderr, "[gen] transmit-symbol ground truth -> %s\n", ge); } }
     f = fopen(path, "wb");
     if (!f) { perror(path); return; }
     fprintf(stderr, "[gen] R=%d trellis=%d : %.1fs of 4-point Phase 4, then DATA to %.1fs -> %s\n",
@@ -3163,11 +3174,33 @@ void V34_datagen_test(const char *path)
             tx.state = V34_DATA;
             fprintf(stderr, "[gen] switching to DATA at t=%.2f s\n", b*512/8000.0);
         }
+        int k;
         V34_mod(&tx, out, 512);
+        /* SIPFAX: SCALE DOWN. tx_amp is CALC_AMP(S_POWER) = 11585 and tx_buf is
+           (si*tx_amp)>>7, so lattice coordinate 1 alone already reaches 11585 - against a
+           real line signal measured at rms 1714. Unscaled, the generated data mode ran at
+           rms 17152 with the peak pinned at 32767 on every block: continuous clipping.
+           That matters more than tidiness, because clipping is a NON-LINEARITY - it
+           scrambles symbol phase while roughly preserving the amplitude distribution, and
+           it hits large excursions hardest. A ground-truth test fed with a clipped signal
+           measures the clipping, not the receiver, and reproduces exactly the
+           amplitude-dependent phase error we were chasing. */
+        for (k = 0; k < 512; k++) {
+            double v = out[k] / lvl;
+            if (v >  32000) v =  32000;
+            if (v < -32000) v = -32000;
+            out[k] = (s16)lrint(v);
+            acc += v*v; nac++;
+            if (fabs(v) > pk) pk = fabs(v);
+        }
         fwrite(out, 2, 512, f);
     }
     fclose(f);
-    fprintf(stderr, "[gen] wrote %.1f s\n", nball*512/8000.0);
+    { extern FILE *g_txsymf; if (g_txsymf) { fclose(g_txsymf); g_txsymf = 0; } }
+    fprintf(stderr, "[gen] wrote %.1f s at level/%.1f: rms %.0f peak %.0f"
+            "  (a real line measures rms ~1714 peak ~4600)\n",
+            nball*512/8000.0, lvl, nac ? sqrt(acc/nac) : 0.0, pk);
+    if (pk > 31000) fprintf(stderr, "[gen] WARNING: still clipping - raise SIPFAX_GEN_LEVEL\n");
 }
 
 void V34_encode_test(const char *path)

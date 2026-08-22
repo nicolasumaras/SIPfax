@@ -3495,6 +3495,29 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
                 R = (their_ca < our_ca ? their_ca : our_ca) * 2400;
                 s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
+                {   /* SIPFAX: does the caller precode even though our MP advertises
+                       h = 0,0,0? Two comments in this file disagree about that, and it is
+                       the one mechanism that fits the measured symptom exactly - correct
+                       amplitude statistics with NO lattice structure at any rotation,
+                       because Tomlinson-Harashima output is not lattice-valued until the
+                       receiver applies the modulo inverse. The coefficients to invert with
+                       are the ones the caller ADVERTISED (peer_h, decoded from its MP);
+                       the 9.6.2 inverse at decode_mapping_frame reads s->h, so load them
+                       there. SIPFAX_RX_PRECODE=1 to try it. */
+                    char *ep = getenv("SIPFAX_RX_PRECODE");
+                    if (ep && atoi(ep)) {
+                        int hi5, hj5;
+                        for (hi5 = 0; hi5 < 3; hi5++)
+                            for (hj5 = 0; hj5 < 2; hj5++)
+                                s->h[hi5][hj5] = s->peer_h[hi5*2+hj5];
+                        s->rx_precode = 1;
+                        fprintf(stderr, "[data] RX precoder inverse ON, peer h = "
+                                "%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj\n",
+                                s->h[0][0]/16384.0, s->h[0][1]/16384.0,
+                                s->h[1][0]/16384.0, s->h[1][1]/16384.0,
+                                s->h[2][0]/16384.0, s->h[2][1]/16384.0);
+                    }
+                }
                 v34_rx_data_params(s, R);
                 {   /* mean |c|^2 of the negotiated constellation, in lattice units.
                        SIPFAX: s->L is the size of the FULL constellation, but
@@ -3796,6 +3819,92 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                         nw > 10 ? " (first 10)" : "", cnt ? tot/cnt : 0.0);
                             }
                         }
+                        {   /* SIPFAX: test Tomlinson-Harashima inversion AT THE SYMBOL
+                               LEVEL. The inverse in decode_mapping_frame is downstream of
+                               this buffer, so it can never move lattice-rms - a test with
+                               it enabled returned bit-identical numbers, which proved
+                               nothing. THP transmits x(n) = d(n) - SUM h_k x(n-k) (mod),
+                               so the receiver recovers d(n) = y(n) + SUM h_k y(n-k) (mod).
+                               That is a plain FIR over received symbols and can be applied
+                               right here. Both signs, since the convention is what is in
+                               doubt. peer_h is only trustworthy from a CRC-clean MP. */
+                            double hr[3], hi4[3]; int hk, sgn;
+                            for (hk = 0; hk < 3; hk++) {
+                                hr[hk]  = s->peer_h[hk*2]   / 16384.0;
+                                hi4[hk] = s->peer_h[hk*2+1] / 16384.0;
+                            }
+                            if (hr[0] || hi4[0] || hr[1] || hi4[1]) {
+                                for (sgn = -1; sgn <= 1; sgn += 2) {
+                                    static double ti[2048], tq[2048];
+                                    double be4 = 1e30, bp4 = 0, t4;
+                                    int j4, n4 = s->data_acq_n > 2048 ? 2048 : s->data_acq_n;
+                                    for (j4 = 0; j4 < n4; j4++) {
+                                        double ai = s->data_acq_i[j4], aq = s->data_acq_q[j4];
+                                        for (hk = 0; hk < 3; hk++) {
+                                            int idx = j4 - 1 - hk;
+                                            if (idx < 0) break;
+                                            ai += sgn*(hr[hk]*s->data_acq_i[idx]
+                                                       - hi4[hk]*s->data_acq_q[idx]);
+                                            aq += sgn*(hr[hk]*s->data_acq_q[idx]
+                                                       + hi4[hk]*s->data_acq_i[idx]);
+                                        }
+                                        ti[j4] = ai; tq[j4] = aq;
+                                    }
+                                    for (t4 = 0; t4 < 90.0; t4 += 0.25) {
+                                        double e4 = data_lattice_rms(ti, tq, n4, bg,
+                                                        cos(-t4*M_PI/180.0), sin(-t4*M_PI/180.0));
+                                        if (e4 < be4) { be4 = e4; bp4 = t4; }
+                                    }
+                                    fprintf(stderr, "[data] THP inverse sign %+d: "
+                                            "lattice-rms %.3f @ %.2f deg\n", sgn, be4, bp4);
+                                }
+                            } else {
+                                fprintf(stderr, "[data] THP inverse: peer_h is zero"
+                                        " (no CRC-clean MP) - not tested\n");
+                            }
+                        }
+                        {   /* SIPFAX: the peer's CRC-clean MP sets nonlin=1 (9.7). The
+                               non-linear encoder warps each point RADIALLY by
+                               theta = 1 + zeta/6 + zeta^2/120 with zeta from |x|^2, which
+                               moves symbols off the odd-integer lattice while leaving the
+                               amplitude distribution smoothly intact - the exact signature
+                               measured here (kurtosis 1.594, no angular structure at any
+                               rotation, rate, shaping or THP inversion). linmodem's own
+                               encoder stubs the warp out (dzeta hardcoded 0.3125), so the
+                               normalisation is not trustworthy from this source. Sweep the
+                               warp parameter instead of guessing it: if some value
+                               collapses the score, warping is confirmed AND measured; if
+                               nothing does, it is refuted. a=0 is the unwarped baseline. */
+                            double aa, bestA = 0, bestE = 1e30, bestP = 0, mr2 = 0;
+                            int j6, n6 = s->data_acq_n > 2048 ? 2048 : s->data_acq_n;
+                            static double wi6[2048], wq6[2048];
+                            for (j6 = 0; j6 < n6; j6++)
+                                mr2 += (s->data_acq_i[j6]*s->data_acq_i[j6]
+                                      + s->data_acq_q[j6]*s->data_acq_q[j6]);
+                            mr2 = mr2 / (n6 > 0 ? n6 : 1);
+                            fprintf(stderr, "[data] non-linear warp sweep (peer nonlin=%d):\n",
+                                    s->peer_nonlin);
+                            for (aa = -0.60; aa <= 0.601; aa += 0.05) {
+                                double e6 = 1e30, t6;
+                                for (j6 = 0; j6 < n6; j6++) {
+                                    double xi6 = s->data_acq_i[j6], xq6 = s->data_acq_q[j6];
+                                    double z = (mr2 > 0) ? (xi6*xi6 + xq6*xq6)/mr2 : 0.0;
+                                    double th = 1.0 + aa*z/6.0 + (aa*z)*(aa*z)/120.0;
+                                    if (th < 0.05) th = 0.05;
+                                    wi6[j6] = xi6/th; wq6[j6] = xq6/th;
+                                }
+                                for (t6 = 0; t6 < 90.0; t6 += 0.5) {
+                                    double v = data_lattice_rms(wi6, wq6, n6, bg,
+                                                   cos(-t6*M_PI/180.0), sin(-t6*M_PI/180.0));
+                                    if (v < e6) { e6 = v; if (v < bestE) { bestE = v; bestA = aa; bestP = t6; } }
+                                }
+                                if (fabs(aa) < 1e-9 || fabs(aa+0.30) < 1e-9 || fabs(aa-0.30) < 1e-9
+                                    || fabs(aa+0.60) < 1e-9 || fabs(aa-0.60) < 1e-9)
+                                    fprintf(stderr, "[data]   a=%+.2f -> %.3f\n", aa, e6);
+                            }
+                            fprintf(stderr, "[data]   BEST a=%+.2f -> lattice-rms %.3f @ %.1f deg\n",
+                                    bestA, bestE, bestP);
+                        }
                             fprintf(stderr, "[data] amplitude kurtosis %.3f "
                                     "(1.00=constant envelope, 1.50=resolved L=12, 2.00=blob)\n",
                                     s2 > 0 ? s4/(s2*s2) : 0.0);
@@ -3951,7 +4060,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                               : (kb == 2) ? (q16 & 1) : ((q16 >> 1) & 1);
                 int xb = yb ^ ((s->p4_ybits >> 17) & 1) ^ ((s->p4_ybits >> 22) & 1);
                 s->p4_ybits = ((s->p4_ybits << 1) | (unsigned int)yb) & 0x7fffff;
-                s->p4_ring[s->p4_rn & 4095] = (u8)xb; s->p4_rn++;
+                s->p4_ring[s->p4_rn & P4_RING_MASK] = (u8)xb; s->p4_rn++;
                 if (p4bitf) fputc('0'+xb, p4bitf);
                 if (xb) { if (++s->p4_ones_run >= 19 && s->p4_mp_rx && !s->p4_e_rx) {
                             s->p4_e_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn); } } }
@@ -3960,13 +4069,21 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     int Ls[2] = { 88, 188 }, li;
                     s->p4_try = 0;
                     for (li = 0; li < 2; li++) {
-                        int L = Ls[li], per = 8, avail = s->p4_rn > 4096 ? 4096 : s->p4_rn;
+                        /* SIPFAX: fold as deeply as the ring allows (was a fixed 8).
+                            Each doubling of the repetition count roughly halves the
+                            majority-vote error rate, and a CRC-clean frame is what
+                            carries the peer's precoder coefficients. */
+                        int L = Ls[li], per, avail = s->p4_rn > P4_RING_SZ ? P4_RING_SZ : s->p4_rn;
+                        { static int pcap = -1;
+                          if (pcap < 0) { char *e = getenv("SIPFAX_MP_FOLD"); pcap = e ? atoi(e) : 64; }
+                          per = avail / L; if (per > pcap) per = pcap; if (per < 3) per = 3; }
                         int start2, i2, run, st;
                         static u8 maj[188]; static int votes[188];
                         if (avail < per*L) { if (avail/L >= 3) per = avail/L; else continue; }
+                        if (per*L > P4_RING_SZ) per = P4_RING_SZ / L;
                         start2 = s->p4_rn - per*L;
                         for (i2 = 0; i2 < L; i2++) votes[i2] = 0;
-                        for (i2 = 0; i2 < per*L; i2++) votes[i2 % L] += s->p4_ring[(start2 + i2) & 4095];
+                        for (i2 = 0; i2 < per*L; i2++) votes[i2 % L] += s->p4_ring[(start2 + i2) & P4_RING_MASK];
                         for (i2 = 0; i2 < L; i2++) maj[i2] = (votes[i2]*2 >= per);
                         run = 0; st = -1;
                         for (i2 = 0; i2 < 2*L; i2++) {
@@ -3997,7 +4114,43 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                 int trel = (f[29]<<1) | f[30];
                                 int consensus = (key == s->p4_key);
                                 s->p4_keyn = consensus ? s->p4_keyn+1 : 1; s->p4_key = key;
-                                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d type=%d ca=%d ac=%d trel=%d ack=%d crc=%s cons=%d\n", L, type, rate_ca*2400, rate_ac*2400, trel, ackb, ok?"OK":"fail", s->p4_keyn); }
+                                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d type=%d ca=%d ac=%d trel=%d ack=%d nonlin=%d shape=%d crc=%s cons=%d\n", L, type, rate_ca*2400, rate_ac*2400, trel, ackb, f[31], f[32], ok?"OK":"fail", s->p4_keyn); }
+                                /* SIPFAX: bit 31 is the NON-LINEAR ENCODER request (9.7)
+                                   and nothing has ever read it. If the peer sets it, its
+                                   transmitter warps each point radially by
+                                   theta = 1 + zeta/6 + zeta^2/120 with zeta from |x|^2 -
+                                   which moves symbols OFF the odd-integer lattice while
+                                   leaving the amplitude distribution smoothly intact.
+                                   That is exactly the signature measured here: kurtosis
+                                   1.594 (real amplitude structure) with no angular
+                                   structure at any rotation, rate, shaping or THP
+                                   inversion. Note linmodem's own encoder stubs this out -
+                                   dzeta is hardcoded to 0.3125 with the real formula
+                                   commented out - so we neither apply it nor invert it. */
+                                if (ok) s->peer_nonlin = f[31];
+                                if (ok && type == 1) {
+                                    /* SIPFAX: the fold decoder never read the peer's
+                                       precoder coefficients, so peer_h stayed zero even
+                                       on calls where MP decoded fine - which read as "the
+                                       caller advertises h=0" when it actually meant "we
+                                       never looked". Only trust them from a CRC-clean
+                                       frame; a consensus frame has known bit errors and
+                                       these 96 bits are not covered by the head-field
+                                       agreement. Offsets 52/69/86/103/120/137, LSB-first. */
+                                    static const int hof[6] = { 52, 69, 86, 103, 120, 137 };
+                                    int hx, hb;
+                                    for (hx = 0; hx < 6; hx++) {
+                                        int v = 0;
+                                        for (hb = 0; hb < 16; hb++) v |= ((int)f[hof[hx]+hb]) << hb;
+                                        s->peer_h[hx] = (short)v;
+                                    }
+                                    { extern int v34_dbg; if (v34_dbg)
+                                        fprintf(stderr, "[p4] peer precoder h = %.4f%+.4fj "
+                                                "%.4f%+.4fj %.4f%+.4fj\n",
+                                                s->peer_h[0]/16384.0, s->peer_h[1]/16384.0,
+                                                s->peer_h[2]/16384.0, s->peer_h[3]/16384.0,
+                                                s->peer_h[4]/16384.0, s->peer_h[5]/16384.0); }
+                                }
                                 if (ok || s->p4_keyn >= 2) {
                                     s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = msk;
                                     s->p4_trellis = trel; s->p4_mp_crcok = ok;

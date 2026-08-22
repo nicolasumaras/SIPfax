@@ -222,7 +222,16 @@ typedef struct V34DSPState {
     int rx_j16;      /* SIPFAX: caller's J requested 16-point Phase 4 from US (0x0D91) */
     int jvar_wait, jvar_phase, jvar_c4, jvar_c16;  /* SIPFAX: J-variant vote in progress */
     int p4_key, p4_keyn, p4_mp_crcok, p4_trellis;
-    u8 p4_ring[4096]; int p4_rn; int p4_try;
+    /* SIPFAX: MP fold ring. Was 4096 bits, which at L=188 allowed a majority vote over
+       only 8 repetitions - not enough to get a CRC-clean frame through the hybrid-echo
+       BER on a real line, so MP was accepted on "consensus of the reliable head fields"
+       instead and the PRECODER COEFFICIENTS, which the fold path does not even read, were
+       never recovered. MP repeats continuously through Phase 4, so more repetitions cost
+       nothing but memory. */
+#define P4_RING_SZ 32768
+#define P4_RING_MASK (P4_RING_SZ - 1)
+    u8 p4_ring[P4_RING_SZ]; int p4_rn; int p4_try;
+    int peer_nonlin;   /* SIPFAX: MP bit 31 - peer requests the 9.7 non-linear encoder */
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;
     /* SIPFAX: tracked symbol clock for the LIVE receiver. The 7:6 resampler below used

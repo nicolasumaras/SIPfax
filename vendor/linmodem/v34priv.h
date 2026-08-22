@@ -225,6 +225,14 @@ typedef struct V34DSPState {
     u8 p4_ring[4096]; int p4_rn; int p4_try;
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;
+    /* SIPFAX: tracked symbol clock for the LIVE receiver. The 7:6 resampler below used
+       to be an exact integer grid (q=7m, ip=q/6) - rigid by construction and locked to
+       OUR sample counter, so it could not follow the far end's clock at all. cma_pos is
+       the position of the next T/2 output in input samples and cma_tinc the tracked rate
+       correction; cma_h* is the short post-matched-filter history the interpolator needs
+       once the grid is no longer integer. cma_g* hold Gardner's y(n-1/2) and y(n-1). */
+    double cma_pos, cma_tinc, cma_hi[8], cma_hq[8];
+    double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 
     int dbg_last; long dbg_n; int dbg_last2;

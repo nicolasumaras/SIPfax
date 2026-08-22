@@ -1060,8 +1060,12 @@ static void encode_mapping_frame(V34DSPState *s)
 /* put a new baseband symbol in the tx queue */
 void (*g_symtap)(int, int) = 0;
 FILE *gt_f = 0;
+/* SIPFAX: measurement tap - see v34_shaped_meanc2() */
+static double shp_acc; static long shp_n; static int shp_on;
+
 static void put_sym(V34DSPState *s, int si, int sq)
 {
+    if (shp_on) { shp_acc += (double)si*si + (double)sq*sq; shp_n++; return; }
     if (g_symtap) { g_symtap(si, sq); return; }
     s->tx_buf[s->tx_buf_ptr][0] = (si * s->tx_amp) >> 7;
     s->tx_buf[s->tx_buf_ptr][1] = (sq * s->tx_amp) >> 7;
@@ -3083,6 +3087,40 @@ void V34_decode_file(const char *path, int calling)
 
 /* ---- offline Phase-3 encode harness ---- */
 static int enc_get_bit(void *o){ return 1; }
+/* SIPFAX: the shell mapper is a SHAPING code - it picks inner constellation points far
+   more often than outer ones, so the mean |c|^2 actually transmitted is well below the
+   uniform average over the constellation (measured 24.3 against 122.3 at R=16800). The
+   receiver needs that shaped mean to set its gain, and it cannot be derived from the
+   constellation geometry alone.
+
+   Searching for the gain instead does NOT work, and the failure is not a tuning problem.
+   The only objective available to the receiver is distance to the odd-integer lattice,
+   and that is MINIMISED by collapsing every symbol onto the innermost ring - a collapsed
+   constellation genuinely does sit on the lattice. Measured: a flattering lattice-rms of
+   0.109 with 4 of 12 points used, all four rotations of the single point (1,1). An
+   anti-collapse power floor cannot rescue it either: at 0.25x the uniform mean the floor
+   sat ABOVE the true shaped mean and excluded the right answer, and at the corrected
+   value it sits BELOW |c|^2 = 2 and admits the collapse. There is no threshold between.
+
+   So remove the freedom rather than constrain it: run OUR OWN shell mapper at the
+   negotiated rate - the same code the peer is running - and measure what it emits. */
+static double v34_shaped_meanc2(int R, int nb_states)
+{
+    V34State p;
+    static V34DSPState tx;          /* static: far too big for the stack */
+    long i;
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = R; p.conv_nb_states = nb_states;
+    p.use_high_carrier = 1; p.calling = 0;
+    memset(&tx, 0, sizeof(tx));
+    V34_mod_init(&tx, &p);
+    tx.get_bit = enc_get_bit; tx.opaque = 0;
+    shp_acc = 0; shp_n = 0; shp_on = 1;
+    for (i = 0; i < 4000; i++) encode_mapping_frame(&tx);
+    shp_on = 0;
+    return shp_n ? shp_acc / (double)shp_n / (128.0*128.0) : 0.0;
+}
+
 void V34_encode_test(const char *path)
 {
     extern int v34_dbg; extern long v34_ntrn, v34_nj;
@@ -3257,10 +3295,33 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
     for (i = CMANT-1; i > 0; i--) { s->cma_bufi[i] = s->cma_bufi[i-1]; s->cma_bufq[i] = s->cma_bufq[i-1]; }
     s->cma_bufi[0] = yi; s->cma_bufq[0] = yq;
     s->cma_t2++;
-    if (s->cma_t2 & 1) return;
     oi = oq = 0;
     for (i = 0; i < CMANT; i++) { oi += s->cma_wi[i]*s->cma_bufi[i] - s->cma_wq[i]*s->cma_bufq[i];
                                   oq += s->cma_wi[i]*s->cma_bufq[i] + s->cma_wq[i]*s->cma_bufi[i]; }
+    /* SIPFAX: the equaliser output used to be computed only on symbol instants - the odd
+       T/2 phase returned before this convolution. Gardner needs the midpoint, so compute
+       both and spend one extra CMANT-tap convolution per symbol (a few hundred kMAC/s). */
+    if (s->cma_t2 & 1) { s->cma_gmi = oi; s->cma_gmq = oq; return; }
+    {   /* Gardner TED -> the resampler's phase and rate. See FINDINGS 38: without this
+           the sampling instant walks with the ~20 ppm offset across the RTP path and the
+           EVM traces a V across every burst (37.6% / 3.6% / 15.6%), which is what has
+           been capping the link at ~16 dB on a line measured at 28.9 dB. */
+        static double dkp = -1, dki, dsg;
+        double ted, pwn;
+        if (dkp < 0) { char *e;
+            e = getenv("SIPFAX_DTED_KP");   dkp = e ? atof(e) : 0.10;
+            e = getenv("SIPFAX_DTED_KI");   dki = e ? atof(e) : 0.002;
+            e = getenv("SIPFAX_DTED_SIGN"); dsg = e ? atof(e) : -1.0;
+        }
+        ted = (oi - s->cma_gpi)*s->cma_gmi + (oq - s->cma_gpq)*s->cma_gmq;
+        pwn = oi*oi + oq*oq + s->cma_gpi*s->cma_gpi + s->cma_gpq*s->cma_gpq + 1e-9;
+        ted = dsg * ted / pwn;
+        s->cma_pos  += dkp * ted;
+        s->cma_tinc += dki * ted;
+        if (s->cma_tinc >  0.005) s->cma_tinc =  0.005;   /* ~4000 ppm: past any real clock */
+        if (s->cma_tinc < -0.005) s->cma_tinc = -0.005;
+        s->cma_gpi = oi; s->cma_gpq = oq;
+    }
     { static int skip = -1; if (skip < 0) { char *e = getenv("SIPFAX_CMA_SKIP"); skip = e ? atoi(e) : 300; }
       if (s->cma_skipn < skip) { s->cma_skipn++; return; } }
     {   /* running 4-point quality (|EMA of u^4|) drives phase transitions:
@@ -3391,12 +3452,36 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 R = (their_ca < our_ca ? their_ca : our_ca) * 2400;
                 s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
                 v34_rx_data_params(s, R);
-                {   /* mean |c|^2 of the negotiated constellation, in lattice units */
-                    int ci; double acc = 0;
-                    for (ci = 0; ci < s->L; ci++)
+                {   /* mean |c|^2 of the negotiated constellation, in lattice units.
+                       SIPFAX: s->L is the size of the FULL constellation, but
+                       s->constellation[] only ever holds the QUARTER of it -
+                       build_constellation() fills the whole (4x+1, 4y+1) coset sorted by
+                       energy and every other user indexes it with < L_MAX/4 (see the
+                       assert in the 9.6.1 mapper, which reaches the other three quadrants
+                       by rotate_clockwise). Averaging over s->L entries therefore reached
+                       nine points BEYOND the negotiated set: at R=9600 it averaged
+                       energies {2,10,10,18,26,26,34,34,50,50,50,58} = 30.7 instead of the
+                       true {2,10,10} = 7.33, inflating the mean 4.2x. Rotation preserves
+                       magnitude, so the quarter's mean IS the full constellation's mean. */
+                    int nq = s->L / 4, ci; double acc = 0;
+                    for (ci = 0; ci < nq; ci++)
                         acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
                              + (double)s->constellation[ci][1]*s->constellation[ci][1];
-                    s->data_pw_target = (s->L > 0 ? acc / s->L : 30.0) * (128.0*128.0);
+                    s->data_pw_target = (nq > 0 ? acc / nq : 30.0) * (128.0*128.0);
+                    {   /* the UNIFORM mean above is only a fallback; measure the SHAPED
+                           mean the shell mapper actually produces at this rate. */
+                        double uni = (nq > 0 ? acc / nq : 30.0);
+                        double shp = v34_shaped_meanc2(R, s->conv_nb_states);
+                        if (shp > 0.05 * uni && shp < 4.0 * uni) {
+                            s->data_pw_target = shp * (128.0*128.0);
+                            fprintf(stderr, "[data] shaped mean |c|^2 = %.2f (uniform %.2f,"
+                                    " ratio %.3f, amplitude %.3fx)\n",
+                                    shp, uni, shp/uni, sqrt(shp/uni));
+                        } else {
+                            fprintf(stderr, "[data] shaped-mean measurement %.2f rejected"
+                                    " against uniform %.2f - keeping uniform\n", shp, uni);
+                        }
+                    }
                     /* SIPFAX: that is the UNIFORM average over the constellation, but the
                        shell mapper is a SHAPING code - it uses inner points far more
                        often, so the transmitted mean power is much lower. Measured on the
@@ -3443,6 +3528,13 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 if (s->data_agc <= 0) s->data_agc = sqrt(s->data_meanc2 / s->rx16_rms);
                 gc = s->data_agc;
                 if (!s->data_acq_done) {
+                    /* SIPFAX: the gain is no longer searched - v34_shaped_meanc2() measures
+                       it from our own mapper, because the lattice objective is minimised by
+                       collapsing the constellation. SIPFAX_ACQ_GAIN=1 restores the search
+                       for comparison. Only the carrier phase is searched. */
+                    static int acq_search_gain = -1;
+                    if (acq_search_gain < 0) { char *e7 = getenv("SIPFAX_ACQ_GAIN");
+                                               acq_search_gain = e7 ? atoi(e7) : 0; }
                     /* SIPFAX: ACQUIRE gain and carrier phase before decoding anything.
                        Two static errors otherwise wreck the whole of data mode, and both
                        were measured against encoder ground truth on a noiseless signal:
@@ -3460,9 +3552,22 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        one-shot; the DD loop then only has to track drift. */
                     if (s->data_acq_n < DATA_ACQ_N) {
                         double ct0 = cos(-s->data_th), st0 = sin(-s->data_th);
+                        /* SIPFAX: the acquisition window starts the instant E is detected,
+                           which is not necessarily where the caller's DATA starts. The
+                           measured constellation there is four points 90 deg apart at
+                           radius sqrt(10) - a 4-point set, not a smeared 12-point one -
+                           and 4-point is exactly what Phase 4 transmits. SIPFAX_ACQ_DELAY
+                           moves the window further into data mode so the two can be told
+                           apart. */
+                        static long acqdly = -1, acqseen = 0;
+                        if (acqdly < 0) { char *ea = getenv("SIPFAX_ACQ_DELAY");
+                                          acqdly = ea ? atol(ea) : 0; }
+                        if (acqseen < acqdly) { acqseen++; }
+                        else {
                         s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
                         s->data_acq_q[s->data_acq_n] = (oi*st0 + oq*ct0) * gc;
                         s->data_acq_n++;
+                        }
                     } else
                     {
                         double bg = 1.0, be = 1e30, bp = 0.0, gdb, th2;
@@ -3481,7 +3586,14 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                            lowers it (measured 24.3 against a uniform 122.3 at R=16800, i.e.
                            0.2x) but never collapses it to a single ring. */
                         pwmin = 0.25 * s->data_meanc2;
-                        for (gdb = -14.0; gdb <= 6.0; gdb += 0.1) {
+                        /* SIPFAX: the gain is now MEASURED, not searched - see
+                           v34_shaped_meanc2(). This search is degenerate: it is minimised
+                           by collapsing the constellation onto its innermost ring, and no
+                           power floor separates the two cases (0.25x the uniform mean sat
+                           above the true shaped mean and excluded the right answer; the
+                           corrected value sits below |c|^2 = 2 and admits the collapse).
+                           SIPFAX_ACQ_GAIN=1 restores it for comparison. */
+                        for (gdb = -14.0; acq_search_gain && gdb <= 6.0; gdb += 0.1) {
                             double g2 = pow(10.0, gdb/20.0), em = 1e30, t2;
                             if (pw0*g2*g2 < pwmin) continue;
                             for (t2 = 0; t2 < 90.0; t2 += 3.0) {
@@ -3502,6 +3614,96 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                         s->data_agc *= bg;
                         s->data_th  += bp*M_PI/180.0;
                         s->data_acq_done = 1;
+                        {   /* SIPFAX: a low lattice score is NOT on its own evidence of a
+                               decode - the acquisition minimises distance to the lattice,
+                               and squashing every symbol onto the innermost ring minimises
+                               it trivially. Print the point distribution so the claim is
+                               checkable rather than assumed.
+                               Units: data_acq_* are already in LATTICE units (gc applied on
+                               the way in, and data_lattice_rms snaps to odd integers), so
+                               they go into data_slice as-is. An earlier version of this
+                               check divided by 128 and re-applied data_agc, which drove
+                               every symbol to the origin and reported a collapse that was
+                               purely its own doing. Score exactly what the acquisition
+                               scored: the buffer scaled by bg and rotated by bp. */
+                            int hc[64], hi2, nq2 = s->L/4, used = 0;
+                            double cth = cos(-bp*M_PI/180.0), sth = sin(-bp*M_PI/180.0);
+                            for (hi2 = 0; hi2 < 64; hi2++) hc[hi2] = 0;
+                            for (hi2 = 0; hi2 < s->data_acq_n; hi2++) {
+                                double bi2 = s->data_acq_i[hi2], bq2 = s->data_acq_q[hi2];
+                                double xi2 = (bi2*cth - bq2*sth) * bg;
+                                double xq2 = (bi2*sth + bq2*cth) * bg;
+                                double d1, d2; int b2, qd2, fi;
+                                b2 = data_slice(s, xi2, xq2, &d1, &d2);
+                                qd2 = (d1 >= 0) ? (d2 >= 0 ? 0 : 3) : (d2 >= 0 ? 1 : 2);
+                                fi = b2*4 + qd2;
+                                if (fi >= 0 && fi < 64) hc[fi]++;
+                            }
+                        {   /* SIPFAX: is the constellation SPINNING? The odd-integer set
+                               has 90-degree symmetry, so the mean of y^4 has a stable angle
+                               for a phase-locked signal and a walking one for a signal with
+                               residual carrier offset. Report it per block: a linear walk
+                               IS a frequency error, and its slope gives the offset in Hz.
+                               Needed because data mode derotates by a STATIC data_th seeded
+                               once at entry - nothing tracks carrier after that. */
+                            int bn, nb3 = s->data_acq_n/200, dn = 0;
+                            double prev = 0, dsum = 0; int havep = 0;
+                            static int seed_frq = -1;
+                            if (seed_frq < 0) { char *e9 = getenv("SIPFAX_SEED_FRQ");
+                                                seed_frq = e9 ? atoi(e9) : 1; }
+                            double cth4 = cos(-bp*M_PI/180.0), sth4 = sin(-bp*M_PI/180.0);
+                            fprintf(stderr, "[data] 4th-power angle per 200 syms:");
+                            for (bn = 0; bn < nb3 && bn < 12; bn++) {
+                                double a4 = 0, b4 = 0; int j4;
+                                for (j4 = bn*200; j4 < (bn+1)*200; j4++) {
+                                    double bi3 = s->data_acq_i[j4], bq3 = s->data_acq_q[j4];
+                                    double xr = (bi3*cth4 - bq3*sth4) * bg;
+                                    double xq3 = (bi3*sth4 + bq3*cth4) * bg;
+                                    double r2 = xr*xr - xq3*xq3, i2 = 2*xr*xq3;
+                                    a4 += r2*r2 - i2*i2; b4 += 2*r2*i2;
+                                }
+                                {   double ang = atan2(b4, a4)/4.0*180.0/M_PI, d;
+                                    if (havep) { d = ang - prev;
+                                                 while (d >  45.0) d -= 90.0;
+                                                 while (d < -45.0) d += 90.0;
+                                                 fprintf(stderr, " %+.1f(d%+.1f)", ang, d); }
+                                    else fprintf(stderr, " %+.1f", ang);
+                                    if (havep) { dsum += d; dn++; }
+                                    prev = ang; havep = 1; }
+                            }
+                            fprintf(stderr, "\n");
+                            if (dn >= 4 && seed_frq) {
+                                /* SIPFAX: that walk IS a residual carrier offset - the far
+                                   end's clock is off, so its carrier is off by the same
+                                   ratio, and data mode derotates by a STATIC angle seeded
+                                   once at entry. Measured on the caller: -1.95 deg per 200
+                                   symbols, dead linear, = -0.093 Hz = 47 ppm of the 1959 Hz
+                                   carrier - the same offset the Gardner loop sees in the
+                                   symbol clock, as physics requires. Over the 20000-symbol
+                                   scoring window that is 195 degrees, which is why no
+                                   carrier-loop gain made any difference: there was nothing
+                                   for a phase loop to hold on to. Seed the rate directly
+                                   from the measurement; data_th advances by data_frq every
+                                   symbol even with the DD gains at zero. */
+                                double dps = (dsum/dn) / 200.0 * M_PI / 180.0;
+                                s->data_frq = dps;
+                                fprintf(stderr, "[data] carrier offset %+.4f Hz (%+.1f ppm)"
+                                        " -> seeding data_frq %+.3e rad/sym\n",
+                                        dps*3428.571/(2*M_PI), dps*3428.571/(2*M_PI)/1959.184*1e6,
+                                        dps);
+                            }
+                        }
+                            fprintf(stderr, "[data] point usage over %d syms (L=%d):",
+                                    s->data_acq_n, s->L);
+                            for (hi2 = 0; hi2 < nq2*4 && hi2 < 64; hi2++) {
+                                fprintf(stderr, " %d", hc[hi2]);
+                                if (hc[hi2] > 0) used++;
+                            }
+                            fprintf(stderr, "\n[data] %d of %d points used, mean|c|^2 %.2f"
+                                    " (shaped target %.2f)%s\n", used, s->L,
+                                    pw0*bg*bg, s->data_meanc2,
+                                    used*4 < s->L*3 ? "  <-- COLLAPSED, score is an artifact" : "");
+                        }
                         gc = s->data_agc;
                         { extern int v34_dbg; if (v34_dbg)
                             fprintf(stderr, "[data] acquired: gain x%.3f, phase %+.2f deg,"
@@ -3554,6 +3756,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 }
                 }
                 { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
+                    fprintf(stderr, "[data] clock %+.1f ppm\n", s->cma_tinc/(7.0/6.0)*1e6),
                     fprintf(stderr, "[data] %ld syms, metric %.1f, freq %.2e rad/sym\n",
                             s->data_n, s->data_mse_n ? s->data_mse_acc/s->data_mse_n : 0.0,
                             s->data_frq); }
@@ -3813,11 +4016,26 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         }
         s->srx_pqd = qd;
     }
-    if (s->p4_mode == 2) {   /* MP/data: decision-FREE CMA tap tracking. DD decisions are
-                                wrong once timing drifts, so DD-LMS can't recover; CMA holds
-                                constant modulus (4-point) and tracks slow channel/clock drift. */
-        double r2t2 = srx_rx16() ? 1.32 : 1.0;                        /* SIPFAX: 16-pt Godard radius */
-        double m2 = oi*oi + oq*oq, g = r2t2 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
+    {   /* MP: decision-FREE CMA tap tracking. DD decisions are wrong once timing drifts,
+           so DD-LMS can't recover; CMA holds constant modulus and tracks slow drift.
+
+           SIPFAX: this used to run for ALL of p4_mode == 2, which includes DATA MODE, and
+           it silently defeated the "taps frozen" line in the Phase-C branch above (that
+           sets mu = 0; this then set it straight back to 2e-3). Correct for MP, where the
+           signal really is 4- or 16-point constant-modulus - catastrophic for data mode,
+           where the shaped constellation has THREE distinct rings and CMA's whole purpose
+           is to force one. Measured on the caller's capture: the received points collapsed
+           onto a single radius, 98% of symbols landing on the four rotations of one
+           |c|^2 = 10 point with nothing on the equal-energy neighbour and nothing on the
+           other rings. That is CMA doing exactly what it is designed to do, to a signal
+           that must not have it done. Stop at E. */
+        int cma_in_data = 0;
+        { static int e8 = -2; if (e8 == -2) { char *v = getenv("SIPFAX_DATA_CMA");
+                                              e8 = v ? atoi(v) : 0; } cma_in_data = e8; }
+        if (s->p4_mode == 2 && (!s->p4_e_rx || cma_in_data)) {
+            double r2t2 = srx_rx16() ? 1.32 : 1.0;                    /* 16-pt Godard radius */
+            double m2 = oi*oi + oq*oq, g = r2t2 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
+        }
     }
     for (i = 0; i < CMANT; i++) {
         double gi = ei*s->cma_bufi[i] + eq*s->cma_bufq[i];
@@ -3957,6 +4175,17 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
    pass of a decode had to run inside one call. The taps are static and persist between
    calls, so with reset under the caller's control the same multi-pass scheme can be driven
    ONE pass per call and amortised across audio frames - see p4_block_step. */
+/* SIPFAX: Gardner loop gains; swept offline against a live capture (see FINDINGS 39). */
+static double p4_ted_kp = 0.0, p4_ted_ki = 0.0, p4_ted_sign = 1.0, p4_ted_last = 0.0;
+static void p4_ted_init(void)
+{
+    static int done; char *e;
+    if (done) return; done = 1;
+    e = getenv("SIPFAX_TED_KP");   if (e) p4_ted_kp   = atof(e);
+    e = getenv("SIPFAX_TED_KI");   if (e) p4_ted_ki   = atof(e);
+    e = getenv("SIPFAX_TED_SIGN"); if (e) p4_ted_sign = atof(e);
+}
+
 static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                        int sixteen, int ncma, int ndd, int reset, double *si, double *sq)
 {
@@ -3964,6 +4193,7 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
     double R2 = sixteen ? 1.32 : 1.0;          /* Godard radius, unit mean power */
     double scale = sixteen ? sqrt(10.0) : sqrt(2.0);   /* base units -> unit power */
     int p, i, ns = 0;
+    p4_ted_init();
     if (reset) {
         for (i = 0; i < P4_NT; i++) { wi[i] = 0; wq[i] = 0; }
         wi[P4_NT/2] = 1.0;
@@ -3971,6 +4201,22 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
     for (p = 0; p < ncma + ndd; p++) {
         int dd = (p >= ncma), cnt = 0;
         double pos = off*P4_SPS + P4_SPS*8, th = 0, fr = 0, g = 1.0;
+        /* SIPFAX: symbol-clock recovery. This loop used to take ONE timing estimate at the
+           top of the burst and then advance by a fixed P4_SPS/2 forever, with no tracking
+           anywhere in the Phase-4 or data-mode receiver. Measured per-block EVM across the
+           caller's TRN came out as a clean V - 37.6% / 3.6% at the middle / 15.6% - with
+           the residual phase flat at +-0.4 deg, i.e. not carrier but sampling instant: a
+           ~20 ppm clock offset between the two ends of the RTP path, accumulating
+           unopposed while the fractionally-spaced taps absorb only the burst average. At
+           the V's minimum the EVM is 3.6% (28.9 dB), so the line is fine and the 16 dB we
+           were measuring was entirely our own drift.
+
+           Gardner is the right detector here: it needs the T/2 samples we already compute
+           and no knowledge of the constellation, so the same loop serves TRN and data mode.
+                e = ( y(n) - y(n-1) ) . y(n-1/2)
+           tfr accumulates the rate error (samples per half-symbol); the proportional term
+           nudges the phase directly. */
+        double tfr = 0, gmi = 0, gmq = 0, gpi = 0, gpq = 0;
         for (i = 0; i < P4_NT; i++) { bufi[i] = 0; bufq[i] = 0; }
         ns = 0;
         while (pos < nz - 2) {
@@ -3987,7 +4233,10 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                 nrm += bufi[k]*bufi[k] + bufq[k]*bufq[k];
             }
             cnt++;
-            if (cnt & 1) { pos += P4_SPS/2.0; continue; }   /* T/2: adapt on symbol instants */
+            if (cnt & 1) {                       /* mid-symbol: Gardner's y(n-1/2) */
+                gmi = oi; gmq = oq;
+                pos += P4_SPS/2.0 + tfr; continue;
+            }
             {
                 double ei, eq, mu, ypi, ypq, c = cos(-th), s2 = sin(-th);
                 ypi = (oi*c - oq*s2)*g; ypq = (oi*s2 + oq*c)*g;
@@ -4011,7 +4260,18 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                 }
                 if (ns < P4_MAXSY) { si[ns] = ypi; sq[ns] = ypq; ns++; }
             }
-            pos += P4_SPS/2.0;
+            {   /* Gardner TED, normalised so the gains are independent of level */
+                double ted = (oi - gpi)*gmi + (oq - gpq)*gmq;
+                double pwn = oi*oi + oq*oq + gpi*gpi + gpq*gpq + 1e-9;
+                ted = p4_ted_sign * ted / pwn;
+                pos += p4_ted_kp * ted;          /* phase */
+                tfr += p4_ted_ki * ted;          /* rate  */
+                if (tfr >  0.02) tfr =  0.02;    /* +-4000 ppm: far past any real clock */
+                if (tfr < -0.02) tfr = -0.02;
+                p4_ted_last = tfr;
+                gpi = oi; gpq = oq;
+            }
+            pos += P4_SPS/2.0 + tfr;
         }
     }
     return ns;
@@ -4213,6 +4473,7 @@ static void p4_est_precoder(const double *si, const double *sq, int ns, int sixt
     if (pw <= 0 || nn < 400) return;
     fprintf(stderr, "[p4] precoder estimate from TRN (%d syms, residual %.1f%% rms):\n",
             nn, 100.0*sqrt(ep/pw));
+    fprintf(stderr, "[p4] block-path clock: %+.1f ppm\n", p4_ted_last/(P4_SPS/2.0)*1e6);
     {   /* SIPFAX: is that residual stationary noise, or drift? p4_equalize advances its
            read pointer by a FIXED P4_SPS/2 with no timing-recovery loop, so any sample
            clock offset between the caller and us accumulates; a fractionally-spaced
@@ -4309,17 +4570,26 @@ static double data_lattice_rms(const double *bi, const double *bq, int n,
     return sqrt(acc / (2.0*n));
 }
 
+/* SIPFAX: slice against the FULL constellation. This used to scan s->constellation[0..L),
+   which is wrong twice over: the array holds only the QUARTER constellation (L/4 entries
+   are in the negotiated set, the rest are higher-energy coset points that the peer never
+   transmits), and every entry lies on the (4x+1, 4y+1) coset, so a decision could never
+   land on any of the three rotations that make up the rest of the odd-integer lattice.
+   Walk the L/4 real points through all four rotations instead - that is exactly the set
+   the 9.6.1 mapper can emit. */
 static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq)
 {
-    int i, best = 0; double bd = 1e30;
-    for (i = 0; i < s->L; i++) {
-        double dx = xi - (double)s->constellation[i][0];
-        double dy = xq - (double)s->constellation[i][1];
-        double d = dx*dx + dy*dy;
-        if (d < bd) { bd = d; best = i; }
+    int i, j, nq = s->L / 4, best = 0; double bd = 1e30;
+    *di = 1.0; *dq = 1.0;
+    for (i = 0; i < nq; i++) {
+        int x1 = s->constellation[i][0], y1 = s->constellation[i][1];
+        for (j = 0; j < 4; j++) {
+            int x, y; double dx, dy, d;
+            rotate_clockwise(x, y, x1, y1, j);
+            dx = xi - (double)x; dy = xq - (double)y; d = dx*dx + dy*dy;
+            if (d < bd) { bd = d; best = i; *di = (double)x; *dq = (double)y; }
+        }
     }
-    *di = (double)s->constellation[best][0];
-    *dq = (double)s->constellation[best][1];
     return best;
 }
 
@@ -4433,6 +4703,9 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
     if (!s->cma_init) {
         int i; for (i=0;i<CMANT;i++){s->cma_wi[i]=s->cma_wq[i]=s->cma_bufi[i]=s->cma_bufq[i]=0;}
         s->cma_wi[CMANT/2] = 1.0; s->cma_pow = 0.0; s->cma_warm = 0;
+        for (i=0;i<8;i++){s->cma_hi[i]=s->cma_hq[i]=0;}
+        s->cma_pos = 0.0; s->cma_tinc = 0.0;
+        s->cma_gmi = s->cma_gmq = s->cma_gpi = s->cma_gpq = 0.0;
         s->cma_ncma = 1000; { char *e=getenv("SIPFAX_CMA_N"); if (e) s->cma_ncma = atoi(e); }
         { char *e = getenv("SIPFAX_RX_DBG"); if (e && atoi(e)) { extern int v34_dbg; v34_dbg = 1; } }
         { char *e=getenv("SIPFAX_CMA_TPHASE"); if (e) s->cma_residx = atof(e); }
@@ -4476,15 +4749,22 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
             int ix = (s->cma_mfp - 1 - mk) & 63;
             cbi += mft[mk]*s->cma_mfi[ix]; cbq += mft[mk]*s->cma_mfq[ix];
         }
-        for (;;) {              /* exact 7:6 grid: output m lives at input position 7m/6 */
-            long q = 7*s->cma_m; long ip = q/6; int fr = (int)(q%6);
-            long need = ip + (fr ? 1 : 0);
-            double f, vi, vq;
-            if (need > s->cma_n) break;
-            if (fr == 0) { vi = cbi; vq = cbq; }
-            else { f = fr/6.0; vi = s->cma_pbi*(1.0-f) + cbi*f; vq = s->cma_pbq*(1.0-f) + cbq*f; }
+        /* SIPFAX: the 7:6 grid is no longer integer - the Gardner loop in t2sample steers
+           cma_pos/cma_tinc, so the output instants have to be interpolated from a short
+           history rather than from the previous sample alone. */
+        s->cma_hi[s->cma_n & 7] = cbi; s->cma_hq[s->cma_n & 7] = cbq;
+        for (;;) {
+            long ip; double f, vi, vq;
+            if (s->cma_pos < (double)(s->cma_n - 6))    /* fell behind the history: resync */
+                s->cma_pos = (double)(s->cma_n - 6);
+            ip = (long)floor(s->cma_pos);
+            if (ip + 1 > s->cma_n) break;
+            f = s->cma_pos - ip;
+            vi = s->cma_hi[ip & 7]*(1.0-f) + s->cma_hi[(ip+1) & 7]*f;
+            vq = s->cma_hq[ip & 7]*(1.0-f) + s->cma_hq[(ip+1) & 7]*f;
             V34_cma_t2sample(s, vi, vq);
             s->cma_m++;
+            s->cma_pos += step + s->cma_tinc;
         }
         s->cma_pbi = cbi; s->cma_pbq = cbq; s->cma_n++;
     }
@@ -4533,7 +4813,12 @@ void V34_stream_decode_file(const char *path)
     { char *db = getenv("SIPFAX_DATABITS"); if (db) g_databitf = fopen(db, "w"); }
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }
-    cma_dumpf = fopen("/tmp/stream-soft.txt","w"); { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
+    /* SIPFAX: this dump used to be unconditional - one symbol per line for the whole
+       decode. A single long sweep run wrote 16 GB and filled the VM's disk, which then
+       failed every subsequent build and test in a way that looked like a code fault.
+       Opt in with SIPFAX_SOFTDUMP=<path>. */
+    { char*e=getenv("SIPFAX_SOFTDUMP"); if(e) cma_dumpf = fopen(e,"w"); }
+    { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     { long fed = 0;
       while ((n = fread(buf, 2, 512, f)) > 0) {

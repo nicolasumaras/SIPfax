@@ -3422,6 +3422,50 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
            lattice). The old floor((ang+45)/90) slicer had boundaries ON the
            diagonals - i.e. through the constellation points themselves. */
         qd = (pi_ >= 0) ? (pq_ >= 0 ? 1 : 0) : (pq_ >= 0 ? 2 : 3);
+        {   /* SIPFAX: the data-mode cloud is constant-envelope - kurtosis 1.001, every
+               symbol in one radius bin, rho 0.002. A LINEAR filter cannot turn QAM into
+               constant envelope, so either the caller is not sending QAM or something
+               here is normalising per-symbol amplitude. Kurtosis of |x|^2 immediately
+               BEFORE the equaliser (yi/yq, post matched filter) against immediately AFTER
+               (oi/oq) settles which: 1.5-ish before and 1.0 after means we did it,
+               1.0 before means the caller did. Also report whether the taps are still
+               moving, since CMA's whole objective IS constant modulus. */
+            static double k2a, k4a, k2b, k4b, tapsum; static long kn;
+            double pa = yi*yi + yq*yq, pb = oi*oi + oq*oq;
+            k2a += pa; k4a += pa*pa; k2b += pb; k4b += pb*pb;
+            if (++kn % 4000 == 0) {
+                extern int v34_dbg; double ts = 0; int ti;
+                for (ti = 0; ti < CMANT; ti++)
+                    ts += s->cma_wi[ti]*s->cma_wi[ti] + s->cma_wq[ti]*s->cma_wq[ti];
+                if (v34_dbg)
+                    fprintf(stderr, "[kurt] %s pre-EQ %.3f  post-EQ %.3f  |w|^2 %.5f"
+                            " (d %+.2e)  cma_phase=%d\n",
+                            s->p4_e_rx ? "DATA  " : "phase4",
+                            k2a > 0 ? (k4a/kn)/((k2a/kn)*(k2a/kn)) : 0.0,
+                            k2b > 0 ? (k4b/kn)/((k2b/kn)*(k2b/kn)) : 0.0,
+                            ts, ts - tapsum, s->cma_phase);
+                tapsum = ts; k2a = k4a = k2b = k4b = 0; kn = 0;
+            }
+        }
+        {   /* SIPFAX: how good is the LIVE receiver on a signal it certainly should
+               handle? The block receiver reaches 3.4-4.7% EVM on the caller's Phase-4
+               TRN; the live receiver's quality on the SAME signal has never been
+               measured, so there is no way to tell whether data mode fails because it is
+               data or because this receiver is simply worse. 4-point EVM against a
+               decision at the tracked radius. */
+            static double eacc, pacc; static long en;
+            double A = sqrt((s->rx16_rms > 1e-12 ? s->rx16_rms : 1.0)/2.0);
+            double dxr = (pi_ >= 0 ? A : -A), dyr = (pq_ >= 0 ? A : -A);
+            eacc += (pi_-dxr)*(pi_-dxr) + (pq_-dyr)*(pq_-dyr);
+            pacc += dxr*dxr + dyr*dyr;
+            if (++en % 2000 == 0 && pacc > 0) {
+                extern int v34_dbg;
+                if (v34_dbg) fprintf(stderr, "[live] 4pt EVM %.1f%% over %ld syms (%s)\n",
+                                     100.0*sqrt(eacc/pacc), en,
+                                     s->p4_e_rx ? "DATA" : "phase4");
+                eacc = 0; pacc = 0;
+            }
+        }
         s->cma_q[s->cma_qn & 127] = qd; s->cma_qn++;
         {   /* SIPFAX: track mean power so the 16-point slicer has a scale reference */
             double pw = pi_*pi_ + pq_*pq_;
@@ -3692,6 +3736,76 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                         dps*3428.571/(2*M_PI), dps*3428.571/(2*M_PI)/1959.184*1e6,
                                         dps);
                             }
+                        }
+                        {   /* SIPFAX: does the cloud have AMPLITUDE structure at all?
+                               The inner/outer decision is purely radial - the union of the
+                               four inner Voronoi cells is exactly the square [-2,2]^2, so
+                               r=1.41 is inner at EVERY phase and r=3.16 outer at every
+                               phase, and no rotation can move a symbol across. A resolved
+                               shaped L=12 set must therefore put 54.75% of symbols on the
+                               inner ring; we see 9.75%. Either the cloud is constant-
+                               envelope (kurtosis ~1.0, one radius bin) or it is a diffuse
+                               blob (~2.0); a resolved set gives ~1.50. That distinguishes
+                               a phase problem from an amplitude one, which no score does. */
+                            double s2 = 0, s4 = 0, r4i = 0, r4q = 0, m4 = 0;
+                            int rb[5]; int hj, rk;
+                            double cthk = cos(-bp*M_PI/180.0), sthk = sin(-bp*M_PI/180.0);
+                            for (hj = 0; hj < 5; hj++) rb[hj] = 0;
+                            for (hj = 0; hj < s->data_acq_n; hj++) {
+                                double bi4 = s->data_acq_i[hj], bq4 = s->data_acq_q[hj];
+                                double xr = (bi4*cthk - bq4*sthk) * bg;
+                                double xq4 = (bi4*sthk + bq4*cthk) * bg;
+                                double r2 = xr*xr + xq4*xq4, r = sqrt(r2);
+                                double a2 = xr*xr - xq4*xq4, b2 = 2*xr*xq4;
+                                s2 += r2; s4 += r2*r2; m4 += r2*r2;
+                                r4i += a2*a2 - b2*b2; r4q += 2*a2*b2;
+                                rk = (r < 1.8) ? 0 : (r < 2.4) ? 1 : (r < 2.9) ? 2
+                                                 : (r < 3.6) ? 3 : 4;
+                                rb[rk]++;
+                            }
+                            s2 /= s->data_acq_n; s4 /= s->data_acq_n; m4 /= s->data_acq_n;
+                        {   /* SIPFAX: the acquisition fits ONE static phase across 2000
+                               symbols. If the constellation is rotating, no single angle
+                               can fit and the score sits at the no-lock floor even though
+                               the amplitude structure is perfect - which is exactly what
+                               we see (kurtosis 1.59, inner ring 53.3% vs 54.75% predicted,
+                               mean power on target, yet lattice-rms 0.573).
+                               Fit the best phase INDEPENDENTLY per sub-window: if short
+                               windows score well and their best phase walks linearly, the
+                               residual carrier is measured - and unlike the 4th-power
+                               estimator this works on a shaped set, where rho is only
+                               0.026 and that estimator has almost no signal. */
+                            int wl[4], wi3;
+                            wl[0]=100; wl[1]=200; wl[2]=500; wl[3]=2000;
+                            for (wi3 = 0; wi3 < 4; wi3++) {
+                                int W = wl[wi3], nw = s->data_acq_n / W, bk;
+                                double tot = 0; int cnt = 0;
+                                fprintf(stderr, "[data] window %4d:", W);
+                                for (bk = 0; bk < nw && bk < 10; bk++) {
+                                    double be3 = 1e30, bp3 = 0, t3;
+                                    for (t3 = 0; t3 < 90.0; t3 += 0.25) {
+                                        double e3 = data_lattice_rms(
+                                            s->data_acq_i + bk*W, s->data_acq_q + bk*W, W,
+                                            bg, cos(-t3*M_PI/180.0), sin(-t3*M_PI/180.0));
+                                        if (e3 < be3) { be3 = e3; bp3 = t3; }
+                                    }
+                                    if (nw <= 10) fprintf(stderr, " %.3f@%.1f", be3, bp3);
+                                    tot += be3; cnt++;
+                                }
+                                fprintf(stderr, "%s  mean %.3f\n",
+                                        nw > 10 ? " (first 10)" : "", cnt ? tot/cnt : 0.0);
+                            }
+                        }
+                            fprintf(stderr, "[data] amplitude kurtosis %.3f "
+                                    "(1.00=constant envelope, 1.50=resolved L=12, 2.00=blob)\n",
+                                    s2 > 0 ? s4/(s2*s2) : 0.0);
+                            fprintf(stderr, "[data] radius bins <1.8:%d 1.8-2.4:%d 2.4-2.9:%d"
+                                    " 2.9-3.6:%d >3.6:%d   (rings at 1.41 / 3.16)\n",
+                                    rb[0], rb[1], rb[2], rb[3], rb[4]);
+                            fprintf(stderr, "[data] rho = |E[x^4]|/E|x|^4 = %.4f "
+                                    "(0=no 4-fold phase structure)\n",
+                                    m4 > 0 ? sqrt(r4i*r4i + r4q*r4q)
+                                             /(double)s->data_acq_n/m4 : 0.0);
                         }
                             fprintf(stderr, "[data] point usage over %d syms (L=%d):",
                                     s->data_acq_n, s->L);

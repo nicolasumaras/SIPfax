@@ -1849,3 +1849,93 @@ boundary along with the taps.
 
 Rate is not the blocker (§37), equaliser adaptivity is not the blocker, precoding is not the
 blocker. The symbol clock is.
+
+## 39. The capture had no data in it
+
+Everything in §37 and §38, and a full day of data-mode work after them, was measured against
+`ca96_rx.s16` - the capture from the ca=9600 experiment. A one-second spectrum of that file,
+which I did not run until the end:
+
+| t(s) | rms  | peak  | dominant tones           |
+|------|------|-------|--------------------------|
+| 11   | 1703 |  5884 | 1950:97  1175:65 1600:64 |
+| 14   | 1712 |  5116 | 1600:79  3275:70 3075:58 |
+| 16   | 1685 |  4604 | 1200:714 3125:38 1700:38 |
+| 17   | 1753 |  2492 | 1200:1239 1175:32 1225:31|
+| 20   | 1754 |  2492 | 1200:1238 1225:32 1175:31|
+| 23   | 1753 |  2492 | 1200:1237 1175:32 1225:31|
+| 24   |  874 | 16764 | 1200:273 (hangup)        |
+
+From t=17s the caller transmits a **pure 1200 Hz tone** - rms constant to four digits, peak
+constant, the tone 32 dB above everything else - holds it for seven seconds, and hangs up.
+The call failed after Phase 4. There is no data in the file.
+
+So every data-mode number reported from that capture - lattice-rms 0.564, 0.271, 0.121,
+0.109, 0.597, trellis metric 115 through 238 - is a measurement of a sine wave. The receiver
+detected E, entered data mode, and demodulated a tone for seven seconds.
+
+The diagnostics that eventually exposed it are worth keeping, because each one was necessary:
+
+- **amplitude kurtosis** E|x|^4/(E|x|^2)^2: 1.00 = constant envelope, 1.50 = resolved L=12,
+  2.00 = diffuse blob. The tone measured **1.001**, with all 2000 symbols in a single radius
+  bin. A pure tone has constant amplitude by definition.
+- **rho** = |E[x^4]|/E|x|^4: 0.92 on the 4-point Phase-4 tail, **0.002** on the "data". No
+  four-fold structure at all.
+- **pre- vs post-equaliser kurtosis**: 1.001 on BOTH sides, with the taps provably frozen
+  (|w|^2 constant to five digits, d = 0.00e+00). That is what ruled out our own receiver -
+  a linear filter cannot create a constant envelope, so the signal arrived that way.
+
+### What that invalidates, and what survives
+
+Invalidated: the §38 conclusion that the symbol clock was "the blocker", the 47 ppm carrier
+figure as a *data-mode* measurement (it is a valid measurement of the 4-point Phase-4 tail,
+where rho = 0.92 and the 4th-power walk really was dead linear at -1.95 deg/200 symbols),
+and the entire chain of ring/collapse/carrier reasoning built on top.
+
+Survives, because it was validated against other signals:
+
+| fix | independent evidence |
+|-----|----------------------|
+| negotiated rate = min(ours, theirs) | spec, and monotonic decode-rate sweep |
+| quarter-constellation indexing (`s->L` vs `s->L/4`) | inner-ring occupancy 53.3% vs 54.75% predicted, on the GOOD capture |
+| `v34_shaped_meanc2()` measures the gain | achieved mean 5.59 against target 5.62, on the GOOD capture |
+| Gardner timing recovery | Phase-4 TRN EVM V flattened, 3.4-4.7% across the burst |
+| CMA stops at E | metric 238 -> 200; correct regardless of signal |
+| `data_slice()` over all four rotations | required for any DD loop to function at all |
+| symbol dump gated | it had filled a 20 GB disk with 16 GB of text |
+
+Loopback stayed 100% at 9600 and 16800 throughout.
+
+### The good capture, and where the problem actually stands
+
+`connect_rx.s16` (64 s, the call that held data mode) and the slmodem reference are both
+**wideband to the end** - tone fraction 0.03-0.07 per second. Real data.
+
+Run against it, the receiver now produces a genuine constellation:
+
+    amplitude kurtosis 1.594          (1.50 = resolved L=12)
+    radius bins  <1.8:747  1.8-2.4:449  2.4-2.9:317  2.9-3.6:329  >3.6:158
+    point usage  273 273 264 255 | 116 109 142 113 | 112 117 111 115
+    mean |c|^2   5.59               (shaped target 5.62)
+    lattice-rms  0.573              (0.577 = no lock)
+
+The inner group takes 53.3% against the 54.75% a correctly scaled shaped L=12 set predicts,
+and the mean power is within 0.5% of target. **The amplitude structure is right.** The
+failure is now purely angular, and it is not rotation: fitting the best phase independently
+per sub-window gives 0.553 at 100 symbols, 0.561 at 200, 0.567 at 500, 0.573 at 2000, and
+the per-window best phases are scattered (19.2, 33.8, 75.8, 27.5, 2.0, 37.0, 17.5, 48.5,
+81.8, 70.8) rather than walking linearly. Shortening the window does not recover a lock, so
+there is no coherent carrier drift to remove - there is no angular structure to find.
+
+A decision-directed carrier loop cannot bootstrap from there (swept: metric 170.6-173.2 flat
+across all gains), which is the expected chicken-and-egg - DD needs mostly-correct decisions.
+
+### The lesson
+
+Check that the input contains the signal before analysing it. Six hypotheses were built,
+tested and partly refuted against a sine wave, and the elaborate internal consistency of
+those measurements - a clean linear carrier walk, a plausible ring, an arithmetic
+coincidence matching CMA's Godard radius to two figures - made the whole edifice feel
+well-evidenced. It was self-consistent because a tone is a very simple signal, not because
+the analysis was sound. One `rms + dominant tone` pass per second of input, run first, would
+have cost a minute.

@@ -47,6 +47,7 @@ static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, in
                           int *shape, unsigned int *mask, int *sixteen_out, short *hout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
+double g_tedacc = 0; long g_tedn = 0;   /* SIPFAX: Gardner TED magnitude, a lock indicator */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
 int v34_softi[40000], v34_softq[40000];  /* soft equalized symbols */
 int eq_notrack = 0, eq_freeze = 0;  /* diagnostic knobs */
@@ -3316,10 +3317,31 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         ted = (oi - s->cma_gpi)*s->cma_gmi + (oq - s->cma_gpq)*s->cma_gmq;
         pwn = oi*oi + oq*oq + s->cma_gpi*s->cma_gpi + s->cma_gpq*s->cma_gpq + 1e-9;
         ted = dsg * ted / pwn;
+        { extern double g_tedacc; extern long g_tedn;      /* SIPFAX: lock indicator */
+          g_tedacc += fabs(ted); g_tedn++; }
+        {   /* SIPFAX: FREEZE the symbol clock at data-mode entry, keeping the rate the
+               loop converged to during Phase 4 - the same treatment the taps get, and for
+               the same reason.
+
+               Gardner's error is unbiased only on a constant-modulus signal; its
+               self-noise scales with the amplitude variance of the constellation, so on a
+               shaped 12/48-point set it is largely noise. Measured on the caller's data:
+               mean|TED| is ~0.35 whether this loop runs or is switched off entirely
+               (0.339-0.358 on, 0.346-0.398 off), i.e. it reduces the timing error by
+               nothing - while dragging the tracked clock from 31 to 48 ppm. That walk is
+               the loop chasing its own noise, not a real drift. Phase-4 TRN IS constant
+               modulus, so the rate it converged to there is the trustworthy one; hold it.
+               SIPFAX_DATA_TED=1 keeps the loop running in data mode for comparison. */
+            static int ted_in_data = -1;
+            if (ted_in_data < 0) { char *e = getenv("SIPFAX_DATA_TED");
+                                   ted_in_data = e ? atoi(e) : 0; }
+            if (s->p4_e_rx && !ted_in_data) goto ted_done;
+        }
         s->cma_pos  += dkp * ted;
         s->cma_tinc += dki * ted;
         if (s->cma_tinc >  0.005) s->cma_tinc =  0.005;   /* ~4000 ppm: past any real clock */
         if (s->cma_tinc < -0.005) s->cma_tinc = -0.005;
+        ted_done:
         s->cma_gpi = oi; s->cma_gpq = oq;
     }
     { static int skip = -1; if (skip < 0) { char *e = getenv("SIPFAX_CMA_SKIP"); skip = e ? atoi(e) : 300; }
@@ -3437,6 +3459,25 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 extern int v34_dbg; double ts = 0; int ti;
                 for (ti = 0; ti < CMANT; ti++)
                     ts += s->cma_wi[ti]*s->cma_wi[ti] + s->cma_wq[ti]*s->cma_wq[ti];
+                {   /* SIPFAX: does the receiver LOSE LOCK at data-mode entry, or does the
+                       signal simply stop being 4-point? 4-point EVM cannot tell them apart
+                       once the constellation changes, so report indicators that do not
+                       depend on the constellation at all: the mean |Gardner TED|, which is
+                       small and steady while symbol timing is locked and grows when it is
+                       not, and the tracked clock rate, which should hold near a constant
+                       ppm. Three things change at E - the block receiver stops (4909), the
+                       data path starts (3474), and CMA stops adapting (4302, added today) -
+                       and the last of those is a change we made, so it has to be ruled in
+                       or out by measurement rather than argument. */
+                    extern double g_tedacc; extern long g_tedn;
+                    if (v34_dbg)
+                        fprintf(stderr, "[lock] %s  mean|TED| %.4f  clock %+.1f ppm  "
+                                "rx16_rms %.4f  cma_pow %.3e\n",
+                                s->p4_e_rx ? "DATA  " : "phase4",
+                                g_tedn ? g_tedacc/g_tedn : 0.0,
+                                s->cma_tinc/(7.0/6.0)*1e6, s->rx16_rms, s->cma_pow);
+                    g_tedacc = 0; g_tedn = 0;
+                }
                 if (v34_dbg)
                     fprintf(stderr, "[kurt] %s pre-EQ %.3f  post-EQ %.3f  |w|^2 %.5f"
                             " (d %+.2e)  cma_phase=%d\n",

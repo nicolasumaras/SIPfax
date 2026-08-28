@@ -3643,8 +3643,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     if (tavg && s->cma_an > 200) {
                         double d = 0, t = 0;
                         for (q = 0; q < CMANT; q++) {
-                            double ai = s->cma_ai[q]/(double)s->cma_an;
-                            double aq = s->cma_aq[q]/(double)s->cma_an;
+                            double ai = s->cma_ai[q];      /* EMA, already normalised */
+                            double aq = s->cma_aq[q];
                             d += (s->cma_wi[q]-ai)*(s->cma_wi[q]-ai)
                                + (s->cma_wq[q]-aq)*(s->cma_wq[q]-aq);
                             t += ai*ai + aq*aq;
@@ -4527,8 +4527,25 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         double gq = eq*s->cma_bufi[i] - ei*s->cma_bufq[i];
         s->cma_wi[i] += mu*gi; s->cma_wq[i] += mu*gq;
     }
-    if (mu != 0.0) {                       /* SIPFAX: average the taps while they adapt */
-        for (i = 0; i < CMANT; i++) { s->cma_ai[i] += s->cma_wi[i]; s->cma_aq[i] += s->cma_wq[i]; }
+    if (mu != 0.0) {
+        /* SIPFAX: TRAILING average of the taps. A cumulative mean over the whole adaptation
+           history is biased - it starts at the initial delta and includes the entire
+           convergence transient, so it leans toward pre-convergence taps instead of
+           smoothing the post-convergence noise (measured: it recovered only 0.452 -> 0.442
+           where the tap error implies more headroom). An exponential moving average with
+           time constant N tracks the converged solution and averages out the misadjustment
+           that CMA leaves at mu = 2e-3. SIPFAX_TAPAVG_N sets N. */
+        static double a = -1.0;
+        if (a < 0) { char *e = getenv("SIPFAX_TAPAVG_N");
+                     double nn = e ? atof(e) : 1000.0; if (nn < 1) nn = 1; a = 1.0/nn; }
+        if (s->cma_an == 0) {
+            for (i = 0; i < CMANT; i++) { s->cma_ai[i] = s->cma_wi[i]; s->cma_aq[i] = s->cma_wq[i]; }
+        } else {
+            for (i = 0; i < CMANT; i++) {
+                s->cma_ai[i] += a*(s->cma_wi[i] - s->cma_ai[i]);
+                s->cma_aq[i] += a*(s->cma_wq[i] - s->cma_aq[i]);
+            }
+        }
         s->cma_an++;
     }
     s->cma_cnt++;

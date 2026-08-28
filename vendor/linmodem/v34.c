@@ -3626,6 +3626,50 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    proposal alone, so when we asked it for 9600 and it offered 16800 it
                    duly transmitted 9600 while we decoded as if it were 16800 (L=56 rather
                    than L=12). SIPFAX_MP_CA is the same value our MP advertised. */
+                {   /* SIPFAX: freeze the AVERAGED taps, not the instantaneous ones.
+                       On a channel-free signal the ideal equaliser is a delta, yet the
+                       frozen taps measured 96.8% of energy in the peak with 3.2% spread
+                       across the neighbours - pure CMA misadjustment at mu=2e-3, giving a
+                       ~15 dB ISI ceiling when a shaped 12-point set needs about 17 dB.
+                       Averaging over the adaptation window cuts that noise by roughly the
+                       number of samples averaged. SIPFAX_TAPAVG=0 keeps the instantaneous
+                       taps. */
+                    static int tavg = -1; int q;
+                    if (tavg < 0) { char *e = getenv("SIPFAX_TAPAVG"); tavg = e ? atoi(e) : 1; }
+                    { extern int v34_dbg; if (v34_dbg)
+                        fprintf(stderr, "[data] tap-average window: cma_an=%ld cma_phase=%d "
+                                "p4_mode=%d cma_cnt=%d\n", s->cma_an, s->cma_phase,
+                                s->p4_mode, s->cma_cnt); }
+                    if (tavg && s->cma_an > 200) {
+                        double d = 0, t = 0;
+                        for (q = 0; q < CMANT; q++) {
+                            double ai = s->cma_ai[q]/(double)s->cma_an;
+                            double aq = s->cma_aq[q]/(double)s->cma_an;
+                            d += (s->cma_wi[q]-ai)*(s->cma_wi[q]-ai)
+                               + (s->cma_wq[q]-aq)*(s->cma_wq[q]-aq);
+                            t += ai*ai + aq*aq;
+                            s->cma_wi[q] = ai; s->cma_wq[q] = aq;
+                        }
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[data] taps averaged over %ld samples; "
+                                    "instantaneous deviated %.2f%% in energy\n",
+                                    s->cma_an, t > 0 ? 100.0*d/t : 0.0); }
+                    }
+                }
+                {   /* SIPFAX: dump the frozen equaliser taps at data-mode entry. For our
+                       own generated signal there is NO channel, and TX sqrt-RC(0.1) against
+                       RX sqrt-RC(0.1) is a Nyquist raised cosine, so the ideal equaliser is
+                       exactly a delta. Any deviation is ISI the equaliser is ADDING - and a
+                       modulus-based metric like the 4-point TRN EVM cannot see it, because
+                       CMA's cost penalises only modulus variation. */
+                    char *ed = getenv("SIPFAX_TAPDUMP");
+                    if (ed) { FILE *tf = fopen(ed, "w"); int q;
+                              if (tf) { for (q = 0; q < CMANT; q++)
+                                            fprintf(tf, "%.9f %.9f\n", s->cma_wi[q], s->cma_wq[q]);
+                                        fclose(tf);
+                                        fprintf(stderr, "[data] equaliser taps -> %s (%d taps, centre %d)\n",
+                                                ed, CMANT, CMANT/2); } }
+                }
                 {   /* SIPFAX: our own generated signal passes through NO channel, so the
                        correct equaliser for it is a DELTA. The taps carried into data mode
                        are whatever CMA converged to on 4-point Phase-4 TRN, and their
@@ -4482,6 +4526,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         double gi = ei*s->cma_bufi[i] + eq*s->cma_bufq[i];
         double gq = eq*s->cma_bufi[i] - ei*s->cma_bufq[i];
         s->cma_wi[i] += mu*gi; s->cma_wq[i] += mu*gq;
+    }
+    if (mu != 0.0) {                       /* SIPFAX: average the taps while they adapt */
+        for (i = 0; i < CMANT; i++) { s->cma_ai[i] += s->cma_wi[i]; s->cma_aq[i] += s->cma_wq[i]; }
+        s->cma_an++;
     }
     s->cma_cnt++;
 }

@@ -252,6 +252,11 @@ typedef struct V34DSPState {
     double rx3_pos;                     /* next T/2 output, in 24 kHz samples */
     double rx3_bi[512], rx3_bq[512];    /* pre-filter downconverted ring */
     double rx3_last;                    /* last cma_pos seen, to carry Gardner across */
+    /* SIPFAX: running average of the equaliser taps. Measured on a signal with NO channel,
+       where the ideal equaliser is exactly a delta, the frozen taps still carry 3.2% error
+       energy - a 15 dB ceiling before the decoder sees anything. That is CMA steady-state
+       misadjustment at mu=2e-3, and freezing captures the INSTANTANEOUS tap noise. */
+    double cma_ai[32], cma_aq[32]; long cma_an;   /* 32 == CMANT, which v34.c defines */
     double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 

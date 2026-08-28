@@ -4146,6 +4146,29 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                     used*4 < s->L*3 ? "  <-- COLLAPSED, score is an artifact" : "");
                         }
                         gc = s->data_agc;
+                        {   /* SIPFAX: is the acquisition FINDING the optimum, or is there
+                               no optimum to find? The only transforms between the equaliser
+                               output and the lattice score are a rotation and a scale, and
+                               the acquisition fixes the gain by measurement and searches the
+                               phase over 0-90 deg. Sweep BOTH exhaustively and report the
+                               global minimum: if it is far below what the acquisition picks,
+                               the search is at fault; if it equals it, then no rotation or
+                               scale can make these symbols fit the lattice and the fault is
+                               upstream. Self-contained - needs no alignment to ground truth. */
+                            double gg, tt, gbest = 0, tbest = 0, ebest = 1e30;
+                            for (gg = 0.30; gg <= 3.001; gg *= 1.02) {
+                                for (tt = 0; tt < 90.0; tt += 0.5) {
+                                    double e5 = data_lattice_rms(s->data_acq_i, s->data_acq_q,
+                                                    s->data_acq_n, bg*gg,
+                                                    cos(-tt*M_PI/180.0), sin(-tt*M_PI/180.0));
+                                    if (e5 < ebest) { ebest = e5; gbest = gg; tbest = tt; }
+                                }
+                            }
+                            { extern int v34_dbg; if (v34_dbg)
+                                fprintf(stderr, "[data] 2-D (gain,phase) sweep: best %.3f at "
+                                        "gain x%.3f phase %+.2f deg   [acquisition chose %.3f]\n",
+                                        ebest, bg*gbest, tbest, be); }
+                        }
                         { extern int v34_dbg; if (v34_dbg)
                             fprintf(stderr, "[data] acquired: gain x%.3f, phase %+.2f deg,"
                                     " lattice-rms %.3f (0.577 = no lock, <0.2 = good)\n",

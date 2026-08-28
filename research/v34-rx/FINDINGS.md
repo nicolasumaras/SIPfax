@@ -2027,3 +2027,62 @@ one of several pre-emphasis characteristics during Phase 2), and confirm the rec
 filter is the true conjugate of it. The generator plus ground-truth tap now make that directly
 measurable: encode a KNOWN single symbol, look at the audio it produces, and compare with what
 the matched filter expects.
+
+## 41. The transmit pulse is correct; the matched filter was not — and §40's ISI numbers were bad
+
+Checking the transmit shaping against the matched filter, as §40 proposed.
+
+### The transmitter is verified correct, three independent ways
+
+1. **The filter table is exact.** `v34_rc_7_filter` (281 taps = 40 symbols x 7 phases + 1) matches
+   theoretical square-root raised-cosine at beta = 0.1, 7 samples/symbol, with correlation
+   **1.0000** — tap for tap: -33 vs -33.1, 16831 vs 16831.0, -443 vs -443.3. `v34gen.c` builds it
+   as `build_sqr_nyquist_filter(filter, 0.0, 1/(2*7), 0.1, 281)`.
+2. **The symbols are exact.** 12 distinct points, mean |c|^2 = 5.621, 100% on the odd-integer
+   lattice, inner ring 54.7% against 54.75% predicted, and the sequence is white
+   (autocorrelation 0.004-0.017 at non-zero lags).
+3. **The audio follows from them.** Reimplementing `V34_baseband_to_carrier` in Python against
+   the real table and the recorded symbols reconstructs the generated audio at **correlation
+   0.931 at lag 0**.
+
+So the transmit chain — mapper, shaping filter, upconversion — is sound.
+
+### The matched filter was mismatched
+
+The transmit pulse is sqrt-Nyquist **beta = 0.1** spanning 40 symbols. The live receiver
+hand-rolls its own RRC at **beta = 0.15** over 57 taps (~24 symbols at 2.33 samples/symbol).
+Corrected to 0.10 (`SIPFAX_RX_BETA` overrides):
+
+| RX beta | ours (lattice / metric) | caller (lattice / metric) |
+|---------|-------------------------|---------------------------|
+| 0.15    | 0.458 / 175.7           | 0.571 / 173.0             |
+| **0.10**| **0.453 / 172.9**       | **0.570 / 172.3**         |
+| 0.05    | 0.460 / 170.3           | 0.570 / 172.7             |
+
+Correct, and worth having, but small — not the blocker.
+
+### The structural finding
+
+linmodem **already generates proper receive matched filters** — `v34_rx_filters[12]`, one per
+rate/carrier pair (`v34_rx_filter_3429_1959` and friends), built by the same
+`build_sqr_nyquist_filter` as a *bandpass* square-root-Nyquist at **3x oversampling**. The live
+receiver ignores them completely and hand-rolls a 57-tap baseband RRC at 8 kHz, i.e. **2.33
+samples per symbol**. The block receiver — the one that reaches 3.4-4.7% EVM on TRN — is built
+around the 3x-oversampled design (`p4_front`, `P4_US = 3`, `P4_SPS = 7`).
+
+That is the real architectural gap: a fractionally-spaced receiver running at 2.33 samples per
+symbol with a filter that was never designed for that grid, when a correctly designed one for
+this exact rate and carrier is sitting in the table.
+
+### Correction to §40
+
+Two results in §40 are **withdrawn**: "end-to-end ISI 214%" and "no linear relation between
+transmitted and received symbols at 1-15 taps". Both rested on a correlation alignment search
+that returned inconsistent answers — the filtered and unfiltered runs aligned to symbol indices
+11145 and 9262, 1883 apart, on the same audio. A white sequence against a real pulse gives an
+unambiguous peak; a surface that flat means the search was finding noise. The reconstruction
+above proves the audio IS a clean linear function of the symbols, so a linear relationship
+exists and the FIR fit should have found it.
+
+What survives from §40 is unaffected: the loopback never exercised the audio path, our own
+signal fails like the caller's, and an independent demodulator reproduces both failures.

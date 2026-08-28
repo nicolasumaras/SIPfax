@@ -47,6 +47,20 @@ static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, in
                           int *shape, unsigned int *mask, int *sixteen_out, short *hout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
+/* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
+   The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
+   pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
+   symbols with a 90-degree unwrap. Data mode instead derotates the RAW oi/oq by data_th,
+   seeded ONCE at entry and never updated (its DD gains default to 0). So the two paths do
+   not differ only in constellation: one tracks carrier and the other does not. Measured
+   against ground truth, the raw equaliser output has a per-symbol phase error of 96 deg
+   stdev, so there IS something for a tracker to remove. */
+static int g_data_srx = -1;
+static double data_carrier(V34DSPState *s)
+{
+    if (g_data_srx < 0) { char *e = getenv("SIPFAX_DATA_SRX"); g_data_srx = e ? atoi(e) : 0; }
+    return g_data_srx ? (s->srx_th + s->data_th) : s->data_th;
+}
 double g_tedacc = 0; long g_tedn = 0;   /* SIPFAX: Gardner TED magnitude, a lock indicator */
 int v34_symdump[40000]; int v34_symdump_n = 0;  /* equalized quadrant dump */
 int v34_softi[40000], v34_softq[40000];  /* soft equalized symbols */
@@ -3612,6 +3626,39 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    proposal alone, so when we asked it for 9600 and it offered 16800 it
                    duly transmitted 9600 while we decoded as if it were 16800 (L=56 rather
                    than L=12). SIPFAX_MP_CA is the same value our MP advertised. */
+                {   /* SIPFAX: our own generated signal passes through NO channel, so the
+                       correct equaliser for it is a DELTA. The taps carried into data mode
+                       are whatever CMA converged to on 4-point Phase-4 TRN, and their
+                       energy measures |w|^2 = 1.537 rather than 1.0 - on a channel-free
+                       signal anything other than a delta can only ADD ISI. CMA is also
+                       phase-blind and its cost function has its minimum in the wrong place
+                       for a multi-ring set, so there is no reason its solution should be
+                       right here. SIPFAX_EQ_DELTA=1 replaces the taps with a delta at
+                       data-mode entry: if the score collapses, the equaliser is the fault. */
+                    char *e = getenv("SIPFAX_EQ_DELTA");
+                    if (e && atoi(e)) {
+                        int q; double e2 = 0;
+                        for (q = 0; q < CMANT; q++) e2 += s->cma_wi[q]*s->cma_wi[q]
+                                                        + s->cma_wq[q]*s->cma_wq[q];
+                        for (q = 0; q < CMANT; q++) { s->cma_wi[q] = 0; s->cma_wq[q] = 0; }
+                        s->cma_wi[CMANT/2] = 1.0;
+                        fprintf(stderr, "[data] equaliser replaced by a DELTA "
+                                "(discarded taps had |w|^2 = %.4f)\n", e2);
+                    }
+                }
+                {   /* SIPFAX: is the receiver sampling at the wrong point WITHIN the
+                       symbol? Ground truth says the integer symbol alignment is exact (the
+                       lag peak is sharp: 0.676 against 0.007 either side) but the magnitude
+                       correlation is only 0.68 and the phase is random. A fractional timing
+                       error does exactly that - each received symbol becomes a mix of two
+                       adjacent transmitted symbols, whose phases are independent, so phase
+                       scrambles while magnitude partly survives and the integer lag stays
+                       sharp. One symbol is 7/3 = 2.333 input samples; sweep the offset. */
+                    char *e = getenv("SIPFAX_DATA_TOFF");
+                    if (e) { double t = atof(e); s->cma_pos += t;
+                             fprintf(stderr, "[data] symbol-timing offset %+.3f input samples"
+                                     " (%.3f symbol)\n", t, t/(7.0/3.0)); }
+                }
                 int our_ca = 4, their_ca, R;
                 { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
                 their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
@@ -3685,7 +3732,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 s->phase_4d = 0; s->sync_count = 0; s->half_data_frame_count = 0;
                 s->phase_mse = 0; s->phase_mse_cnt = 0;
                 s->data_meanc2 = s->data_pw_target / (128.0*128.0);
-                s->data_th = s->srx_th; s->data_frq = 0.0;   /* inherit Phase-4 phase */
+                { if (g_data_srx < 0) { char *e = getenv("SIPFAX_DATA_SRX");
+                                         g_data_srx = e ? atoi(e) : 0; }
+                  /* with SRX tracking, data_th holds only the RESIDUAL on top of srx_th */
+                  s->data_th = g_data_srx ? 0.0 : s->srx_th; }
+                s->data_frq = 0.0;
                 s->data_on = 1; s->data_n = 0;
                 { extern int v34_dbg; if (v34_dbg)
                     fprintf(stderr, "[data] entering data mode: target mean power %.0f (rx16_rms %.0f)\n",
@@ -3740,7 +3791,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        coarse search finds false minima. Both are static here, so this is
                        one-shot; the DD loop then only has to track drift. */
                     if (s->data_acq_n < DATA_ACQ_N) {
-                        double ct0 = cos(-s->data_th), st0 = sin(-s->data_th);
+                        double dth0 = data_carrier(s);
+                        double ct0 = cos(-dth0), st0 = sin(-dth0);
                         /* SIPFAX: the acquisition window starts the instant E is detected,
                            which is not necessarily where the caller's DATA starts. The
                            measured constellation there is four points 90 deg apart at
@@ -4057,7 +4109,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     }
                 }
                 if (s->data_acq_done) {
-                ct2 = cos(-s->data_th); st2 = sin(-s->data_th);
+                { double dth2 = data_carrier(s); ct2 = cos(-dth2); st2 = sin(-dth2); }
                 xi = (oi*ct2 - oq*st2) * gc;
                 xq = (oi*st2 + oq*ct2) * gc;
                 data_slice(s, xi, xq, &di, &dq);
@@ -5106,7 +5158,17 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
        rate and corrupted symbol decisions) and provides proper matched filtering. */
     static double mft[57]; static int mfinit = 0;
     if (!mfinit) {
-        int t2; double beta = 0.15, sum2 = 0.0;
+        /* SIPFAX: the TRANSMIT pulse is square-root Nyquist with beta = 0.1 - v34gen.c
+           builds it as build_sqr_nyquist_filter(..., beta=0.1) and the resulting table
+           v34_rc_7_filter matches theoretical sqrt-RC(0.1) at 7 samples/symbol with
+           correlation 1.0000, tap for tap. This matched filter was hand-rolled at 0.15,
+           so it is not the conjugate of what the peer (or our own modulator) transmits.
+           Note linmodem ALSO generates a properly designed receive matched filter for
+           every rate/carrier pair - v34_rx_filters[] - which this live path ignores
+           entirely; the block receiver's 3x-oversampled design is built around them.
+           SIPFAX_RX_BETA overrides. */
+        int t2; double beta = 0.10, sum2 = 0.0;
+        { char *e = getenv("SIPFAX_RX_BETA"); if (e) beta = atof(e); }
         for (t2 = 0; t2 < 57; t2++) {
             double ti = (t2 - 28) / SPS, v;
             if (fabs(ti) < 1e-9) v = 1.0 - beta + 4.0*beta/M_PI;

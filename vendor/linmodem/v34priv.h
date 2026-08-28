@@ -241,6 +241,17 @@ typedef struct V34DSPState {
        correction; cma_h* is the short post-matched-filter history the interpolator needs
        once the grid is no longer integer. cma_g* hold Gardner's y(n-1/2) and y(n-1). */
     double cma_pos, cma_tinc, cma_hi[8], cma_hq[8];
+    /* SIPFAX: 3x-oversampled front end. At 24 kHz the 3429 baud symbol rate divides
+       EXACTLY - 7.0 samples/symbol - so the symbol grid is integer and T/2 is 3.5 samples,
+       against 2.3333 samples/symbol at 8 kHz where every output needs interpolation on a
+       barely-oversampled grid. This mirrors p4_front(), the block receiver that reaches
+       3.4-4.7% EVM on TRN. */
+    double rx3_i[512], rx3_q[512];      /* filtered complex baseband at 24 kHz */
+    long   rx3_n;                       /* 24 kHz sample counter */
+    int    rx3_cphi;                    /* downconversion phase, 4/49 per 24 kHz sample */
+    double rx3_pos;                     /* next T/2 output, in 24 kHz samples */
+    double rx3_bi[512], rx3_bq[512];    /* pre-filter downconverted ring */
+    double rx3_last;                    /* last cma_pos seen, to carry Gardner across */
     double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 

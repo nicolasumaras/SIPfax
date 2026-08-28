@@ -5189,6 +5189,87 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
        2*pi*12/49 = 88.15 deg, which corrupted the symbol sequence downstream. */
     static double c49[49], s49[49]; static int lut49 = 0;
     if (!lut49) { int li; for (li = 0; li < 49; li++) { c49[li] = cos(2.0*M_PI*li/49.0); s49[li] = sin(2.0*M_PI*li/49.0); } lut49 = 1; }
+    {   /* SIPFAX: 3x-OVERSAMPLED FRONT END (SIPFAX_RX3X, default on).
+           The 8 kHz path below works at 2.3333 samples/symbol, so every T/2 output is
+           interpolated on a grid only 2.33x the symbol rate, and its matched filter was
+           hand-rolled for that grid. Upsampling 3x to 24 kHz makes the symbol rate divide
+           exactly (7.0 samples/symbol), so T/2 is 3.5 samples and interpolation happens on
+           a 7x grid instead - which is what p4_front() does, and that receiver reaches
+           3.4-4.7% EVM on the caller's TRN. Downconversion is exact there too: 4/49 cycles
+           per 24 kHz sample is precisely 1959.18 Hz. */
+        static int rx3 = -1;
+        if (rx3 < 0) { char *e = getenv("SIPFAX_RX3X"); rx3 = e ? atoi(e) : 1; }
+        if (rx3) {
+            static double h3[169]; static int h3init = 0; static double c49b[49], s49b[49];
+            const int NH = 169;                    /* 24 symbols at 7 samples/symbol + 1 */
+            unsigned int kk;
+            if (!h3init) {
+                int t2; double beta = 0.10, sum2 = 0.0, li;
+                { char *e = getenv("SIPFAX_RX_BETA"); if (e) beta = atof(e); }
+                for (t2 = 0; t2 < NH; t2++) {
+                    double ti = (t2 - (NH-1)/2.0) / 7.0, v;
+                    if (fabs(ti) < 1e-9) v = 1.0 - beta + 4.0*beta/M_PI;
+                    else {
+                        double dnm = M_PI*ti*(1.0 - (4.0*beta*ti)*(4.0*beta*ti));
+                        if (fabs(dnm) < 1e-9) dnm = 1e-9;
+                        v = (sin(M_PI*ti*(1.0-beta)) + 4.0*beta*ti*cos(M_PI*ti*(1.0+beta)))/dnm;
+                    }
+                    h3[t2] = v; sum2 += v*v;
+                }
+                sum2 = sqrt(sum2);
+                for (t2 = 0; t2 < NH; t2++) h3[t2] /= sum2;
+                /* SIPFAX: the 4/49 factor lives in the INDEX STEP (rx3_cphi += 4), so the
+                   table itself must be plain cos/sin of 2*pi*t/49. Having it in both places
+                   downconverted at 16/49 * 24000 = 7836 Hz instead of 1959.18 Hz, and the
+                   receiver never locked (TRN EVM 64.8% against 4.5%). */
+                for (t2 = 0; t2 < 49; t2++) { li = 2.0*M_PI*t2/49.0;
+                                              c49b[t2] = cos(li); s49b[t2] = sin(li); }
+                h3init = 1;
+                { extern int v34_dbg; if (v34_dbg)
+                    fprintf(stderr, "[rx3x] 3x front end: 24 kHz, 7.0 samples/symbol, "
+                            "matched filter %d taps beta=%.2f\n", NH, beta); }
+            }
+            for (kk = 0; kk < nb; kk++) {
+                int u;
+                for (u = 0; u < 3; u++) {          /* zero-stuff 3x */
+                    double v = (u == 0) ? (double)samples[kk]*3.0 : 0.0;
+                    int ph = s->rx3_cphi;
+                    s->rx3_bi[s->rx3_n & 511] =  v*c49b[ph];
+                    s->rx3_bq[s->rx3_n & 511] = -v*s49b[ph];
+                    s->rx3_cphi = (ph + 4) % 49;
+                    {   /* matched filter over the complex baseband */
+                        double ai = 0, aq = 0; int j;
+                        for (j = 0; j < NH; j++) {
+                            long idx = s->rx3_n - j;
+                            if (idx < 0) break;
+                            ai += h3[j]*s->rx3_bi[idx & 511];
+                            aq += h3[j]*s->rx3_bq[idx & 511];
+                        }
+                        s->rx3_i[s->rx3_n & 511] = ai; s->rx3_q[s->rx3_n & 511] = aq;
+                    }
+                    s->rx3_n++;
+                    /* emit T/2 outputs: 3.5 samples apart on the 7-per-symbol grid */
+                    if (s->rx3_pos < (double)(s->rx3_n - 400)) s->rx3_pos = (double)(s->rx3_n - 400);
+                    while (s->rx3_pos + 1 < (double)s->rx3_n) {
+                        long i0 = (long)floor(s->rx3_pos);
+                        double fr = s->rx3_pos - i0;
+                        double vi = s->rx3_i[i0 & 511]*(1.0-fr) + s->rx3_i[(i0+1) & 511]*fr;
+                        double vq = s->rx3_q[i0 & 511]*(1.0-fr) + s->rx3_q[(i0+1) & 511]*fr;
+                        { static double pa=0; static long pn=0; extern int v34_dbg;
+                          pa += vi*vi+vq*vq; if (++pn % 40000 == 0 && v34_dbg)
+                            fprintf(stderr,"[rx3x] mean|v|^2 into t2sample = %.3e (n=%ld)\n",
+                                    pa/40000, pn), pa=0; }
+                        V34_cma_t2sample(s, vi, vq);
+                        /* SIPFAX: the Gardner loop steers cma_pos (8 kHz units); this path
+                           advances rx3_pos in 24 kHz units, so carry the correction over. */
+                        s->rx3_pos += 3.5 + s->cma_tinc*3.0 + (s->cma_pos - s->rx3_last)*3.0;
+                        s->rx3_last = s->cma_pos;
+                    }
+                }
+            }
+            return;
+        }
+    }
     for (k = 0; k < nb; k++) {
         double smp = (double)samples[k];
         double rbi = smp*c49[s->cma_cphi], rbq = -smp*s49[s->cma_cphi];
@@ -5213,6 +5294,10 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
             f = s->cma_pos - ip;
             vi = s->cma_hi[ip & 7]*(1.0-f) + s->cma_hi[(ip+1) & 7]*f;
             vq = s->cma_hq[ip & 7]*(1.0-f) + s->cma_hq[(ip+1) & 7]*f;
+            { static double pa=0; static long pn=0; extern int v34_dbg;
+              pa += vi*vi+vq*vq; if (++pn % 40000 == 0 && v34_dbg)
+                fprintf(stderr,"[rx1x] mean|v|^2 into t2sample = %.3e (n=%ld)\n",
+                        pa/40000, pn), pa=0; }
             V34_cma_t2sample(s, vi, vq);
             s->cma_m++;
             s->cma_pos += step + s->cma_tinc;

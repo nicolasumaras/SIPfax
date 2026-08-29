@@ -58,6 +58,10 @@ FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
 FILE *g_encf = 0;
+int *g_truest = 0; long g_truen = 0, g_truei = 0;
+long g_et_n = 0, g_et_zero = 0; double g_et_min = 0, g_et_max = 0, g_et_sum = 0, g_et_spread = 0;
+long g_ss_n = 0, g_ss_tied = 0; double g_ss_spread = 0;
+long g_tr_argmin = 0, g_tr_tot = 0, g_tr_rank = 0, g_tr_gap = 0, g_tr_inf = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2548,6 +2552,22 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
         error_table[i] = emin;
         decision_table[i] = i * n + jmin;
+        {   /* SIPFAX: do the branch metrics discriminate at all? The ACS reports every one
+               of the 64 states tied for minimum (rank 0, gap 0) while picking the true one
+               only 1/64 of the time, which means error_table carries no information. With
+               16 coset-tuples per branch and only 4 cosets per 2D coordinate, every branch
+               may contain a tuple at the nearest point, so all branches tie and the trellis
+               degenerates to the slicer. */
+            extern long g_et_n; extern double g_et_min, g_et_max, g_et_sum;
+            if (i == 0) { g_et_min = 1e30; g_et_max = -1e30; }
+            if (emin < g_et_min) g_et_min = emin;
+            if (emin > g_et_max) g_et_max = emin;
+            if (i == nb_trans*2 - 1) {
+                extern double g_et_spread; extern long g_et_zero;
+                g_et_spread += (g_et_max - g_et_min); g_et_n++;
+                if (g_et_max == g_et_min) g_et_zero++;
+            }
+        }
     }
 
     /* we compute the bit u0 (needed for synchronization & c0 estimation) */
@@ -2586,6 +2606,56 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
     }
 
+    {   /* SIPFAX: drive the ACS against the ENCODER'S KNOWN STATE SEQUENCE. The survivor
+           states are uncorrelated with the encoder's at every delay (1.6-1.9%, i.e. chance)
+           while the symbols still decode 100% off the slicer, so the question is whether
+           the correct next state even survives this loop and what metric it is given.
+           SIPFAX_TRUESTATE=<file> is one encoder conv_reg per line (field 7 of the
+           SIPFAX_ENCDUMP dump); SIPFAX_TRUESTATE_OFF aligns it. */
+        extern int *g_truest; extern long g_truen, g_truei;
+        extern long g_tr_argmin, g_tr_tot, g_tr_rank, g_tr_gap, g_tr_inf;
+        static int loaded = 0;
+        if (!loaded) {
+            char *fn = getenv("SIPFAX_TRUESTATE");
+            loaded = 1;
+            if (fn) { FILE *f = fopen(fn,"r");
+                if (f) { int v; long cap = 1<<20, k = 0;
+                    g_truest = (int*)malloc(cap*sizeof(int));
+                    while (k < cap && fscanf(f,"%d",&v) == 1) g_truest[k++] = v;
+                    fclose(f); g_truen = k;
+                    { char *o2 = getenv("SIPFAX_TRUESTATE_OFF"); g_truei = o2 ? atol(o2) : 0; }
+                    fprintf(stderr,"[acs] loaded %ld true states, start %ld\n", g_truen, g_truei);
+                } }
+        }
+        {   /* SIPFAX: branch metrics discriminate (spread ~700) yet every state comes out
+               tied. Measure the spread of the ACCUMULATED state metrics, and how many
+               states share the minimum - that is where the information is being lost. */
+            extern long g_ss_n, g_ss_tied; extern double g_ss_spread;
+            int st3, mn3 = 0x7fffffff, mx3 = -0x7fffffff, cnt3 = 0;
+            for (st3 = 0; st3 < s->conv_nb_states; st3++) {
+                if (s->state_error1[st3] == 0x7fffffff) continue;
+                if (s->state_error1[st3] < mn3) mn3 = s->state_error1[st3];
+                if (s->state_error1[st3] > mx3) mx3 = s->state_error1[st3];
+            }
+            for (st3 = 0; st3 < s->conv_nb_states; st3++)
+                if (s->state_error1[st3] == mn3) cnt3++;
+            g_ss_n++; g_ss_spread += (double)(mx3 - mn3); g_ss_tied += cnt3;
+        }
+        if (g_truest && g_truei + 1 < g_truen) {
+            int tn = g_truest[g_truei + 1] % s->conv_nb_states;
+            int st2, rank = 0, mn = 0x7fffffff, am = 0;
+            for (st2 = 0; st2 < s->conv_nb_states; st2++)
+                if (s->state_error1[st2] < mn) { mn = s->state_error1[st2]; am = st2; }
+            for (st2 = 0; st2 < s->conv_nb_states; st2++)
+                if (s->state_error1[st2] < s->state_error1[tn]) rank++;
+            g_tr_tot++;
+            if (am == tn) g_tr_argmin++;
+            g_tr_rank += rank;
+            if (s->state_error1[tn] == 0x7fffffff) g_tr_inf++;
+            else g_tr_gap += (s->state_error1[tn] - mn);
+            g_truei++;
+        }
+    }
     /* XXX: this copy is not needed. Permute the two tables */
     memcpy(s->state_error, s->state_error1, sizeof(s->state_error));
 
@@ -5863,6 +5933,22 @@ void V34_stream_decode_file(const char *path)
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
     fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",
             g_databits, g_dataones, g_databits ? 100.0*g_dataones/g_databits : 0.0, rx.data_n);
+    { extern long g_ss_n, g_ss_tied; extern double g_ss_spread;
+      if (g_ss_n) fprintf(stderr,
+        "[acs] accumulated state metrics: mean spread %.1f over 64 states; "
+        "mean %.1f states share the minimum\n",
+        g_ss_spread/g_ss_n, (double)g_ss_tied/g_ss_n); }
+    { extern long g_et_n, g_et_zero; extern double g_et_spread;
+      if (g_et_n) fprintf(stderr,
+        "[acs] branch-metric spread (max-min over the 32 branches): mean %.1f; "
+        "ALL BRANCHES TIED in %.1f%% of %ld symbols\n",
+        g_et_spread/g_et_n, 100.0*g_et_zero/g_et_n, g_et_n); }
+    { extern long g_tr_argmin, g_tr_tot, g_tr_rank, g_tr_gap, g_tr_inf;
+      if (g_tr_tot) fprintf(stderr,
+        "[acs] true next state was the argmin in %.1f%% of %ld; mean rank %.1f of 64; "
+        "mean metric gap %.0f; unreachable %.1f%%\n",
+        100.0*g_tr_argmin/g_tr_tot, g_tr_tot, (double)g_tr_rank/g_tr_tot,
+        (double)g_tr_gap/(g_tr_tot - g_tr_inf + 1), 100.0*g_tr_inf/g_tr_tot); }
     { extern long g_y0same, g_y0tot;
       if (g_y0tot) fprintf(stderr, "[data] computed Y0 == survivor LSB in %.1f%% of %ld\n",
                            100.0*g_y0same/g_y0tot, g_y0tot); }

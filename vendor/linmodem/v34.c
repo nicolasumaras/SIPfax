@@ -4431,6 +4431,19 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     if (skip > 0) { skip--; }
                     else {
                         int si2 = (int)lrint(xi*128.0), sq2 = (int)lrint(xq*128.0);
+                        {   /* SIPFAX: the decided symbols are EXACTLY the transmitted ones
+                               (29456/29456 against ground truth) but rotated a constant
+                               180 degrees. The acquisition searches phase over 0-90 only,
+                               relying on the differential Z to absorb whole-quadrant
+                               offsets - which it should, since a constant offset cancels in
+                               (Z[0]-Z_1). SIPFAX_ROT180 applies the correction at the feed
+                               so the two can be separated: if the bits come good, the
+                               differential path is not absorbing the offset as intended. */
+                            static int r180 = -1;
+                            if (r180 < 0) { char *e = getenv("SIPFAX_ROT180");
+                                            r180 = e ? atoi(e) : 0; }
+                            if (r180) { si2 = -si2; sq2 = -sq2; }
+                        }
                         {   /* SIPFAX: dump what the receiver actually hands the decoder,
                                so it can be diffed against the encoder ground truth. */
                             static FILE *df = 0; static int op = 0;

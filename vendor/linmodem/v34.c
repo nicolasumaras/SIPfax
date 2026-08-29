@@ -3163,7 +3163,14 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
       { static int zs = -1;
         if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 0; }
         Z[i] = zs ? ((4 - ((t >> 14) & 3)) & 3) : (t >> 14); }
-      t = t & 0xff;
+      /* SIPFAX: the constellation_to_code cell packs i | (j << 14), so the index field is
+         FOURTEEN bits, not eight. Masking to 0xff truncated the quarter-constellation index
+         to 0..255. Harmless at every rate whose L/4 fits in 256 - 128 at 28800, 208 at
+         31200 - but R=33600 has L=1408, so L/4 = 352 and every point from 256 up lost bit
+         8. Q is the low q bits and survived the mask, while m = t >> q did not, which is
+         exactly what the mapping-frame dump showed: ring-index bits wrong on ~41% of frames
+         and the I and Q fields bit-exact. */
+      t = t & 0x3fff;
 
       Q[j][i] = t & ((1 << s->q)-1);
       m[j][i] = t >> s->q;

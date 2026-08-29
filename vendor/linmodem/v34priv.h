@@ -1,7 +1,7 @@
 #ifndef V34PRIV_H
 #define V34PRIV_H
 
-#define MAX_MAPPING_FRAME_SIZE 79
+#define MAX_MAPPING_FRAME_SIZE 96
 #define M_MAX 18
 
 /* symbol rate */

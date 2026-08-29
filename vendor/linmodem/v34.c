@@ -2342,6 +2342,7 @@ u8 trellis_trans_16b[512][4] = {
 static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2], 
                              int *mse)
 {
+    int u0_thresh = 128;   /* SIPFAX: see nb_trans below */
     int i, j, k, n, nbbt, nb_trans, state, next_state, error, trellis_ptr;
     int error_table[32],decision_table[32],emin,jmin,u0,x,y;
     u8 *p,*q;
@@ -2364,6 +2365,22 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         break;
     }
     nb_trans = 1 << nbbt;
+    {   /* SIPFAX: the u0/rotation flag is "i >= nb_trans" packed into
+           decision_table[i] = i*n + jmin, so its threshold is nb_trans*n. Upstream had
+           n = 128>>nbbt, giving 16*8 = 128 = 2^7 at 64 states - hence the >>7 tests below.
+           This tree sets n = 16 for the 64-state code (16 coset-tuples per branch), which
+           moves the threshold to 16*16 = 256 = 2^8, and state_decision was widened to s16
+           precisely because the values now reach 511. The >>7 tests were not updated, so on
+           a 64-state connection they evaluate to i>>3 (0..3) instead of a 0/1 flag: the
+           first condition fires for every i >= 8 and the second XORs a 0/1 u0 against a
+           0..3 value. Invisible in loopback - at infinite SNR the surviving branch and
+           u0_memory agree, so the two rotations cancel and (2*I0+U0)>>1 == I0 either way -
+           but it bites at real SNR, which is exactly where we are. Derive the threshold
+           instead of hardcoding a shift. */
+        int ndec = 128 >> nbbt;
+        if (s->conv_nb_states >= 64) ndec = 16;
+        u0_thresh = nb_trans * ndec;
+    }
 
     /* write a previous decoded symbol : extract a decoded bit from
        the beginning of a path */
@@ -2393,14 +2410,14 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         yout[1][1] = tcm_decision(q[3], s->state_memory[trellis_ptr][3]);
       } }
     /* undo the rotation */    
-    if ((s->state_decision[j][k] >> 7)) {
+    if (s->state_decision[j][k] >= u0_thresh) {
         x = yout[1][1];
         y = - yout[1][0];
         yout[1][0] = x;
         yout[1][1] = y;
     }
     /* rotate only if u0 is set */
-    if (u0 ^ (s->state_decision[j][k] >> 7)) {
+    if (u0 ^ (s->state_decision[j][k] >= u0_thresh)) {
         x = - yout[1][1];
         y = yout[1][0];
         yout[1][0] = x;
@@ -2576,7 +2593,20 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
 
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
-      Z[i] = t >> 14;
+      /* SIPFAX: quadrant handedness. rotate_clockwise() is really CCW - case 1 is
+         (x,y)=(-y1,x1), i.e. multiplication by +j, and V34_baseband_to_carrier emits
+         Re{(si+j*sq)e^{+j phi}}. Phase 4 negates it to get spec CW (10.1.3.3), and that
+         negation was validated on a real caller (FINDINGS: TRN decodes to 0.998 ones with
+         CW, 0.32-0.51 the other way). Data mode's 9.6.1 mapper and the decoder's
+         constellation_to_code table were left UN-negated, so the two directions disagree
+         about handedness. That cannot move the trellis metric - Z is read long after mse
+         is computed, and data_slice scans all four rotations - but it does corrupt the
+         extracted BITS: with Z mirrored, I1 stays correct while I2 flips whenever I1=1 and
+         I0 flips whenever U0=1. Metric 23.3 with 50% ones is exactly that signature.
+         SIPFAX_Z_SIGN=1 negates on decode so the two arms can be compared. */
+      { static int zs = -1;
+        if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 0; }
+        Z[i] = zs ? ((4 - ((t >> 14) & 3)) & 3) : (t >> 14); }
       t = t & 0xff;
 
       Q[j][i] = t & ((1 << s->q)-1);

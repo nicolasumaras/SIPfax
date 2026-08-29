@@ -2800,10 +2800,15 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             }
         }
 
-        if (s->y0_n < 4) s->y0_buf[s->y0_n] = s->y0_out;
-        s->y0_n++;
+        /* SIPFAX: buffer Y0 into the SAME slot, at the SAME moment, as the symbols it
+           belongs to. Buffering it on its own counter was wrong: rx_mapping_frame only
+           advances once delay > TRELLIS_LENGTH, so an independently-incremented y0 index
+           drifts ahead and pairs each frame's U0 with a later symbol's Y0. The memcpy below
+           writes 4 s16 = two 2D symbols into slots [count] and [count+1], i.e. one 4D
+           symbol, so the matching Y0 index is count >> 1. */
         memcpy(&s->rx_mapping_frame[s->rx_mapping_frame_count][0], 
                &y[0][0], 4 * sizeof(s16));
+        s->y0_buf[(s->rx_mapping_frame_count >> 1) & 3] = s->y0_out;
         delay++;
         if (delay > TRELLIS_LENGTH) {
 
@@ -2812,7 +2817,6 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
                 /* a complete mapping frame was read */
                 decode_mapping_frame(s, s->rx_mapping_frame); 
                 s->rx_mapping_frame_count = 0;
-                s->y0_n = 0;
             }
         }
         s->phase_4d = 0;

@@ -61,6 +61,62 @@ long g_cs_tot = 0, g_cs_ok = 0, g_cs_all4 = 0;
 long g_z_n=0,g_z_min0=0,g_z_cnt=0,g_z_hist[8]={0};double g_z_minv=0;
 int g_ntup=0; long g_az_n=0,g_az_ok=0,g_az_half=0,g_az_reach=0;
 int *g_v0orc=0; long g_v0orn=0, g_v0ori=0;
+/* SIPFAX: v0 superframe-sync acquisition. v0 is deterministic in
+   (sync_count, half_data_frame_count) with sync_count in 0..29 (P=15) and
+   half_data_frame_count in 0..15, so the pattern has period 30*16 = 480 4D symbols and
+   carries exactly 12 ones (2.500%). Acquisition is therefore a search over one phase in
+   [0,480). Measured: v0[t-1] == U0[t] ^ conv_reg[t]&1 exactly, and both are observable -
+   U0 as the half of the global minimum (u0_memory) and conv_reg parity as the LSB of the
+   traceback endpoint, which tracks the encoder at 100.00% at lag -29. */
+#define V0_PER 480
+long g_sym = 0, g_v0hn = 0;
+/* SIPFAX: u0_memory is a ring of exactly TRELLIS_LENGTH (30) entries and the traceback walks
+   back TRELLIS_LENGTH-1 = 29, so its endpoint index k is congruent to trellis_ptr mod 30 -
+   u0_memory[k] IS u0_memory[trellis_ptr], the CURRENT symbol's U0, not the one belonging to
+   the symbol being emitted. (That is also why reading u0 at k rather than trellis_ptr changed
+   nothing measurable.) Keep a deeper history so U0 can be paired with the traceback's own
+   time. */
+#define U0H 128
+int g_u0hist[U0H];
+int  g_v0h[V0_PER];
+int  g_v0base[V0_PER];
+int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0;
+static void v0_base_init(void)
+{
+    int k; static int done = 0;
+    if (done) return; done = 1;
+    for (k = 0; k < V0_PER; k++)
+        g_v0base[k] = ((k % 30) == 0)
+            ? ((SYNC_PATTERN >> (15 - ((k / 30) % 16))) & 1) : 0;
+}
+static void v0_try_lock(long need)
+{
+    int ph, k, best = -1, bestph = 0, second = -1;
+    if (g_v0lock || g_v0hn < need) return;
+    for (ph = 0; ph < V0_PER; ph++) {
+        int sc = 0;
+        for (k = 0; k < V0_PER; k++) if (g_v0base[(k + ph) % V0_PER]) sc += g_v0h[k];
+        if (sc > best) { second = best; best = sc; bestph = ph; }
+        else if (sc > second) second = sc;
+    }
+    /* The pattern is sparse (12 ones in 480), so score the COINCIDENCE of ones, not overall
+       agreement - an all-zero guess already agrees on 97.5% of symbols. The ones sit on the
+       k == 0 (mod 30) grid, so a WRONG rotation of SYNC_PATTERN still aligns about 9 of 12:
+       with perfect estimates the margin is ~399 vs ~300, a fixed 1.33x that does NOT grow
+       with more data because it is structural rather than noise. So require a 1.25x margin
+       over the runner-up AND that the winner account for at least 3/4 of every observed one
+       (which a wrong rotation cannot, since it predicts ones where none were seen). */
+    { int tot = 0, k2; for (k2 = 0; k2 < V0_PER; k2++) tot += g_v0h[k2];
+      if (!(best > 0 && best * 4 >= (second > 0 ? second : 1) * 5 && best * 4 >= tot * 3))
+          return;
+      g_v0margin = tot; }
+    if (1) {
+        g_v0lock = 1; g_v0ph = bestph; g_v0margin = best - second;
+        fprintf(stderr, "[v0] LOCKED phase %d after %ld symbols "
+                "(captured %d of %d observed ones; runner-up %d)\n",
+                bestph, g_v0hn, best, g_v0margin, second);
+    }
+}
 int g_surv_bs = 0;
 FILE *g_encf = 0;
 FILE *g_survf = 0;
@@ -2402,6 +2458,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     u8 *p,*q;
 
     trellis_ptr = s->trellis_ptr;
+    v0_base_init();
 
     /* compute the number of bits used in the transitions from each state */
     switch(s->conv_nb_states) {
@@ -2574,6 +2631,17 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                decode 100% correctly, so the surviving path must track the encoder's
                states - if these sequences disagree, the numbering does. */
             s->st_arr = j; s->st_prev = prev;
+            {   /* SIPFAX: v0 estimate for the symbol emitted here (index g_sym-(TL-1)).
+                   u0_memory[k] is U0 at that time and (j & 1) is its conv_reg parity. */
+                extern long g_sym, g_v0hn; extern int g_v0h[]; extern int g_v0lock;
+                extern int g_u0hist[];
+                long ie = g_sym - (TRELLIS_LENGTH - 1);
+                if (!g_v0lock && ie >= 0) {
+                    int est = g_u0hist[ie & (U0H-1)] ^ (j & 1);
+                    if (est) g_v0h[(int)(ie % 480)]++;
+                    g_v0hn++;
+                }
+            }
             { extern long g_y0same, g_y0tot; g_y0tot++; if ((ns & 1) == (j & 1)) g_y0same++; }
         } else {
             s->y0_out = j & 1;
@@ -2732,6 +2800,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
     }
     s->u0_memory[trellis_ptr] = (jmin >= nb_trans);
+    { extern int g_u0hist[]; extern long g_sym; g_u0hist[g_sym & (U0H-1)] = (jmin >= nb_trans); }
 
     /* init the error table to +infinity */
     for(state=0;state<s->conv_nb_states;state++) {
@@ -2752,7 +2821,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                halves match is the worst combination and is what made mode 2 degrade. */
             static int noff = -1, half = -1;
             if (noff < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); noff = (e && atoi(e)==3); }
-            if (half < 0) { char *e = getenv("SIPFAX_HALF"); half = e ? atoi(e) : 1; }   /* 1 = recovered U0 (no oracle, 100% bits, no sequence gain); 2 = (state&1)^v0, full trellis, needs v0 */
+            if (half < 0) { char *e = getenv("SIPFAX_HALF"); half = e ? atoi(e) : 3; }   /* 1 = recovered U0 (no oracle, 100% bits, no sequence gain); 2 = (state&1)^v0, full trellis, needs v0 */
             /* SIPFAX: ROOT CAUSE of the coset-selection defect. The y0 half of the subset
                table is indexed by the bit the encoder actually folded into the transmitted
                point, which is U0 = Y[0] ^ c0 ^ v0 - NOT Y[0] alone. v0 is the superframe
@@ -2772,6 +2841,40 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                the constraint AND accounts for v0; it is what a decoder with superframe sync
                would do. Acquiring v0 without the oracle is the remaining work. */
             if (noff)            n = 0;
+            else if (half == 3) {
+                /* SIPFAX: AUTO. Before lock, behave as half=0 (source parity) - that keeps
+                   the survivor tracking the encoder, which is what the v0 estimator needs.
+                   After lock, generate v0 forward from the locked phase, which is half=2 and
+                   gives 100% of bits with the state constraint intact. */
+                extern int g_v0lock, g_v0ph, g_v0base[]; extern long g_sym;
+                int v0h = 0;
+                if (!g_v0lock) {
+                    /* SIPFAX: safety net. Pre-lock we need the survivor to track, so the half
+                       comes from the source parity (half=0 behaviour) - but that costs 5% of
+                       bits, and on a line where v0 never locks it would cost it forever. If
+                       acquisition has not succeeded after SIPFAX_V0FALL symbols, fall back to
+                       the recovered U0 (half=1), which gives full bits without the sequence
+                       gain rather than leaving both on the table. */
+                    static long fall = -1;
+                    if (fall < 0) { char *e = getenv("SIPFAX_V0FALL"); fall = e ? atol(e) : 20000; }
+                    if (fall > 0 && g_sym > fall) {
+                        n = (jmin >= nb_trans) ? nb_trans : 0;
+                        goto half_done;
+                    }
+                }
+                if (g_v0lock) {
+                    /* SIPFAX: the estimate accumulated at index ie is v0[ie-1] (it is
+                       U0[ie] ^ conv_reg_parity[ie]), so the histogram - and hence the locked
+                       phase - is shifted by one relative to v0's own index. The true phase is
+                       g_v0ph + 1. SIPFAX_V0GEN exposes the offset so it stays measurable. */
+                    static int gen = -99; long ix;
+                    if (gen == -99) { char *e = getenv("SIPFAX_V0GEN"); gen = e ? atoi(e) : 1; }
+                    ix = ((g_sym - 1) + g_v0ph + gen) % 480; if (ix < 0) ix += 480;
+                    v0h = g_v0base[ix];
+                }
+                n = (((state & 1) ^ v0h) ? nb_trans : 0);
+                half_done: ;
+            }
             else if (half == 2) {
                 extern int *g_v0orc; extern long g_v0orn, g_v0ori;
                 static int voff = -99; long vi;
@@ -2927,6 +3030,13 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     memcpy(s->state_error, s->state_error1, sizeof(s->state_error));
 
     { extern long g_v0ori; g_v0ori++; }
+    {   extern long g_sym, g_v0hn; extern int g_v0lock;
+        static long need = -1;
+        if (need < 0) { char *e = getenv("SIPFAX_V0ACQ"); need = e ? atol(e) : 480; }   /* one full v0 period; locks after ~931 symbols */
+        g_sym++;
+        /* the correlation is 480x480; run it once per period, not per symbol */
+        if (!g_v0lock && (g_sym % V0_PER) == 0) v0_try_lock(need);
+    }
     trellis_ptr = (trellis_ptr + 1) % TRELLIS_LENGTH;
     s->trellis_ptr = trellis_ptr;
 }
@@ -6402,6 +6512,14 @@ void V34_dataloop_test(void)
         if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
       { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
         fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1));
+    {   extern long g_sym, g_v0hn; extern int g_v0h[], g_v0base[], g_v0lock, g_v0ph;
+        int ph,k,tot=0; int sc[480]; int b1=-1,b2=-1,p1=0;
+        for (k=0;k<480;k++) tot += g_v0h[k];
+        for (ph=0; ph<480; ph++) { int q=0;
+            for (k=0;k<480;k++) if (g_v0base[(k+ph)%480]) q += g_v0h[k];
+            sc[ph]=q; if (q>b1){b2=b1;b1=q;p1=ph;} else if (q>b2) b2=q; }
+        fprintf(stderr,"[v0dbg] g_sym=%ld est_n=%ld ones=%d lock=%d ph=%d | best=%d@%d "
+                "runnerup=%d\n", g_sym, g_v0hn, tot, g_v0lock, g_v0ph, b1, p1, b2); }
     { extern long g_az_n,g_az_ok,g_az_half;
       if (g_az_n) fprintf(stderr,"[acs] survivor took the ZERO-cost branch on %.2f%% of "
           "symbols; its predecessor was in the zero branch's reachable half on %.2f%%\n",

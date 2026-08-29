@@ -57,6 +57,7 @@ FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
+FILE *g_encf = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -1003,6 +1004,18 @@ static void encode_mapping_frame(V34DSPState *s)
     
     /* (§ 9.6.1) mapping to 2D symbols */
     Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
+    {   /* SIPFAX: encoder-side ground truth for the sync work - the Z pair actually
+           transmitted, the U0 folded into Z[1] (which is the PREVIOUS trellis_encoder
+           call's return), and the v0 this symbol will carry. Diffing this against the
+           decoder's recovered values localises the remaining fault without another round
+           of reasoning about the indexing. */
+        extern FILE *g_encf;
+        int v0e = (s->sync_count == 0)
+                ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
+        if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
+        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
+                            s->sync_count, s->half_data_frame_count);
+    }
 
     C0 = 0; /* for trellis coding */
     for(i=0;i<2;i++) {
@@ -2724,8 +2737,8 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
         jj = j + y0sh;
         y0b = (jj >= 0 && jj < 4) ? s->y0_buf[jj] : s->y0_prev;
         if (!g_v0f2) { char *e = getenv("SIPFAX_V0DUMP2"); if (e) g_v0f2 = fopen(e,"w"); }
-        if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
-                            s->sync_count, s->half_data_frame_count);
+        if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
+                            s->sync_count, s->half_data_frame_count, Z[0], Z[1]);
     }
   }
 

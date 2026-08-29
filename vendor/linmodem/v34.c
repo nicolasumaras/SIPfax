@@ -55,6 +55,7 @@ long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histog
    localises the fault to either the frame assembly or everything after it. */
 FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
+int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2408,6 +2409,19 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         if (k < 0) k = TRELLIS_LENGTH-1;
     }
     u0 = s->u0_memory[trellis_ptr];
+    {   /* SIPFAX: recover the superframe sync bit. The encoder returns
+           U0 = Y[0] ^ c0 ^ v0, with Y[0] = conv_reg & 1 and c0 = 0 when not precoding, so
+           v0 = U0 ^ Y0 is available here: u0 above, and Y0 as the LSB of the current
+           minimum-metric survivor. v0 is the SYNC_PATTERN bit at sync_count == 0, which is
+           what V.34 provides for mapping-frame alignment and what this decoder currently
+           computes and discards. */
+        extern int g_v0est, g_v0have;
+        int bs2 = 0, be2 = s->state_error[0], st2;
+        for (st2 = 1; st2 < s->conv_nb_states; st2++)
+            if (s->state_error[st2] < be2) { be2 = s->state_error[st2]; bs2 = st2; }
+        g_v0est = u0 ^ (bs2 & 1);
+        g_v0have = 1;
+    }
     q = p + (s->state_decision[j][k] * 4);
 #if 1
     { char *nt=getenv("SIPFAX_NOTRELLIS");
@@ -2758,6 +2772,12 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             v0 = 0;
         }
 
+        {   extern int g_v0est, g_v0have; extern FILE *g_v0f;
+            if (!g_v0f) { char *e = getenv("SIPFAX_V0DUMP"); if (e) g_v0f = fopen(e,"w"); }
+            if (g_v0f && g_v0have)
+                fprintf(g_v0f, "%d %d %d %d\n", g_v0est, v0, s->sync_count,
+                        s->half_data_frame_count);
+        }
         /* synchronization bit */
         if (++s->sync_count == 2*s->P) {
             s->sync_count = 0;

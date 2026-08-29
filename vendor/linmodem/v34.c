@@ -47,6 +47,8 @@ static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, in
                           int *shape, unsigned int *mask, int *sixteen_out, short *hout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
+long g_moob = 0, g_mtot = 0, g_mmax = 0;   /* SIPFAX: out-of-constellation ring indices */
+long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histogram */
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2591,6 +2593,19 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
           s->x[0][1] = xi;
       }
 
+      {   /* SIPFAX: what coordinates is the trellis decoder actually producing, and does
+             the table know them? m came out 0 on every one of 29456 symbols, and a table
+             MISS also returns 0 (the cell stores i | j<<14, and i=0,j=0 is the zeroed
+             value), so a miss is indistinguishable from a hit on the innermost point. */
+          extern long g_dh[8]; extern long g_dmiss, g_dn;
+          int ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
+          int mx = ax > ay ? ax : ay;
+          g_dn++;
+          if (mx <= 7) g_dh[(mx-1)/2 & 7]++; else g_dh[7]++;
+          if (s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1] == 0
+              && !(x == s->constellation[0][0] && y == s->constellation[0][1]))
+              g_dmiss++;
+      }
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
       /* SIPFAX: quadrant handedness. rotate_clockwise() is really CCW - case 1 is
@@ -2611,6 +2626,18 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
 
       Q[j][i] = t & ((1 << s->q)-1);
       m[j][i] = t >> s->q;
+      {   /* SIPFAX: the slicer above clamps to C_RADIUS - the FULL lattice - not to the
+             negotiated constellation, so a noisy symbol can decide to a point outside the
+             L-point set and yield m >= M. rings_to_index then sums those into indices for
+             g2_tab, which is only built to 8*(M-1)+1 entries (17 at M=3), so one bad
+             decision corrupts the whole mapping frame's bit extraction and can read the
+             table past its initialised range. Exact loopback symbols never leave the set,
+             which is why the loopback scores 100% while noisy input gives coin flips.
+             Count it. */
+          extern long g_moob, g_mtot, g_mmax;
+          g_mtot++;
+          if (m[j][i] >= s->M) { g_moob++; if (m[j][i] > g_mmax) g_mmax = m[j][i]; }
+      }
     }
 
     t = (Z[0] - s->Z_1) & 3;
@@ -5647,6 +5674,14 @@ void V34_stream_decode_file(const char *path)
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
     fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",
             g_databits, g_dataones, g_databits ? 100.0*g_dataones/g_databits : 0.0, rx.data_n);
+    { extern long g_dh[8], g_dmiss, g_dn; int q9;
+      fprintf(stderr, "[data] decided |coord| max-of-pair histogram (1,3,5,7,9,11,13,>13):");
+      for (q9 = 0; q9 < 8; q9++) fprintf(stderr, " %ld", g_dh[q9]);
+      fprintf(stderr, "\n[data] table misses: %ld / %ld = %.2f%%\n",
+              g_dmiss, g_dn, g_dn ? 100.0*g_dmiss/g_dn : 0.0); }
+    { extern long g_moob, g_mtot, g_mmax;
+      fprintf(stderr, "[data] ring index out of constellation: %ld / %ld = %.2f%%  (max m=%ld, M=%d)\n",
+              g_moob, g_mtot, g_mtot ? 100.0*g_moob/g_mtot : 0.0, g_mmax, rx.M); }
     fprintf(stderr, "[data] mean trellis metric = %.1f over %ld 4D symbols\n",
             rx.data_mse_n ? rx.data_mse_acc/rx.data_mse_n : 0.0, rx.data_mse_n);
 }

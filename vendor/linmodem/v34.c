@@ -111,10 +111,11 @@ static void v0_try_lock(long need)
           return;
       g_v0margin = tot; }
     if (1) {
-        g_v0lock = 1; g_v0ph = bestph; g_v0margin = best - second;
-        fprintf(stderr, "[v0] LOCKED phase %d after %ld symbols "
-                "(captured %d of %d observed ones; runner-up %d)\n",
-                bestph, g_v0hn, best, g_v0margin, second);
+        { int tot2 = 0, k3; for (k3 = 0; k3 < V0_PER; k3++) tot2 += g_v0h[k3];
+          g_v0lock = 1; g_v0ph = bestph; g_v0margin = best - second;
+          fprintf(stderr, "[v0] LOCKED phase %d after %ld symbols "
+                  "(captured %d of %d observed ones; runner-up %d)\n",
+                  bestph, g_v0hn, best, tot2, second); }
     }
 }
 int g_surv_bs = 0;
@@ -6461,6 +6462,13 @@ void V34_dataloop_test(void)
 {
     static V34DSPState tx, rx; V34State pt, pr; int i, R=16800; char *e;
     e=getenv("SIPFAX_DATA_R"); if(e) R=atoi(e);
+    /* SIPFAX: this harness took the rate ONLY from SIPFAX_DATA_R and silently ignored
+       SIPFAX_FORCE_DATA, which every other path uses. Passing SIPFAX_FORCE_DATA here ran the
+       default 16800 while appearing to sweep rates - it produced byte-identical bit counts at
+       9600/16800/21600/28800 and a whole session of "both rates" results that were one rate
+       measured twice. Accept both names. */
+    else { e=getenv("SIPFAX_FORCE_DATA"); if(e) R=atoi(e); }
+    fprintf(stderr,"[dataloop] rate R=%d\n", R);
     memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;

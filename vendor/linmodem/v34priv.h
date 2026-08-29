@@ -257,6 +257,14 @@ typedef struct V34DSPState {
        energy - a 15 dB ceiling before the decoder sees anything. That is CMA steady-state
        misadjustment at mu=2e-3, and freezing captures the INSTANTANEOUS tap noise. */
     double cma_ai[32], cma_aq[32]; long cma_an;   /* 32 == CMANT, which v34.c defines */
+    /* SIPFAX: decision-directed tap error carried from the data-mode decision back to the
+       tap update at the end of V34_cma_t2sample. The taps freeze at data-mode entry, which
+       is fine on a clean channel - measured on our own channel-free signal they are 96.8%
+       a delta - but on the caller's real channel they hold only 86.8% of their energy in
+       the peak tap, leaving 13% error energy (~8.9 dB) where a shaped 12-point set needs
+       about 17 dB. 4-point TRN still slices correctly through that, which is why Phase 4
+       looks healthy and data does not. */
+    double data_ei, data_eq; int data_ev;
     double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 

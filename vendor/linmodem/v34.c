@@ -3198,7 +3198,16 @@ void V34_datagen_test(const char *path)
     e = getenv("SIPFAX_GEN_LEVEL"); if (e) lvl = atof(e);
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = R; p.conv_nb_states = trel;
-    p.use_high_carrier = 1; p.calling = 0;
+    p.use_high_carrier = 1;
+    /* SIPFAX: generate as the CALLER. The scrambler polarity is role-dependent -
+       get_bit() uses calling ? GPC : GPA and put_bit() uses !calling ? GPC : GPA - so an
+       answer-side generator scrambles with GPA while our answer-side receiver descrambles
+       with GPC, and the recovered bits come out 50% ones however well the symbols decode.
+       That is a property of the test rig, not of the modem: on a real call the caller
+       scrambles with GPC and we descramble with GPC. Generating as the caller makes the
+       loop consistent, so the decoded bits are directly checkable - the source is constant
+       1, so a correct end-to-end path yields 100% ones. SIPFAX_GEN_CALLING overrides. */
+    { char *ec = getenv("SIPFAX_GEN_CALLING"); p.calling = ec ? atoi(ec) : 1; }
     V34_static_init(); { extern void dsp_init(void); dsp_init(); }
     memset(&tx, 0, sizeof(tx));
     V34_mod_init(&tx, &p);
@@ -3904,9 +3913,18 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                            and 4-point is exactly what Phase 4 transmits. SIPFAX_ACQ_DELAY
                            moves the window further into data mode so the two can be told
                            apart. */
+                        /* SIPFAX: default 6000 symbols (1.75 s), not 0. Data does NOT start
+                           at E - the caller sends another 3000-4000 symbols of 4-point
+                           Phase-4 material first, measured by the live 4-point EVM staying
+                           at 4.9-5.2% for two blocks after p4_e_rx goes true. With the old
+                           default of 0 every LIVE call acquired its gain and carrier phase
+                           on that tail: the first call with the tx_amp fix reported
+                           rho = 0.78 (strong 4-fold structure, i.e. a 4-point set) and
+                           8 of 12 points with the collapse flag, so its data-mode
+                           acquisition was fitted to the wrong signal entirely. */
                         static long acqdly = -1, acqseen = 0;
                         if (acqdly < 0) { char *ea = getenv("SIPFAX_ACQ_DELAY");
-                                          acqdly = ea ? atol(ea) : 0; }
+                                          acqdly = ea ? atol(ea) : 6000; }
                         if (acqseen < acqdly) { acqseen++; }
                         else {
                         s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
@@ -4254,6 +4272,16 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 xi = (oi*ct2 - oq*st2) * gc;
                 xq = (oi*st2 + oq*ct2) * gc;
                 data_slice(s, xi, xq, &di, &dq);
+                {   /* SIPFAX: carry a decision-directed tap error back to the equaliser.
+                       Rotate the decision out of the derotated/scaled frame into the raw
+                       equaliser output frame, so the LMS gradient is in the same units as
+                       cma_bufi/cma_bufq. Only used when SIPFAX_DATA_DDMU > 0. */
+                    double dth3 = data_carrier(s);
+                    double c3 = cos(dth3), s3 = sin(dth3);
+                    double dri = (di*c3 - dq*s3) / (gc != 0 ? gc : 1.0);
+                    double drq = (di*s3 + dq*c3) / (gc != 0 ? gc : 1.0);
+                    s->data_ei = dri - oi; s->data_eq = drq - oq; s->data_ev = 1;
+                }
                 nrm2 = di*di + dq*dq;
                 if (nrm2 > 0) {
                     pe = atan2(xq*di - xi*dq, xi*di + xq*dq);
@@ -4617,6 +4645,21 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         if (s->p4_mode == 2 && (!s->p4_e_rx || cma_in_data)) {
             double r2t2 = srx_rx16() ? 1.32 : 1.0;                    /* 16-pt Godard radius */
             double m2 = oi*oi + oq*oq, g = r2t2 - m2; ei = g*oi; eq = g*oq; mu = 2e-3;
+        }
+    }
+    {   /* SIPFAX: DECISION-DIRECTED tap adaptation in data mode. CMA is wrong here - its
+           cost is constant-modulus and a shaped multi-ring set has its minimum elsewhere -
+           but DD-LMS is right once the decisions are mostly correct, which they now are
+           (our own signal resolves to lattice-rms 0.166). Normalised by the tap-line energy
+           so the step is scale-free. Off by default; SIPFAX_DATA_DDMU sets the step. */
+        static double ddmu = -1;
+        if (ddmu < 0) { char *e = getenv("SIPFAX_DATA_DDMU"); ddmu = e ? atof(e) : 0.0; }
+        if (s->p4_e_rx && ddmu > 0 && s->data_ev) {
+            double nrm = 1e-9; int k2;
+            for (k2 = 0; k2 < CMANT; k2++)
+                nrm += s->cma_bufi[k2]*s->cma_bufi[k2] + s->cma_bufq[k2]*s->cma_bufq[k2];
+            ei = s->data_ei; eq = s->data_eq; mu = ddmu / nrm;
+            s->data_ev = 0;
         }
     }
     for (i = 0; i < CMANT; i++) {

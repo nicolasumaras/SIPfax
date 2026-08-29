@@ -3449,8 +3449,12 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         static double dkp = -1, dki, dsg;
         double ted, pwn;
         if (dkp < 0) { char *e;
-            e = getenv("SIPFAX_DTED_KP");   dkp = e ? atof(e) : 0.10;
-            e = getenv("SIPFAX_DTED_KI");   dki = e ? atof(e) : 0.002;
+            /* SIPFAX: swept - 0.10/0.002 was carried over from the block path, where the
+               loop re-converges on every pass over buffered audio. The live loop runs once,
+               continuously, and those gains made the tracked clock hunt over 24-48 ppm
+               instead of holding. 0.01/3e-7 holds. */
+            e = getenv("SIPFAX_DTED_KP");   dkp = e ? atof(e) : 0.01;
+            e = getenv("SIPFAX_DTED_KI");   dki = e ? atof(e) : 3e-7;
             e = getenv("SIPFAX_DTED_SIGN"); dsg = e ? atof(e) : -1.0;
         }
         ted = (oi - s->cma_gpi)*s->cma_gmi + (oq - s->cma_gpq)*s->cma_gmq;
@@ -3841,8 +3845,17 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    SIPFAX_DD_KP / SIPFAX_DD_KI override the loop constants. */
                 static double kp = -1, ki = -1;
                 double gc, ct2, st2, xi, xq, di, dq, pe, nrm2;
-                if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 0.0;   /* acquisition handles the static offset; DD drags a dense constellation */
-                              char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 0.0; }
+                /* SIPFAX: the DD carrier loop is now ON by default (kp 0.01, ki 1e-5).
+                   It was defaulted OFF because it "could never bootstrap and dragged the
+                   phase back off after acquisition" - true when that was written, but only
+                   because every data symbol off the inner ring was WRAPPING in the
+                   transmitter (put_sym stored (si*tx_amp)>>7 into an s16 with tx_amp left
+                   at the 4-point Phase-4 value), so the decisions it fed on were noise.
+                   With that fixed the symbols resolve to lattice-rms 0.166 and the loop
+                   works: trellis metric 161 -> 115. Same story as the srx_th tracker,
+                   which now improves the symbols to 0.147. */
+                if (kp < 0) { char *e1 = getenv("SIPFAX_DD_KP"); kp = e1 ? atof(e1) : 0.01;
+                              char *e2 = getenv("SIPFAX_DD_KI"); ki = e2 ? atof(e2) : 1e-5; }
                 /* SIPFAX: DECISION-DIRECTED AGC. The open-loop gain used the UNIFORM
                    mean over the constellation, but the shell mapper is a shaping code
                    that favours inner points: measured on the encoder's own output at
@@ -4749,7 +4762,12 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
    calls, so with reset under the caller's control the same multi-pass scheme can be driven
    ONE pass per call and amortised across audio frames - see p4_block_step. */
 /* SIPFAX: Gardner loop gains; swept offline against a live capture (see FINDINGS 39). */
-static double p4_ted_kp = 0.0, p4_ted_ki = 0.0, p4_ted_sign = 1.0, p4_ted_last = 0.0;
+/* SIPFAX: swept defaults. The block-path Gardner loop shipped disabled (kp=0) with sign
+   +1, and the sign matters enormously - +1 drove the residual to 41-56% against 13-14% at
+   -1. With the loop enabled at these values the per-block EVM V across the caller's TRN
+   flattens (37.6/3.6/15.6 -> 3.9/3.4/3.8). Leaving it off cost lattice-rms 0.498 against
+   0.166 on a signal that resolves. */
+static double p4_ted_kp = 0.10, p4_ted_ki = 0.002, p4_ted_sign = -1.0, p4_ted_last = 0.0;
 static void p4_ted_init(void)
 {
     static int done; char *e;
@@ -5190,6 +5208,43 @@ static void v34_rx_data_params(V34DSPState *s, int R)
     s->L = 4 * s->M * (1 << s->q);
     build_constellation(s);
     build_rings(s);
+    {   /* SIPFAX: RESET THE DECODER STATE. This function exists to avoid V34_init_low so
+           that the equaliser taps, symbol timing and carrier phase acquired over Phase 3/4
+           survive into data mode - which is right. But V34_init_low is also the only place
+           that zeroes the decoder's stateful counters, and they were silently left behind.
+
+           rcnt is the damaging one: it drives the alternation between b-1 and b bits per
+           mapping frame (rcnt += r, mod P). If the receiver's phase differs from the
+           transmitter's, EVERY frame is mis-sized and the bit extraction is wrong forever,
+           however clean the symbols are. Its cycle is P/gcd(r,P) = 5 frames at r=6 P=15,
+           i.e. 40 symbols, so no sweep shorter than that can even see it - which is why a
+           16-symbol alignment sweep came back flat and uninformative.
+
+           Z_1 is the differential quadrant reference (10.1.3.3); stale, it applies a
+           persistent 90-degree offset to every decoded quadrant. conv_reg is the trellis
+           memory, s->x the precoder history, and phase_4d the 4D pairing parity.
+
+           Exactly the fields V34_init_low clears, and nothing else - no taps, no timing,
+           no carrier. SIPFAX_DEC_RESET=0 restores the old behaviour. */
+        static int dr = -1;
+        if (dr < 0) { char *e3 = getenv("SIPFAX_DEC_RESET"); dr = e3 ? atoi(e3) : 1; }
+        if (dr) {
+            s->phase_4d = 0;
+            s->Z_1 = 0;
+            s->U0 = 0;
+            memset(s->x, 0, sizeof(s->x));
+            s->half_data_frame_count = 0;
+            s->sync_count = 0;
+            s->conv_reg = 0;
+            s->scrambler_reg = 0;
+            s->mapping_frame = 0;
+            s->acnt = 0;
+            s->rcnt = 0;
+            { extern int v34_dbg; if (v34_dbg)
+                fprintf(stderr, "[data] decoder state reset (rcnt/acnt/phase_4d/Z_1/U0/"
+                        "conv_reg/scrambler/mapping_frame); equaliser preserved\n"); }
+        }
+    }
     { extern int v34_dbg; if (v34_dbg) {
         int ci; double acc=0; int mx=0;
         for (ci=0; ci<s->L; ci++){ acc += (double)s->constellation[ci][0]*s->constellation[ci][0]

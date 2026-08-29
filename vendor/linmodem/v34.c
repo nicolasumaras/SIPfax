@@ -55,7 +55,7 @@ long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histog
    localises the fault to either the frame assembly or everything after it. */
 FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
-int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0;
+int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2409,6 +2409,9 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         if (k < 0) k = TRELLIS_LENGTH-1;
     }
     u0 = s->u0_memory[trellis_ptr];
+    /* SIPFAX: Y0 of the symbol being emitted now is the LSB of the survivor state at the
+       traceback point - the same state the encoder's conv_reg held when it produced it. */
+    s->y0_out = j & 1;
     {   /* SIPFAX: recover the superframe sync bit. The encoder returns
            U0 = Y[0] ^ c0 ^ v0, with Y[0] = conv_reg & 1 and c0 = 0 when not precoding, so
            v0 = U0 ^ Y0 is available here: u0 above, and Y0 as the LSB of the current
@@ -2678,6 +2681,17 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
     
     t = (Z[1] - Z[0]) & 3;
     I[0][j] = t >> 1;
+    {   /* SIPFAX: U0 is the low bit the encoder folded in as
+           Z[1] = (Z[0] + 2*I0 + U0) & 3, so it is free here - no traceback alignment
+           needed, unlike reading u0_memory out of the trellis. Combined with the buffered
+           Y0 it gives the superframe sync bit v0 = U0 ^ Y0 (c0 = 0 with no precoding). */
+        extern FILE *g_v0f2;
+        int u0b = t & 1;
+        int y0b = (j < 4) ? s->y0_buf[j] : 0;
+        if (!g_v0f2) { char *e = getenv("SIPFAX_V0DUMP2"); if (e) g_v0f2 = fopen(e,"w"); }
+        if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
+                            s->sync_count, s->half_data_frame_count);
+    }
   }
 
   /* compute mapping frame size */
@@ -2786,6 +2800,8 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             }
         }
 
+        if (s->y0_n < 4) s->y0_buf[s->y0_n] = s->y0_out;
+        s->y0_n++;
         memcpy(&s->rx_mapping_frame[s->rx_mapping_frame_count][0], 
                &y[0][0], 4 * sizeof(s16));
         delay++;
@@ -2796,6 +2812,7 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
                 /* a complete mapping frame was read */
                 decode_mapping_frame(s, s->rx_mapping_frame); 
                 s->rx_mapping_frame_count = 0;
+                s->y0_n = 0;
             }
         }
         s->phase_4d = 0;

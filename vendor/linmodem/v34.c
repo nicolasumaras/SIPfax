@@ -2417,7 +2417,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
            the branch machinery is worth testing both ways rather than assumed. */
         { static int torig = -1;
           if (torig < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig = e ? atoi(e) : 0; }
-          if (torig == 2) {
+          if (torig == 2 || torig == 3) {
               /* SIPFAX: BUILD the subset table from the encoder's own coset->trans logic,
                  so it is correct by construction. Measured against the encoder, the stored
                  trellis_trans_16b puts the emitted tuple in the block the ACS scores for
@@ -2655,10 +2655,19 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         /* for each state, we update the next state entry by selecting
            the shortest path */
         /* XXX: should handle error overflow */
-        if (state & 1)
-            n = nb_trans;
-        else 
-            n = 0;
+        {   /* SIPFAX: with the subset depending only on trans - the reading in which the
+               encoder derives trans from the coset tuple alone and uses Y0 solely inside
+               trellis_next_state - the y0 halves of the table are identical and this offset
+               carries no information, since the y0 dependence is already expressed by
+               trellis_next_state(state, j). SIPFAX_TRELLIS_ORIG=3 drops it, paired with the
+               runtime-built table whose halves ARE identical. Keeping the offset while the
+               halves match is the worst combination and is what made mode 2 degrade. */
+            static int noff = -1;
+            if (noff < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); noff = (e && atoi(e)==3); }
+            if (noff)            n = 0;
+            else if (state & 1)  n = nb_trans;
+            else                 n = 0;
+        }
         for(j=0;j<nb_trans;j++) {
             next_state = trellis_next_state(s->conv_nb_states, state, j);
             error = s->state_error[state] + error_table[j + n];

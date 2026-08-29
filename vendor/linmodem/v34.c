@@ -1013,8 +1013,8 @@ static void encode_mapping_frame(V34DSPState *s)
         int v0e = (s->sync_count == 0)
                 ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
         if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
-        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
-                            s->sync_count, s->half_data_frame_count);
+        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
+                            s->sync_count, s->half_data_frame_count, s->conv_reg);
     }
 
     C0 = 0; /* for trellis coding */
@@ -2445,6 +2445,11 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
             tr   = (s->state_decision[j][k] / ndec) % nb_trans;
             ns   = trellis_next_state(s->conv_nb_states, prev, tr);
             s->y0_out = ns & 1;
+            /* SIPFAX: carry the states themselves so the decoder's numbering can be
+               compared against the encoder's conv_reg sequence directly. The symbols
+               decode 100% correctly, so the surviving path must track the encoder's
+               states - if these sequences disagree, the numbering does. */
+            s->st_arr = j; s->st_prev = prev;
             { extern long g_y0same, g_y0tot; g_y0tot++; if ((ns & 1) == (j & 1)) g_y0same++; }
         } else {
             s->y0_out = j & 1;
@@ -2737,8 +2742,9 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
         jj = j + y0sh;
         y0b = (jj >= 0 && jj < 4) ? s->y0_buf[jj] : s->y0_prev;
         if (!g_v0f2) { char *e = getenv("SIPFAX_V0DUMP2"); if (e) g_v0f2 = fopen(e,"w"); }
-        if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
-                            s->sync_count, s->half_data_frame_count, Z[0], Z[1]);
+        if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
+                            s->sync_count, s->half_data_frame_count, Z[0], Z[1],
+                            s->st_arr, s->st_prev);
     }
   }
 

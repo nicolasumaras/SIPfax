@@ -271,6 +271,7 @@ typedef struct V34DSPState {
        fixed sync position U0 = Y0 ^ SYNC[h] with Y0 pseudorandom, so there is no bias to
        detect without Y0. */
     int y0_out; int y0_buf[4]; int y0_n; int y0_prev;
+    int st_arr, st_prev;   /* SIPFAX: Viterbi survivor states, for numbering checks */
     double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 

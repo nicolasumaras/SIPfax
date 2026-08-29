@@ -3874,8 +3874,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        collapsing the constellation. SIPFAX_ACQ_GAIN=1 restores the search
                        for comparison. Only the carrier phase is searched. */
                     static int acq_search_gain = -1;
+                    static double acq_gain_win = 3.0;      /* +- dB around the measured gain */
                     if (acq_search_gain < 0) { char *e7 = getenv("SIPFAX_ACQ_GAIN");
-                                               acq_search_gain = e7 ? atoi(e7) : 0; }
+                                               acq_search_gain = e7 ? atoi(e7) : 1;
+                                               { char *e8 = getenv("SIPFAX_ACQ_GAIN_DB");
+                                                 if (e8) acq_gain_win = atof(e8); } }
                     /* SIPFAX: ACQUIRE gain and carrier phase before decoding anything.
                        Two static errors otherwise wreck the whole of data mode, and both
                        were measured against encoder ground truth on a noiseless signal:
@@ -3935,7 +3938,21 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                            above the true shaped mean and excluded the right answer; the
                            corrected value sits below |c|^2 = 2 and admits the collapse).
                            SIPFAX_ACQ_GAIN=1 restores it for comparison. */
-                        for (gdb = -14.0; acq_search_gain && gdb <= 6.0; gdb += 0.1) {
+                        /* SIPFAX: search the gain again, but in a NARROW window around the
+                           measured shaped mean instead of the old -14..+6 dB range.
+                           v34_shaped_meanc2() fixes the scale from our own mapper, which is
+                           right in principle, but on a live signal the channel gain and the
+                           AGC leave it a little off - measured on the first call with the
+                           tx_amp fix, an exhaustive 2-D sweep found lattice-rms 0.124 at
+                           gain x0.792 while the acquisition, with the search disabled,
+                           settled for 0.359. That is the difference between a lock and no
+                           lock, thrown away by removing the search entirely.
+                           +-3 dB is wide enough for that -2.0 dB correction and far too
+                           narrow for the degenerate collapse, which needed -4.5 dB to squash
+                           the constellation onto its inner ring; the anti-collapse power
+                           floor still guards underneath. SIPFAX_ACQ_GAIN=0 disables. */
+                        for (gdb = -acq_gain_win; acq_search_gain && gdb <= acq_gain_win + 1e-9;
+                             gdb += 0.05) {
                             double g2 = pow(10.0, gdb/20.0), em = 1e30, t2;
                             if (pw0*g2*g2 < pwmin) continue;
                             for (t2 = 0; t2 < 90.0; t2 += 3.0) {

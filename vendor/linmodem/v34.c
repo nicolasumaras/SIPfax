@@ -56,6 +56,7 @@ long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histog
 FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
+long g_y0same = 0, g_y0tot = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2411,7 +2412,31 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     u0 = s->u0_memory[trellis_ptr];
     /* SIPFAX: Y0 of the symbol being emitted now is the LSB of the survivor state at the
        traceback point - the same state the encoder's conv_reg held when it produced it. */
-    s->y0_out = j & 1;
+    {   /* SIPFAX: COMPUTE Y[0] the way the encoder does, rather than reading a stored
+           state's LSB. The encoder does Y[0] = conv_reg & 1 AFTER
+           conv_reg = trellis_next_state(nb, conv_reg, trans), so recover both inputs here:
+           the predecessor state from state_path, and the branch from state_decision, which
+           the ACS wrote as decision_table[trans + n] = (trans+n)*ndec + jmin with n either
+           0 or nb_trans. SIPFAX_Y0MODE=0 keeps the old j&1 for comparison.
+           NOTE the algebra says these are the same bit - trellis_next_state(prev,trans) IS
+           the arrival state j, since state_decision/state_path are indexed by next_state -
+           so this is expected to change nothing. Measuring rather than asserting, because
+           that reasoning is what has been wrong five times. */
+        static int y0mode = -1;
+        if (y0mode < 0) { char *em = getenv("SIPFAX_Y0MODE"); y0mode = em ? atoi(em) : 1; }
+        if (y0mode) {
+            int ndec = 128 >> nbbt;
+            int prev, tr, ns;
+            if (s->conv_nb_states >= 64) ndec = 16;
+            prev = s->state_path[j][k];
+            tr   = (s->state_decision[j][k] / ndec) % nb_trans;
+            ns   = trellis_next_state(s->conv_nb_states, prev, tr);
+            s->y0_out = ns & 1;
+            { extern long g_y0same, g_y0tot; g_y0tot++; if ((ns & 1) == (j & 1)) g_y0same++; }
+        } else {
+            s->y0_out = j & 1;
+        }
+    }
     {   /* SIPFAX: recover the superframe sync bit. The encoder returns
            U0 = Y[0] ^ c0 ^ v0, with Y[0] = conv_reg & 1 and c0 = 0 when not precoding, so
            v0 = U0 ^ Y0 is available here: u0 above, and Y0 as the LSB of the current
@@ -5804,6 +5829,9 @@ void V34_stream_decode_file(const char *path)
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
     fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",
             g_databits, g_dataones, g_databits ? 100.0*g_dataones/g_databits : 0.0, rx.data_n);
+    { extern long g_y0same, g_y0tot;
+      if (g_y0tot) fprintf(stderr, "[data] computed Y0 == survivor LSB in %.1f%% of %ld\n",
+                           100.0*g_y0same/g_y0tot, g_y0tot); }
     { extern long g_dh[8], g_dmiss, g_dn; int q9;
       fprintf(stderr, "[data] decided |coord| max-of-pair histogram (1,3,5,7,9,11,13,>13):");
       for (q9 = 0; q9 < 8; q9++) fprintf(stderr, " %ld", g_dh[q9]);

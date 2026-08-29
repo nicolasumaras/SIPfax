@@ -54,6 +54,7 @@ long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histog
    self-synchronising descrambler recovers the source within 23 bits. Comparing the two
    localises the fault to either the frame assembly or everything after it. */
 FILE *g_mftx = 0, *g_mfrx = 0;
+FILE *g_decf = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -2614,6 +2615,14 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
               && !(x == s->constellation[0][0] && y == s->constellation[0][1]))
               g_dmiss++;
       }
+      {   /* SIPFAX: dump the DECIDED coordinate sequence. Its distribution was verified
+             against the transmitted set (54.5% inner vs 54.7%), but a distribution match
+             says nothing about whether the right symbol is decided at the right time -
+             which is what every downstream stage depends on. */
+          extern FILE *g_decf;
+          if (!g_decf) { char *e = getenv("SIPFAX_DECDUMP"); if (e) g_decf = fopen(e,"w"); }
+          if (g_decf) fprintf(g_decf, "%d %d\n", x, y);
+      }
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
       /* SIPFAX: quadrant handedness. rotate_clockwise() is really CCW - case 1 is
@@ -3253,6 +3262,50 @@ static double v34_shaped_meanc2(int R, int nb_states)
    The file starts with 4-point Phase-4 material, which CMA can acquire, and then switches
    to data - mirroring a real call, and letting SIPFAX_FORCE_DATA_AT line the receiver's
    switch up with the transmitter's. */
+/* SIPFAX: round-trip the shell mapper. index_to_rings() maps a K-bit index to four ring
+   pairs; rings_to_index() is meant to be its exact inverse, and it carries n = K of the
+   b bits in every mapping frame (11 of 22 at R=9600). The loopback only ever exercises it
+   on exact integer symbols, so an inverse that is wrong for part of its domain would pass
+   there and corrupt half of every frame on a real signal. Enumerate the whole domain. */
+void V34_ringtest(void)
+{
+    V34State p; static V34DSPState s;
+    int R = 9600, i, k, bad = 0, first = -1;
+    char *e = getenv("SIPFAX_RINGTEST_R"); if (e && atoi(e) > 0) R = atoi(e);
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = R; p.conv_nb_states = 64;
+    p.use_high_carrier = 1; p.calling = 0;
+    V34_static_init(); { extern void dsp_init(void); dsp_init(); }
+    memset(&s, 0, sizeof(s));
+    V34_init_low(&s, &p, 1);
+    fprintf(stderr, "[ring] R=%d  b=%d K=%d q=%d M=%d L=%d  -> enumerating %d indices\n",
+            R, s.b, s.K, s.q, s.M, s.L, 1 << s.K);
+    for (i = 0; i < (1 << s.K); i++) {
+        int m[4][2], back;
+        index_to_rings(&s, m, i);
+        back = rings_to_index(&s, m);
+        if (back != i) {
+            bad++;
+            if (first < 0) {
+                first = i;
+                fprintf(stderr, "[ring] FIRST MISMATCH index %d -> rings "
+                        "(%d,%d)(%d,%d)(%d,%d)(%d,%d) -> %d\n", i,
+                        m[0][0],m[0][1],m[1][0],m[1][1],
+                        m[2][0],m[2][1],m[3][0],m[3][1], back);
+            }
+        }
+        for (k = 0; k < 4; k++) {
+            if (m[k][0] < 0 || m[k][0] >= s.M || m[k][1] < 0 || m[k][1] >= s.M) {
+                fprintf(stderr, "[ring] index %d produced ring out of [0,M): (%d,%d)\n",
+                        i, m[k][0], m[k][1]);
+                i = (1 << s.K); break;
+            }
+        }
+    }
+    fprintf(stderr, "[ring] round-trip mismatches: %d of %d  (%.2f%%)\n",
+            bad, 1 << s.K, 100.0*bad/(double)(1 << s.K));
+}
+
 void V34_datagen_test(const char *path)
 {
     V34State p; static V34DSPState tx; s16 out[512]; FILE *f; int b, nb4, nball;

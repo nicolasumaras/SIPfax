@@ -58,6 +58,7 @@ FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
 FILE *g_encf = 0;
+FILE *g_tblf = 0;
 int *g_truest = 0; long g_truen = 0, g_truei = 0;
 long g_et_n = 0, g_et_zero = 0; double g_et_min = 0, g_et_max = 0, g_et_sum = 0, g_et_spread = 0;
 long g_ss_n = 0, g_ss_tied = 0; double g_ss_spread = 0;
@@ -885,6 +886,22 @@ static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
 
   /* compute the next trellis state */
   trans = (Y[3] << 3) | (Y[4] << 2) | (Y[2] << 1) | Y[1];
+  {   /* SIPFAX: dump what the encoder ACTUALLY emits for this branch - the branch index
+         (trans), the y0 that selects the table half, and the four coset labels the decoder
+         will compare against, computed the same way the encoder does: ((coord+3)>>1)&3.
+         The decoder's ACS scores branch (trans + 16*y0) using the tuples in that row block,
+         so if the emitted tuple is not IN that block, the table's row order disagrees with
+         the encoder's trans packing and every branch metric is attached to the wrong
+         branch. */
+      extern FILE *g_tblf;
+      if (!g_tblf) { char *e = getenv("SIPFAX_TBLDUMP"); if (e) g_tblf = fopen(e,"w"); }
+      if (g_tblf) {
+          int c0l = ((yy[0][0] + 3) >> 1) & 3, c1l = ((yy[0][1] + 3) >> 1) & 3;
+          int c2l = ((yy[1][0] + 3) >> 1) & 3, c3l = ((yy[1][1] + 3) >> 1) & 3;
+          fprintf(g_tblf, "%d %d %d %d %d %d\n", trans, s->conv_reg & 1,
+                  c0l, c1l, c2l, c3l);
+      }
+  }
 
   { extern FILE *gt_f; if (gt_f) fprintf(gt_f, "%d %d %d %d %d %d ", yy[0][0], yy[0][1], yy[1][0], yy[1][1], trans, s->conv_reg); }
   s->conv_reg = trellis_next_state(s->conv_nb_states, s->conv_reg, trans);
@@ -2400,6 +2417,53 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
            the branch machinery is worth testing both ways rather than assumed. */
         { static int torig = -1;
           if (torig < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig = e ? atoi(e) : 0; }
+          if (torig == 2) {
+              /* SIPFAX: BUILD the subset table from the encoder's own coset->trans logic,
+                 so it is correct by construction. Measured against the encoder, the stored
+                 trellis_trans_16b puts the emitted tuple in the block the ACS scores for
+                 that branch only 26.3% of the time - its row order disagrees with
+                 trans = (Y[3]<<3)|(Y[4]<<2)|(Y[2]<<1)|Y[1], so every branch metric is
+                 attached to the wrong branch. Each coset 4-tuple determines trans uniquely
+                 while y0 is free (it is the state's LSB), so the two y0 halves must hold
+                 the SAME 16 tuples, and 256 tuples over 16 trans values gives exactly 16
+                 per block. */
+              static u8 built[512][4]; static int done = 0;
+              if (!done) {
+                  int c[4], cnt[16], t9, q9;
+                  for (t9 = 0; t9 < 16; t9++) cnt[t9] = 0;
+                  for (c[0]=0;c[0]<4;c[0]++) for (c[1]=0;c[1]<4;c[1]++)
+                  for (c[2]=0;c[2]<4;c[2]++) for (c[3]=0;c[3]<4;c[3]++) {
+                      int ss[2][3], YY[5], tr, i9;
+                      for (i9 = 0; i9 < 2; i9++) {
+                          int x = c[i9*2], y = c[i9*2+1];
+                          int x0 = x & 1, x1 = (x & 2) >> 1;
+                          int y0 = y & 1, y1 = (y & 2) >> 1;
+                          ss[i9][2] = x1 ^ y1 ^ y0 ^ x0;
+                          ss[i9][1] = y0;
+                          ss[i9][0] = y0 ^ x0;
+                      }
+                      YY[4] = ss[0][2] ^ ss[1][2];
+                      YY[3] = ss[0][1];
+                      YY[2] = ss[0][0];
+                      YY[1] = (ss[0][0] & ~ss[1][0] & 1) ^ ss[0][1] ^ ss[1][1];
+                      tr = (YY[3]<<3) | (YY[4]<<2) | (YY[2]<<1) | YY[1];
+                      if (cnt[tr] < 16) {
+                          for (q9 = 0; q9 < 4; q9++) {
+                              built[tr*16 + cnt[tr]][q9]        = (u8)c[q9];
+                              built[(tr+16)*16 + cnt[tr]][q9]   = (u8)c[q9];
+                          }
+                          cnt[tr]++;
+                      }
+                  }
+                  { extern int v34_dbg; if (v34_dbg) {
+                      int bad = 0;
+                      for (t9 = 0; t9 < 16; t9++) if (cnt[t9] != 16) bad++;
+                      fprintf(stderr, "[acs] built subset table: %d of 16 branches did NOT "
+                              "get exactly 16 tuples\n", bad); } }
+                  done = 1;
+              }
+              p = &built[0][0];
+          } else
           p = torig ? &trellis_trans_16[0][0] : &trellis_trans_16b[0][0]; }
         break;
     }

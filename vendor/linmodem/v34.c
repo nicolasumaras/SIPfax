@@ -49,6 +49,11 @@ void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 long g_moob = 0, g_mtot = 0, g_mmax = 0;   /* SIPFAX: out-of-constellation ring indices */
 long g_dh[8] = {0}, g_dmiss = 0, g_dn = 0;  /* SIPFAX: decided-coordinate histogram */
+/* SIPFAX: mapping-frame bit dumps. The encoder's data[] holds the SCRAMBLED source bits it
+   packs into a frame; the decoder's data[] should reproduce them exactly, after which the
+   self-synchronising descrambler recovers the source within 23 bits. Comparing the two
+   localises the fault to either the frame assembly or everything after it. */
+FILE *g_mftx = 0, *g_mfrx = 0;
 /* SIPFAX: ride the CONTINUOUSLY TRACKED carrier in data mode instead of a static angle.
    The 4.9% EVM that makes the front end look healthy on Phase-4 TRN is measured on
    pi_/pq_, which are derotated by srx_th - the 4th-power estimator, updated every 64
@@ -939,7 +944,10 @@ static void encode_mapping_frame(V34DSPState *s)
       data[0] = aux_get_bit(s); 
   }
 
-  for(i=1;i<mp_size;i++) data[i] = get_bit(s); 
+  for(i=1;i<mp_size;i++) data[i] = get_bit(s);
+  { extern FILE *g_mftx; if (!g_mftx) { char *e = getenv("SIPFAX_MFDUMP_TX");
+      if (e) g_mftx = fopen(e,"w"); }
+    if (g_mftx) { int z; for (z=0;z<mp_size;z++) fputc('0'+(data[z]&1), g_mftx); fputc('\n', g_mftx); } }
 
   //  print_bit_vector("sent", data, mp_size);
   
@@ -2692,6 +2700,9 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
       aux_put_bit(s, data[0]); 
   }
 
+  { extern FILE *g_mfrx; if (!g_mfrx) { char *e = getenv("SIPFAX_MFDUMP_RX");
+      if (e) g_mfrx = fopen(e,"w"); }
+    if (g_mfrx) { int z; for (z=0;z<mp_size;z++) fputc('0'+(data[z]&1), g_mfrx); fputc('\n', g_mfrx); } }
   /* send all the decoded bits */
   for(i=1;i<mp_size;i++) put_bit(s, data[i]); 
   //  print_bit_vector("recv", data, mp_size);

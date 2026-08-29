@@ -2387,7 +2387,16 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         break;
     default:
         nbbt = 4;
-        p = &trellis_trans_16b[0][0]; /* SIPFAX: corrected 16-cand table */
+        /* SIPFAX: SIPFAX_TRELLIS_ORIG=1 selects linmodem's original trellis_trans_16
+           (256 rows, 8 coset-tuples per branch, n = 128>>nbbt) instead of the regenerated
+           trellis_trans_16b (512 rows, 16 per branch). The regenerated table was introduced
+           on the argument that the Wei 4D partition needs 16 tuples; that may be right, but
+           the Viterbi's survivor states are currently uncorrelated with the encoder's
+           (1.6%, i.e. chance) while the symbols still decode 100% off the slicer alone, so
+           the branch machinery is worth testing both ways rather than assumed. */
+        { static int torig = -1;
+          if (torig < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig = e ? atoi(e) : 0; }
+          p = torig ? &trellis_trans_16[0][0] : &trellis_trans_16b[0][0]; }
         break;
     }
     nb_trans = 1 << nbbt;
@@ -2404,7 +2413,9 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
            but it bites at real SNR, which is exactly where we are. Derive the threshold
            instead of hardcoding a shift. */
         int ndec = 128 >> nbbt;
-        if (s->conv_nb_states >= 64) ndec = 16;
+        static int torig3 = -1;
+        if (torig3 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig3 = e ? atoi(e) : 0; }
+        if (!torig3 && s->conv_nb_states >= 64) ndec = 16;
         u0_thresh = nb_trans * ndec;
     }
 
@@ -2515,7 +2526,11 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     /* compute the error table */
     /* XXX: may be optimized by using the algebraic properties of the mapping */    
     n = 128 >> nbbt;
-    if (s->conv_nb_states >= 64) n = 16; /* SIPFAX: 16 coset-tuples/branch */
+    {   /* SIPFAX: the tuple count must match the table selected above. */
+        static int torig2 = -1;
+        if (torig2 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig2 = e ? atoi(e) : 0; }
+        if (!torig2 && s->conv_nb_states >= 64) n = 16;
+    }
     jmin = 0; /* no warning */
     for(i=0;i<(nb_trans*2);i++) {
         emin = 0x7fffffff;

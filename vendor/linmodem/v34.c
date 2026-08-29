@@ -1698,6 +1698,37 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
             break;
         case V34_STARTUP4_E:
             V34_send_E(s);
+            {   /* SIPFAX: SET tx_amp FOR THE DATA CONSTELLATION. It was left at whatever
+                   Phase 4 used - CALC_AMP(S_POWER) or CALC_AMP(TRN4_POWER), both calibrated
+                   for a 4-point set whose coordinates are only +-1 - and put_sym stores
+                   (si * tx_amp) >> 7 into an s16. At tx_amp = 11585 that is 11585 for
+                   lattice coordinate 1, but 34755 for coordinate 3 and 81095 for
+                   coordinate 7: every data symbol off the innermost ring WRAPPED.
+
+                   Phase 4 never showed it because TRN is all +-1. Data mode uses +-1,+-3 at
+                   L=12 and up to +-7 at L=48, so roughly half of every data frame was
+                   transmitted with the wrong sign and magnitude. Measured: audio
+                   reconstructed from the transmitted symbols correlates 1.0000 with the
+                   real output through Phase 4 and -0.12 the moment data starts, and a
+                   receiver that tracks TRN symbol-for-symbol at 7% EVM loses all
+                   correlation at exactly that boundary.
+
+                   Scale to the constellation actually in use, the same way S_POWER and
+                   TRN4_POWER do: mean |c|^2 over the quarter constellation (rotation
+                   preserves magnitude, so that is the full set's mean). */
+                int ci, nq = s->L / 4; double acc = 0;
+                for (ci = 0; ci < nq; ci++)
+                    acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
+                         + (double)s->constellation[ci][1]*s->constellation[ci][1];
+                if (nq > 0 && acc > 0) {
+                    double mp = acc / nq;
+                    s->tx_amp = CALC_AMP(mp);
+                    { extern int v34_dbg; if (v34_dbg)
+                        fprintf(stderr, "[p4] TX: data constellation L=%d mean|c|^2=%.2f "
+                                "-> tx_amp %d (was %d)\n", s->L, mp, (int)CALC_AMP(mp),
+                                s->tx_amp); }
+                }
+            }
             { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: E sent -> DATA (B1)\n"); }
             s->state = V34_DATA;
             break;
@@ -3185,6 +3216,19 @@ void V34_datagen_test(const char *path)
             R, trel, p4s, total, path);
     for (b = 0; b < nball; b++) {
         if (b == nb4) {
+            {   /* SIPFAX: same tx_amp fix as the V34_STARTUP4_E path - this harness jumps
+                   straight to V34_DATA and would otherwise inherit the 4-point amplitude. */
+                int ci, nq = tx.L / 4; double acc = 0;
+                for (ci = 0; ci < nq; ci++)
+                    acc += (double)tx.constellation[ci][0]*tx.constellation[ci][0]
+                         + (double)tx.constellation[ci][1]*tx.constellation[ci][1];
+                if (nq > 0 && acc > 0) {
+                    double mp = acc / nq;
+                    fprintf(stderr, "[gen] data constellation L=%d mean|c|^2=%.2f -> tx_amp %d (was %d)\n",
+                            tx.L, mp, (int)CALC_AMP(mp), tx.tx_amp);
+                    tx.tx_amp = CALC_AMP(mp);
+                }
+            }
             tx.state = V34_DATA;
             fprintf(stderr, "[gen] switching to DATA at t=%.2f s\n", b*512/8000.0);
         }

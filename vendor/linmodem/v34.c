@@ -57,7 +57,9 @@ FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
+int g_surv_bs = 0;
 FILE *g_encf = 0;
+FILE *g_survf = 0;   /* SIPFAX: survivor-path dump */
 FILE *g_tblf = 0;
 int *g_truest = 0; long g_truen = 0, g_truei = 0;
 long g_et_n = 0, g_et_zero = 0; double g_et_min = 0, g_et_max = 0, g_et_sum = 0, g_et_spread = 0;
@@ -2496,10 +2498,21 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     /* start traceback from the MINIMUM-metric survivor (not arbitrary j=0):
        survivors have not necessarily merged, so the wrong start gives wrong bits */
     { int bs=0, be=s->state_error[0], st; for(st=1;st<s->conv_nb_states;st++) if(s->state_error[st]<be){be=s->state_error[st];bs=st;} j=bs; }
+    { extern int g_surv_bs; g_surv_bs = j; }
     for(i=0;i<(TRELLIS_LENGTH-1);i++) {
         j = s->state_path[j][k];
         k--;
         if (k < 0) k = TRELLIS_LENGTH-1;
+    }
+    {   /* SIPFAX: SURVIVOR-PATH SCORE. The existing TRUESTATE probe scores the
+           INSTANTANEOUS argmin; the Viterbi's actual output comes from the traceback,
+           which merges. Dump both: g_surv_bs is the min-metric state at time t (the
+           traceback start), j is the endpoint after walking back TRELLIS_LENGTH-1
+           through state_path. Scored offline against SIPFAX_ENCDUMP field 7 over a
+           delay sweep, so no in-C alignment assumption is baked in. */
+        extern FILE *g_survf; extern int g_surv_bs;
+        if (!g_survf) { char *e = getenv("SIPFAX_SURVDUMP"); if (e) g_survf = fopen(e,"w"); }
+        if (g_survf) fprintf(g_survf, "%d %d\n", g_surv_bs, j);
     }
     u0 = s->u0_memory[trellis_ptr];
     /* SIPFAX: Y0 of the symbol being emitted now is the LSB of the survivor state at the
@@ -2519,7 +2532,14 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         if (y0mode) {
             int ndec = 128 >> nbbt;
             int prev, tr, ns;
-            if (s->conv_nb_states >= 64) ndec = 16;
+            /* SIPFAX: must match the ndec the ACS used when it WROTE decision_table
+               (see the u0_thresh block above) - that site forces 16 only for the stored
+               table (torig3 == 0). Reading it back with a different divisor yields a
+               garbage branch index, which is why Y0 was uncorrelated on every table but
+               the default. */
+            { static int tz = -1;
+              if (tz < 0) { char *ez = getenv("SIPFAX_TRELLIS_ORIG"); tz = ez ? atoi(ez) : 0; }
+              if (!tz && s->conv_nb_states >= 64) ndec = 16; }
             prev = s->state_path[j][k];
             tr   = (s->state_decision[j][k] / ndec) % nb_trans;
             ns   = trellis_next_state(s->conv_nb_states, prev, tr);

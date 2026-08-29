@@ -2656,6 +2656,17 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
             g_truei++;
         }
     }
+    {   /* SIPFAX: normalise - subtract the minimum from every survivor. Differences are
+           all that matter to the ACS, and without this the metrics grow without bound (the
+           code's own "XXX: should handle error overflow"). Also keeps the spread
+           measurable. */
+        int st4, mn4 = 0x7fffffff;
+        for (st4 = 0; st4 < s->conv_nb_states; st4++)
+            if (s->state_error1[st4] < mn4) mn4 = s->state_error1[st4];
+        if (mn4 != 0x7fffffff && mn4 > 0)
+            for (st4 = 0; st4 < s->conv_nb_states; st4++)
+                if (s->state_error1[st4] != 0x7fffffff) s->state_error1[st4] -= mn4;
+    }
     /* XXX: this copy is not needed. Permute the two tables */
     memcpy(s->state_error, s->state_error1, sizeof(s->state_error));
 
@@ -5612,6 +5623,18 @@ static void v34_rx_data_params(V34DSPState *s, int R)
             s->half_data_frame_count = 0;
             s->sync_count = 0;
             s->conv_reg = 0;
+            {   /* SIPFAX: Viterbi bootstrap. state_error was never initialised anywhere -
+                   not here, not in V34_init_low - so every state started equal, and equal
+                   path metrics are an ABSORBING state for this ACS: each next-state's 16
+                   incoming transitions span the full set of branch metrics, so every state
+                   takes the global minimum and they stay identical forever. Measured: all
+                   64 state metrics exactly equal on every symbol (spread 0.0) while the
+                   branch metrics spread ~700. Start from one known state so the paths can
+                   differentiate. */
+                int q7;
+                for (q7 = 0; q7 < TRELLIS_MAX_STATES; q7++) s->state_error[q7] = 1 << 20;
+                s->state_error[0] = 0;
+            }
             s->scrambler_reg = 0;
             s->mapping_frame = 0;
             s->acnt = 0;

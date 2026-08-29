@@ -58,9 +58,13 @@ FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
 long g_cs_tot = 0, g_cs_ok = 0, g_cs_all4 = 0;
+long g_z_n=0,g_z_min0=0,g_z_cnt=0,g_z_hist[8]={0};double g_z_minv=0;
+int g_ntup=0; long g_az_n=0,g_az_ok=0,g_az_half=0,g_az_reach=0;
+int *g_v0orc=0; long g_v0orn=0, g_v0ori=0;
 int g_surv_bs = 0;
 FILE *g_encf = 0;
-FILE *g_survf = 0;   /* SIPFAX: survivor-path dump */
+FILE *g_survf = 0;
+FILE *g_zf = 0;   /* SIPFAX: survivor-path dump */
 FILE *g_tblf = 0;
 int *g_truest = 0; long g_truen = 0, g_truei = 0;
 long g_et_n = 0, g_et_zero = 0; double g_et_min = 0, g_et_max = 0, g_et_sum = 0, g_et_spread = 0;
@@ -2662,6 +2666,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         if (torig2 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig2 = e ? atoi(e) : 1; }
         if (!torig2 && s->conv_nb_states >= 64) n = 16;
     }
+    { extern int g_ntup; g_ntup = n; }
     jmin = 0; /* no warning */
     for(i=0;i<(nb_trans*2);i++) {
         emin = 0x7fffffff;
@@ -2697,6 +2702,26 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
     }
 
+    {   /* SIPFAX: is the per-symbol branch information unambiguous? trellis_trans_16 is a
+           PARTITION of the 256 coset tuples into 32 blocks of 8, so in a noise-free loopback
+           exactly one branch can contain the transmitted tuple and its error_table entry must
+           be exactly 0, every other branch strictly positive. If that holds, the ACS is being
+           handed perfect information and any wrong branch is an ACS/traceback fault. If the
+           minimum is NOT 0, the transmitted tuple is in no scored block - a level-mapping or
+           half-selection fault instead. */
+        extern long g_z_n, g_z_min0, g_z_cnt, g_z_hist[8]; extern double g_z_minv;
+        static int zchk = -1; int zi, zc = 0, zmin = 0x7fffffff;
+        if (zchk < 0) { char *e = getenv("SIPFAX_ZEROCHK"); zchk = e ? atoi(e) : 0; }
+        if (zchk) {
+            for (zi = 0; zi < nb_trans*2; zi++) {
+                if (error_table[zi] < zmin) zmin = error_table[zi];
+                if (error_table[zi] == 0) zc++;
+            }
+            g_z_n++; g_z_cnt += zc; g_z_minv += zmin;
+            if (zmin == 0) g_z_min0++;
+            g_z_hist[zc < 7 ? zc : 7]++;
+        }
+    }
     /* we compute the bit u0 (needed for synchronization & c0 estimation) */
     jmin = 0;
     emin = 0x7fffffff;
@@ -2725,9 +2750,41 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                trellis_next_state(state, j). SIPFAX_TRELLIS_ORIG=3 drops it, paired with the
                runtime-built table whose halves ARE identical. Keeping the offset while the
                halves match is the worst combination and is what made mode 2 degrade. */
-            static int noff = -1;
+            static int noff = -1, half = -1;
             if (noff < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); noff = (e && atoi(e)==3); }
+            if (half < 0) { char *e = getenv("SIPFAX_HALF"); half = e ? atoi(e) : 1; }   /* 1 = recovered U0 (no oracle, 100% bits, no sequence gain); 2 = (state&1)^v0, full trellis, needs v0 */
+            /* SIPFAX: ROOT CAUSE of the coset-selection defect. The y0 half of the subset
+               table is indexed by the bit the encoder actually folded into the transmitted
+               point, which is U0 = Y[0] ^ c0 ^ v0 - NOT Y[0] alone. v0 is the superframe
+               sync bit, nonzero at sync_count == 0 for the one-bits of SYNC_PATTERN, i.e.
+               on 2.5% of symbols. Measured in a noise-free loopback: the half containing the
+               transmitted tuple equals the encoder's U0 on 100.00% of symbols and the state
+               parity on only 97.50%. On the v0-flipped symbols the zero-cost branch sits in
+               the half this loop cannot reach, so the true path is forced onto a non-zero
+               branch and is overtaken. Invisible with trellis_trans_16b because its two y0
+               halves are identical.
+               jmin/emin above already recover U0 as the half of the GLOBAL minimum over all
+               2*nb_trans branches - that is exactly what u0_memory stores. Use it. */
+            /* SIPFAX: HALF=2 is the PRINCIPLED form, half = (state & 1) ^ v0, with v0
+               supplied by SIPFAX_V0ORACLE (field 4 of an ENCDUMP, one line per 4D symbol).
+               HALF=1 (global recovered U0) fixes the bits but makes the half a scalar, which
+               removes the per-state Y0 constraint and destroys state tracking. HALF=2 keeps
+               the constraint AND accounts for v0; it is what a decoder with superframe sync
+               would do. Acquiring v0 without the oracle is the remaining work. */
             if (noff)            n = 0;
+            else if (half == 2) {
+                extern int *g_v0orc; extern long g_v0orn, g_v0ori;
+                static int voff = -99; long vi;
+                int v0h = 0;
+                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : -1; }
+                /* SIPFAX: measured exactly - half == (conv_reg[t]&1) ^ v0[t-1] == U0[t],
+                   100.00% over 16000 noise-free symbols. The source-state parity is right;
+                   it needs the PREVIOUS symbol,s v0, hence the default offset of -1. */
+                vi = g_v0ori + voff;
+                if (g_v0orc && vi >= 0 && vi < g_v0orn) v0h = g_v0orc[vi];
+                n = (((state & 1) ^ v0h) ? nb_trans : 0);
+            }
+            else if (half)       n = (jmin >= nb_trans) ? nb_trans : 0;
             else if (state & 1)  n = nb_trans;
             else                 n = 0;
         }
@@ -2755,6 +2812,56 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
     }
 
+    {   /* SIPFAX: load the v0 oracle (field 4 of an ENCDUMP), one entry per 4D symbol. */
+        extern int *g_v0orc; extern long g_v0orn, g_v0ori;
+        static int loaded2 = 0;
+        if (!loaded2) { char *fn = getenv("SIPFAX_V0ORACLE"); loaded2 = 1;
+            if (fn) { FILE *f = fopen(fn,"r"); char ln[256];
+                if (f) { long cap = 1<<20; g_v0orc = (int*)malloc(cap*sizeof(int));
+                    while (g_v0orn < cap && fgets(ln,sizeof(ln),f)) {
+                        int f1,f2,f3,f4;
+                        if (sscanf(ln,"%d %d %d %d",&f1,&f2,&f3,&f4) == 4)
+                            g_v0orc[g_v0orn++] = f4 & 1;
+                    }
+                    fclose(f);
+                    fprintf(stderr,"[acs] v0 oracle: %ld entries\n", g_v0orn); } } }
+    }
+    {   /* SIPFAX: the branch information is unambiguous (exactly one zero-cost branch per
+           symbol with trellis_trans_16), so ask whether the ACS actually FOLLOWS it. For
+           source state `state` the loop can only reach indices j + 16*(state&1) - one half is
+           unreachable. If the unique zero branch lies in the half the true state cannot
+           reach, the true path is forced onto a non-zero branch and can be overtaken. */
+        extern long g_az_n, g_az_ok, g_az_half, g_az_reach; extern int g_ntup;
+        static int azchk = -1;
+        if (azchk < 0) { char *e = getenv("SIPFAX_ACSZERO"); azchk = e ? atoi(e) : 0; }
+        if (azchk && g_ntup > 0) {
+            int zi, z = -1, bs5 = 0, st5, d5, br5, par;
+            int be5 = s->state_error1[0];
+            for (zi = 0; zi < nb_trans*2; zi++) if (error_table[zi] == 0) { z = zi; break; }
+            for (st5 = 1; st5 < s->conv_nb_states; st5++)
+                if (s->state_error1[st5] < be5) { be5 = s->state_error1[st5]; bs5 = st5; }
+            d5  = s->state_decision[bs5][trellis_ptr];
+            br5 = d5 / g_ntup;
+            g_az_n++;
+            if (z >= 0 && br5 == z) g_az_ok++;
+            {   /* SIPFAX: dump the half the zero-cost branch REQUIRES, alongside the parity
+                   of the surviving predecessor. Compared offline against the encoder's own
+                   conv_reg parity (SIPFAX_ENCDUMP field 7) this separates "the half
+                   convention is wrong" from "the survivor was already lost". */
+                extern FILE *g_zf;
+                if (!g_zf) { char *e = getenv("SIPFAX_ZDUMP"); if (e) g_zf = fopen(e,"w"); }
+                if (g_zf) fprintf(g_zf, "%d %d %d %d\n", z, (z >= nb_trans) ? 1 : 0,
+                                  s->state_path[bs5][trellis_ptr] & 1, bs5 & 1);
+            }
+            /* how many states can even reach the zero branch's half? */
+            if (z >= 0) {
+                par = (z >= nb_trans) ? 1 : 0;
+                for (st5 = 0; st5 < s->conv_nb_states; st5++)
+                    if ((st5 & 1) == par) g_az_reach++;
+                if ((s->state_path[bs5][trellis_ptr] & 1) == par) g_az_half++;
+            }
+        }
+    }
     {   /* SIPFAX: drive the ACS against the ENCODER'S KNOWN STATE SEQUENCE. The survivor
            states are uncorrelated with the encoder's at every delay (1.6-1.9%, i.e. chance)
            while the symbols still decode 100% off the slicer, so the question is whether
@@ -2819,6 +2926,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     /* XXX: this copy is not needed. Permute the two tables */
     memcpy(s->state_error, s->state_error1, sizeof(s->state_error));
 
+    { extern long g_v0ori; g_v0ori++; }
     trellis_ptr = (trellis_ptr + 1) % TRELLIS_LENGTH;
     s->trellis_ptr = trellis_ptr;
 }
@@ -6294,6 +6402,15 @@ void V34_dataloop_test(void)
         if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
       { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
         fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1));
+    { extern long g_az_n,g_az_ok,g_az_half;
+      if (g_az_n) fprintf(stderr,"[acs] survivor took the ZERO-cost branch on %.2f%% of "
+          "symbols; its predecessor was in the zero branch's reachable half on %.2f%%\n",
+          100.0*g_az_ok/g_az_n, 100.0*g_az_half/g_az_n); }
+    { extern long g_z_n,g_z_min0,g_z_cnt,g_z_hist[8]; extern double g_z_minv; int zq;
+      if (g_z_n) { fprintf(stderr,"[zero] min branch metric == 0 on %.2f%% of symbols; "
+          "mean min %.1f; mean #zero-branches %.3f; hist(#zeros 0..7+):",
+          100.0*g_z_min0/g_z_n, g_z_minv/g_z_n, (double)g_z_cnt/g_z_n);
+        for (zq=0;zq<8;zq++) fprintf(stderr," %ld",g_z_hist[zq]); fprintf(stderr,"\n"); } }
     { extern long g_cs_tot, g_cs_ok, g_cs_all4;
       if (g_cs_tot) fprintf(stderr, "[coset] NOISE-FREE: trellis picked the nearest-point "
               "coset on %.2f%% of coordinates (%ld), all 4 correct on %.2f%% of 4D symbols\n",

@@ -57,6 +57,7 @@ FILE *g_mftx = 0, *g_mfrx = 0;
 FILE *g_decf = 0;
 int g_v0est = 0, g_v0have = 0; FILE *g_v0f = 0; FILE *g_v0f2 = 0;
 long g_y0same = 0, g_y0tot = 0;
+long g_cs_tot = 0, g_cs_ok = 0, g_cs_all4 = 0;
 int g_surv_bs = 0;
 FILE *g_encf = 0;
 FILE *g_survf = 0;   /* SIPFAX: survivor-path dump */
@@ -2410,15 +2411,26 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         break;
     default:
         nbbt = 4;
-        /* SIPFAX: SIPFAX_TRELLIS_ORIG=1 selects linmodem's original trellis_trans_16
-           (256 rows, 8 coset-tuples per branch, n = 128>>nbbt) instead of the regenerated
-           trellis_trans_16b (512 rows, 16 per branch). The regenerated table was introduced
-           on the argument that the Wei 4D partition needs 16 tuples; that may be right, but
-           the Viterbi's survivor states are currently uncorrelated with the encoder's
-           (1.6%, i.e. chance) while the symbols still decode 100% off the slicer alone, so
-           the branch machinery is worth testing both ways rather than assumed. */
+        /* SIPFAX: table selection. 1 (DEFAULT) is linmodem's original trellis_trans_16
+           (256 rows, 8 coset-tuples per branch, n = 128>>nbbt); 0 is the regenerated
+           trellis_trans_16b (512 rows, 16 per branch); 2/3 build it at runtime.
+           MEASURED, by scoring the Viterbi survivor path against the encoder's own state
+           sequence (SIPFAX_SURVDUMP vs SIPFAX_ENCDUMP, exhaustive over all delays, scored
+           permutation-invariantly against a random-data floor of 3.76%):
+
+               table 1 (upstream)      99.79% state tracking
+               table 0 (regenerated)    4.12%  - chance, not even a bijection
+               tables 2/3 (built)       4.09% / 4.05%
+
+           So the 64-state Wei decoder works, and the regenerated table is what broke it.
+           The regenerated table was introduced on the argument that the Wei 4D partition
+           needs 16 tuples per branch rather than 8; that argument is refuted above.
+           Under table 1 the decoder's state numbering differs from the encoder's by a
+           single inverted bit (pi(s) = s ^ 32), a perfect bijection with 99.8% row purity.
+           NOTE bit counts cannot detect any of this: table 0 scores 100% of bits with a
+           dead trellis because the slicer carries the decode. */
         { static int torig = -1;
-          if (torig < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig = e ? atoi(e) : 0; }
+          if (torig < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig = e ? atoi(e) : 1; }
           if (torig == 2 || torig == 3) {
               /* SIPFAX: BUILD the subset table from the encoder's own coset->trans logic,
                  so it is correct by construction. Measured against the encoder, the stored
@@ -2484,7 +2496,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
            instead of hardcoding a shift. */
         int ndec = 128 >> nbbt;
         static int torig3 = -1;
-        if (torig3 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig3 = e ? atoi(e) : 0; }
+        if (torig3 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig3 = e ? atoi(e) : 1; }
         if (!torig3 && s->conv_nb_states >= 64) ndec = 16;
         u0_thresh = nb_trans * ndec;
     }
@@ -2514,7 +2526,16 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         if (!g_survf) { char *e = getenv("SIPFAX_SURVDUMP"); if (e) g_survf = fopen(e,"w"); }
         if (g_survf) fprintf(g_survf, "%d %d\n", g_surv_bs, j);
     }
-    u0 = s->u0_memory[trellis_ptr];
+    {   /* SIPFAX: u0_memory is WRITTEN at trellis_ptr (the current symbol) but the symbol
+           being emitted here is the traceback endpoint, TRELLIS_LENGTH-1 symbols earlier at
+           index k. Pairing this u0 with state_decision[j][k] therefore crosses a 29-symbol
+           gap. The existing note above says the two rotations cancel when the surviving
+           branch and u0_memory agree - true at the same instant, not across the traceback.
+           SIPFAX_U0IDX=1 reads u0 at k instead; 0 keeps the old behaviour. */
+        static int u0idx = -1;
+        if (u0idx < 0) { char *e = getenv("SIPFAX_U0IDX"); u0idx = e ? atoi(e) : 0; }
+        u0 = u0idx ? s->u0_memory[k] : s->u0_memory[trellis_ptr];
+    }
     /* SIPFAX: Y0 of the symbol being emitted now is the LSB of the survivor state at the
        traceback point - the same state the encoder's conv_reg held when it produced it. */
     {   /* SIPFAX: COMPUTE Y[0] the way the encoder does, rather than reading a stored
@@ -2538,7 +2559,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                garbage branch index, which is why Y0 was uncorrelated on every table but
                the default. */
             { static int tz = -1;
-              if (tz < 0) { char *ez = getenv("SIPFAX_TRELLIS_ORIG"); tz = ez ? atoi(ez) : 0; }
+              if (tz < 0) { char *ez = getenv("SIPFAX_TRELLIS_ORIG"); tz = ez ? atoi(ez) : 1; }
               if (!tz && s->conv_nb_states >= 64) ndec = 16; }
             prev = s->state_path[j][k];
             tr   = (s->state_decision[j][k] / ndec) % nb_trans;
@@ -2578,6 +2599,28 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         yout[0][1] = tcm_decision(q[1], s->state_memory[trellis_ptr][1]);
         yout[1][0] = tcm_decision(q[2], s->state_memory[trellis_ptr][2]);
         yout[1][1] = tcm_decision(q[3], s->state_memory[trellis_ptr][3]);
+        {   /* SIPFAX: COSET CORRECTNESS. In a noise-free symbol loopback the unconstrained
+               nearest point IS the transmitted point, so the level that minimises tcm_dist
+               over l = 0..3 is the level the encoder actually sent. Comparing that against
+               the level the trellis chose (q[]) measures directly whether the branch is
+               selecting the right coset - no ground-truth file or alignment needed. */
+            extern long g_cs_tot, g_cs_ok, g_cs_all4;
+            static int cschk = -1; int ci4, ok4 = 0;
+            if (cschk < 0) { char *e = getenv("SIPFAX_COSETCHK"); cschk = e ? atoi(e) : 0; }
+            if (cschk) {
+                for (ci4 = 0; ci4 < 4; ci4++) {
+                    s16 sm = s->state_memory[trellis_ptr][ci4];
+                    int l4, bl = 0, bd = 0x7fffffff, d4;
+                    for (l4 = 0; l4 < 4; l4++) {
+                        d4 = tcm_dist(l4, sm);
+                        if (d4 < bd) { bd = d4; bl = l4; }
+                    }
+                    g_cs_tot++;
+                    if (bl == q[ci4]) { g_cs_ok++; ok4++; }
+                }
+                if (ok4 == 4) g_cs_all4++;
+            }
+        }
       } }
     /* undo the rotation */    
     if (s->state_decision[j][k] >= u0_thresh) {
@@ -2616,7 +2659,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     n = 128 >> nbbt;
     {   /* SIPFAX: the tuple count must match the table selected above. */
         static int torig2 = -1;
-        if (torig2 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig2 = e ? atoi(e) : 0; }
+        if (torig2 < 0) { char *e = getenv("SIPFAX_TRELLIS_ORIG"); torig2 = e ? atoi(e) : 1; }
         if (!torig2 && s->conv_nb_states >= 64) n = 16;
     }
     jmin = 0; /* no warning */
@@ -2689,11 +2732,24 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
             else                 n = 0;
         }
         for(j=0;j<nb_trans;j++) {
+            int nn = n;
             next_state = trellis_next_state(s->conv_nb_states, state, j);
-            error = s->state_error[state] + error_table[j + n];
+            {   /* SIPFAX: the y0 half of the subset table is Y[0], and the ENCODER sets
+                   Y[0] = conv_reg & 1 AFTER conv_reg = trellis_next_state(...) - i.e. the
+                   DESTINATION state's LSB. This loop picked the half from the SOURCE state's
+                   LSB, outside the j loop. With trellis_trans_16 that matters: its two halves
+                   are different partitions (each tuple lives in exactly one of them), so the
+                   wrong half scores the wrong 8 tuples. With trellis_trans_16b the halves are
+                   identical, which is why it never showed. SIPFAX_YN=0 restores the old
+                   source-state behaviour. */
+                static int yn = -1;
+                if (yn < 0) { char *e = getenv("SIPFAX_YN"); yn = e ? atoi(e) : 0; }   /* REFUTED: destination-state y0 scores 64.4% vs 94.6%; the encoder Y[0] computed at symbol t is folded into t+1, so it arrives as the SOURCE state of the next symbol */
+                if (yn) nn = (next_state & 1) ? nb_trans : 0;
+            }
+            error = s->state_error[state] + error_table[j + nn];
             if (error < s->state_error1[next_state]) {
                 s->state_error1[next_state] = error;
-                s->state_decision[next_state][trellis_ptr] = decision_table[j + n];
+                s->state_decision[next_state][trellis_ptr] = decision_table[j + nn];
                 s->state_path[next_state][trellis_ptr] = state;
             }
         }
@@ -5726,7 +5782,15 @@ static void v34_rx_data_params(V34DSPState *s, int R)
                    differentiate. */
                 int q7;
                 for (q7 = 0; q7 < TRELLIS_MAX_STATES; q7++) s->state_error[q7] = 1 << 20;
-                s->state_error[0] = 0;
+                {   /* SIPFAX: the receiver runs a constant 180 deg rotation, and sigma_180 maps the
+            64 state labels by exactly XOR 32 (verified over all 256 coset 4-tuples through
+            the encoder's own algebra). The code is RECURSIVE, so a decoder seeded at 0 while
+            the encoder is effectively at 32 never merges - the trajectories stay disjoint
+            forever even when every branch decision is correct. SIPFAX_DEC_SEED picks the
+            seed state; 32 should put the decoder on the encoder's own trajectory. */
+        static int seed = -1;
+        if (seed < 0) { char *e = getenv("SIPFAX_DEC_SEED"); seed = e ? atoi(e) : 0; }
+        s->state_error[seed & (TRELLIS_MAX_STATES-1)] = 0; }
             }
             s->scrambler_reg = 0;
             s->mapping_frame = 0;
@@ -6065,6 +6129,10 @@ void V34_stream_decode_file(const char *path)
         "mean metric gap %.0f; unreachable %.1f%%\n",
         100.0*g_tr_argmin/g_tr_tot, g_tr_tot, (double)g_tr_rank/g_tr_tot,
         (double)g_tr_gap/(g_tr_tot - g_tr_inf + 1), 100.0*g_tr_inf/g_tr_tot); }
+    { extern long g_cs_tot, g_cs_ok, g_cs_all4;
+      if (g_cs_tot) fprintf(stderr, "[coset] trellis picked the nearest-point coset on "
+              "%.2f%% of coordinates (%ld), all 4 correct on %.2f%% of 4D symbols\n",
+              100.0*g_cs_ok/g_cs_tot, g_cs_tot, 400.0*g_cs_all4/g_cs_tot); }
     { extern long g_y0same, g_y0tot;
       if (g_y0tot) fprintf(stderr, "[data] computed Y0 == survivor LSB in %.1f%% of %ld\n",
                            100.0*g_y0same/g_y0tot, g_y0tot); }
@@ -6225,7 +6293,11 @@ void V34_dataloop_test(void)
         for(i=0;i+lag<g_rxn && i<g_txn && i<3000;i++){ if(g_txb[i]==g_rxb[i+lag])mt++; cn++; }
         if(cn>1000 && mt>best){best=mt;bestlag=lag;} }
       { int mt=0,cn=0; for(i=300;i+bestlag<g_rxn && i<g_txn;i++){ if(g_txb[i]==g_rxb[i+bestlag])mt++; cn++; }
-        fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1)); } }
+        fprintf(stderr,"[dataloop] best lag=%d: %d/%d = %.1f%% bit match (100%%=DSP round-trips)\n", bestlag, mt, cn, 100.0*mt/(cn?cn:1));
+    { extern long g_cs_tot, g_cs_ok, g_cs_all4;
+      if (g_cs_tot) fprintf(stderr, "[coset] NOISE-FREE: trellis picked the nearest-point "
+              "coset on %.2f%% of coordinates (%ld), all 4 correct on %.2f%% of 4D symbols\n",
+              100.0*g_cs_ok/g_cs_tot, g_cs_tot, 400.0*g_cs_all4/g_cs_tot); } } }
 }
 
 

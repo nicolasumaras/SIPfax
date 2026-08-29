@@ -4173,9 +4173,26 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                the loop chasing its own noise, not a real drift. Phase-4 TRN IS constant
                modulus, so the rate it converged to there is the trustworthy one; hold it.
                SIPFAX_DATA_TED=1 keeps the loop running in data mode for comparison. */
+            /* SIPFAX 2026-08-29: THIS NOW DEFAULTS ON. The reasoning above is sound only
+               for our OWN signal, where the loopback and stream harnesses share a clock with
+               the transmitter, so there is no real drift for the loop to track and anything
+               it does is noise. A LIVE CALLER has an independent clock, and freezing ours
+               guarantees the sampling phase walks. Measured on 6.3 s of a real caller's data
+               (call 4, 2026-08-29), scored by lattice-rms - constellation-aware, unlike the
+               4-point EVM print below, which measures QPSK-ness and would happily reward a
+               flattened constellation:
+
+                   frozen  : lattice 0.489, pre-EQ kurtosis 1.137, and the 4-point EVM decays
+                             25 -> 4.3 -> 9.1 -> 23 -> 40 -> 53 -> 60% across the window
+                   tracking: lattice 0.310, pre-EQ kurtosis 1.317, EVM holds 3-4% throughout
+
+               The kurtosis is the honest half: 1.137 -> 1.317 means the equaliser is now fed
+               a properly sampled multi-ring constellation instead of a smeared one. Our own
+               signal is unaffected either way (loopback 99.9%/99.8%, stream 99.8% with the
+               loop on or off), so the freeze cost the live case and bought nothing. */
             static int ted_in_data = -1;
             if (ted_in_data < 0) { char *e = getenv("SIPFAX_DATA_TED");
-                                   ted_in_data = e ? atoi(e) : 0; }
+                                   ted_in_data = e ? atoi(e) : 1; }
             if (s->p4_e_rx && !ted_in_data) goto ted_done;
         }
         s->cma_pos  += dkp * ted;

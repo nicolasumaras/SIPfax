@@ -270,7 +270,7 @@ typedef struct V34DSPState {
        form v0 = U0 ^ Y0 with U0 = ((Z[1]-Z[0]) & 3) & 1. U0 alone cannot reveal v0: at a
        fixed sync position U0 = Y0 ^ SYNC[h] with Y0 pseudorandom, so there is no bias to
        detect without Y0. */
-    int y0_out; int y0_buf[4]; int y0_n;
+    int y0_out; int y0_buf[4]; int y0_n; int y0_prev;
     double cma_gmi, cma_gmq, cma_gpi, cma_gpq;
     int cma_phase, cma_phn; double cma_c4i, cma_c4q, cma_pu4i, cma_pu4q, cma_sq;
 

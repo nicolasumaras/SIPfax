@@ -2686,13 +2686,25 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
            needed, unlike reading u0_memory out of the trellis. Combined with the buffered
            Y0 it gives the superframe sync bit v0 = U0 ^ Y0 (c0 = 0 with no precoding). */
         extern FILE *g_v0f2;
-        int u0b = t & 1;
-        int y0b = (j < 4) ? s->y0_buf[j] : 0;
+        /* SIPFAX: trellis_encoder returns s->U0 at the END of a 4D symbol and the encoder
+           folds it into the NEXT symbol's Z[1] = (Z[0] + 2*I0 + s->U0) & 3, so the U0
+           recovered here at symbol j belongs with Y[0] of symbol j-1 - carried across the
+           frame boundary in y0_prev. SIPFAX_Y0SHIFT makes the offset measurable rather than
+           assumed. Acceptance test: v0 is nonzero only at sync_count == 0 (1 in 2*P = 30)
+           and then only for the one-bits of SYNC_PATTERN, so a CORRECT pairing gives
+           U0 ^ Y0 == 0 in about 97.5% of samples; a wrong one sits at 50%. */
+        static int y0sh = -2;
+        int u0b = t & 1, y0b, jj;
+        if (y0sh == -2) { char *ez = getenv("SIPFAX_Y0SHIFT"); y0sh = ez ? atoi(ez) : -1; }
+        jj = j + y0sh;
+        y0b = (jj >= 0 && jj < 4) ? s->y0_buf[jj] : s->y0_prev;
         if (!g_v0f2) { char *e = getenv("SIPFAX_V0DUMP2"); if (e) g_v0f2 = fopen(e,"w"); }
         if (g_v0f2) fprintf(g_v0f2, "%d %d %d %d %d\n", u0b ^ y0b, u0b, y0b,
                             s->sync_count, s->half_data_frame_count);
     }
   }
+
+  s->y0_prev = s->y0_buf[3];   /* SIPFAX: carry Y0 across the frame boundary for j-1 */
 
   /* compute mapping frame size */
   s->rcnt += s->r;

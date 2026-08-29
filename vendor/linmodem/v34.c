@@ -4449,10 +4449,20 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                              fprintf(stderr, "[data] symbol-timing offset %+.3f input samples"
                                      " (%.3f symbol)\n", t, t/(7.0/3.0)); }
                 }
-                int our_ca = 4, their_ca, R;
+                int our_ca = 0, their_ca, R;   /* 0 = follow the caller, no cap */
                 { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
                 their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
-                R = (their_ca < our_ca ? their_ca : our_ca) * 2400;
+                /* SIPFAX: 'ca' is the CALL-TO-ANSWER rate - what the caller TRANSMITS and
+                   therefore what we must RECEIVE. our_ca defaulted to 4, hard-capping the
+                   receiver at 9600 in every path; meanwhile our MP echoes the caller's own
+                   r_ca straight back (see the MP builder), so on 2026-08-29 we told a caller
+                   to transmit at ca=16800 and then demodulated it against a 9600, L=12
+                   constellation. A receive cap is meaningless anyway: capping what we DECODE
+                   cannot slow the far transmitter, only what we ADVERTISE can. Follow the
+                   caller by default; SIPFAX_MP_CA still caps for experiments. */
+                R = ((our_ca > 0 && our_ca < their_ca) ? our_ca : their_ca) * 2400;
+                fprintf(stderr, "[data] rx rate: caller ca=%d, our cap=%s -> R=%d\n",
+                        their_ca*2400, our_ca ? "set" : "none", R);
                 s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
                 {   /* SIPFAX: does the caller precode even though our MP advertises
                        h = 0,0,0? Two comments in this file disagree about that, and it is

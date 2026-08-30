@@ -7141,6 +7141,46 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                transmits S, S-bar, PP, TRN and then J continuously until it detects the
                call modem's J. Only the pre-p3go yield cycle remains, which just gives
                the caller a clear window to START. */
+            {   /* SIPFAX: YIELD THE FLOOR AFTER OUR J IS ON THE WIRE.
+                   Measured on a call that WORKS (sl-up/sl-down, the same caller):
+
+                     t=7.50-9.50   slmodem only   - it sends its phase-3 block
+                     t=10.0-11.75  CALLER ONLY    - slmodem is silent, rms 0, for 2.0 s
+                     t=12.0+       both           - data mode, full duplex
+
+                   slmodem hands the caller a clean two-second window and the caller
+                   completes its phase 4 in it. We transmit continuously through the same
+                   window (2240-2350 rms across t=10-16), so we are talking over the caller
+                   exactly while it trains - which is why it takes 2.78 s to return J and
+                   1.82 s to return MP, and then abandons.
+
+                   The old p3go mute did this and was removed for a real reason: V34_send_J
+                   QUEUES its symbols and the state machine enters WAIT_J in the same call,
+                   so muting on the state transition zeroed the very J the caller waits for
+                   and both sides deadlocked. The idea was right and the trigger was wrong.
+                   Gate on TIME SINCE the J went out instead: keep transmitting for
+                   SIPFAX_J_HOLD ms after entering WAIT_J so the queued J and the tx filter
+                   pipeline fully drain, then yield until the caller answers with its J.
+                   SIPFAX_J_YIELD=0 restores the previous always-on behaviour. */
+                extern int v34_dbg;
+                static int yen = -1, yhold = -1; static long wait_j_start = -1;
+                static int announced = 0;
+                if (yen < 0)   { char *e = getenv("SIPFAX_J_YIELD"); yen = e ? atoi(e) : 1; }
+                if (yhold < 0) { char *e = getenv("SIPFAX_J_HOLD");  yhold = e ? atoi(e) : 400; }
+                if (yen && s->v34_tx.state == V34_STARTUP3_WAIT_J && !s->v34_rx.J_received) {
+                    if (wait_j_start < 0) wait_j_start = s->p3n;
+                    if ((s->p3n - wait_j_start) * 1000 / 8000 >= yhold) {
+                        if (!announced && v34_dbg) {
+                            fprintf(stderr, "[v34p3] J is on the wire - yielding the floor "
+                                    "for the caller's phase 4 (held %d ms)\n", yhold);
+                            fflush(stderr); announced = 1;
+                        }
+                        yielding = 1;
+                    }
+                } else if (s->v34_rx.J_received) {
+                    wait_j_start = -1; announced = 0;
+                }
+            }
             if (yielding) {
                 int _i; for (_i = 0; _i < nb_samples; _i++) output[_i] = 0;
                 if (yielding && cyc < 2300 + (nb_samples*1000/8000) + 1)

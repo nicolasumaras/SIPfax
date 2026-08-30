@@ -45,7 +45,8 @@ static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double 
 static double data_lattice_rms(const double *bi, const double *bq, int n,
                                double g, double ct, double st);
 static int  p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
-                          int *shape, unsigned int *mask, int *sixteen_out, short *hout);
+                          int *shape, unsigned int *mask, int *sixteen_out, short *hout,
+                          int *nlout);
 void baseband_decode_pub(V34DSPState *s, int si, int sq);
 int v34_dbg = 0;  /* offline decode verbosity */
 long g_moob = 0, g_mtot = 0, g_mmax = 0;   /* SIPFAX: out-of-constellation ring indices */
@@ -5904,7 +5905,8 @@ static double p4_trn_score(const double *si, const double *sq, int ns, int sixte
    are I1,I2 from the differential rotation and, for 16-point, Q1,Q2 from the base index. */
 static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen, int poly,
                         int *out_ca, int *out_ac, int *out_trel, int *out_ack,
-                        int *out_shape, unsigned int *out_mask, short *out_h)
+                        int *out_shape, unsigned int *out_mask, short *out_h,
+                        int *out_nonlin)
 {
     static int raw[P4_MAXSY*4], db[P4_MAXSY*4];
     double pw = 0, scale;
@@ -5954,6 +5956,15 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
             if (out_ac)  *out_ac  = (db[i+24]<<3)|(db[i+25]<<2)|(db[i+26]<<1)|db[i+27];
             if (out_trel) *out_trel = (db[i+29]<<1)|db[i+30];
             if (out_shape) *out_shape = db[i+32];
+            /* SIPFAX: bit 31 is the peer's non-linear-encoder request. This decoder pulled
+               out shape (bit 32) and the precoder coefficients but never nonlin, and it is
+               the decoder the LIVE path uses - the fold path that does read f[31] only runs
+               offline. So peer_nonlin stayed 0 on every live call no matter what the caller
+               asked for, which is why the precoder fired live and the non-linear encoder
+               never did: same CRC gate, same rx->tx copy, but one field was simply never
+               extracted. Measured: captures decode nonlin=1 offline while the live journal
+               recorded zero "non-linear encoder ON" events on the same calls. */
+            if (out_nonlin) *out_nonlin = db[i+31];
             if (out_ack) { if (found == 1) *out_ack = db[i+33]; else *out_ack |= db[i+33]; }
             if (out_mask) { unsigned int m = 0; for (k = 0; k < 15; k++) m |= (unsigned int)db[i+35+k] << k; *out_mask = m; }
             if (out_h && type == 1) {
@@ -6089,7 +6100,8 @@ static void p4_est_precoder(const double *si, const double *sq, int ns, int sixt
 }
 
 static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int *ack,
-                         int *shape, unsigned int *mask, int *sixteen_out, short *hout)
+                         int *shape, unsigned int *mask, int *sixteen_out, short *hout,
+                         int *nlout)
 {
     if (p4_stage == 0) {                       /* snapshot: front end + symbol timing */
         if (n < 8000) return 0;
@@ -6109,7 +6121,8 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
         int nmp;
         if (!p4_have_h) p4_est_precoder(p4_si, p4_sq, p4_ns, p4_six);
         nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
-                               p4_six, V34_GPC, ca, ac, trel, ack, shape, mask, hout);
+                               p4_six, V34_GPC, ca, ac, trel, ack, shape, mask, hout,
+                               nlout);
         if (nmp) {
             if (sixteen_out) *sixteen_out = p4_six;
             p4_stage = 0;                      /* next window */
@@ -6333,7 +6346,7 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                 /* One bounded step per audio frame. Running continuously is now free -
                    the work per frame is a few ms - and it finds the acknowledge sooner
                    than the old once-a-second full decode did. */
-                int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 0, nmp;
+                int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, six = 0, nmp, nlreq = 0;
                 unsigned int mk = 0;
                 {   /* SIPFAX: this decoder starved the transmit path once (see
                        p4_block_step) - keep it measured so it cannot happen silently. */
@@ -6342,7 +6355,8 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                     clock_gettime(CLOCK_MONOTONIC, &ta);
                     nmp = p4_block_step(p4b + (p4bn > 20000 ? p4bn-20000 : 0),
                                         p4bn > 20000 ? 20000 : p4bn,
-                                        &ca, &ac, &tr, &ak, &sh, &mk, &six, s->peer_h);
+                                        &ca, &ac, &tr, &ak, &sh, &mk, &six, s->peer_h,
+                                        &nlreq);
                     clock_gettime(CLOCK_MONOTONIC, &tb);
                     ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
                     if (ms > worst) {
@@ -6354,6 +6368,14 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                 if (nmp) {
                     s->p4_mp_rate_ca = ca; s->p4_mp_rate_ac = ac;
                     s->p4_trellis = tr; s->p4_mp_mask = mk;
+                    /* SIPFAX: the live path never captured the peer's non-linear-encoder
+                       request. p4_mp_decode pulled out shape (bit 32) and the precoder
+                       coefficients but not bit 31, so peer_nonlin stayed 0 on every live
+                       call however the caller set it - which is why the precoder fired live
+                       and the 9.7 encoder never did, off the same CRC gate and the same
+                       rx->tx copy. Captures decode nonlin=1 offline while the live journal
+                       shows zero "non-linear encoder ON" events for the same calls. */
+                    if (nlreq) s->peer_nonlin = 1;
                     s->p4_mp_crcok = 1; s->p4_mp_rx = 1;
                     if (ak && !s->p4_mpp_rx) {
                         s->p4_mpp_rx = 1;
@@ -6869,7 +6891,7 @@ void V34_p4step_test(void)
             double ms;
             clock_gettime(CLOCK_MONOTONIC, &ta);
             nmp = p4_block_step(buf + (bn > 20000 ? bn-20000 : 0), bn > 20000 ? 20000 : bn,
-                                &ca, &ac, &tr, &ak, &sh, &mk, &six, hh);
+                                &ca, &ac, &tr, &ak, &sh, &mk, &six, hh, NULL);
             clock_gettime(CLOCK_MONOTONIC, &tb);
             ms = (tb.tv_sec-ta.tv_sec)*1e3 + (tb.tv_nsec-ta.tv_nsec)/1e6;
             total += ms; calls++;
@@ -6938,11 +6960,11 @@ void V34_p4block_test(void)
         {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp;
             unsigned int mk = 0;
             nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC,
-                               &ca, &ac, &tr, &ak, &sh, &mk, NULL);
+                               &ca, &ac, &tr, &ak, &sh, &mk, NULL, NULL);
             if (!nmp) {
                 int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, 1, si, sq);
                 nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, V34_GPC,
-                                   &ca, &ac, &tr, &ak, &sh, &mk, NULL);
+                                   &ca, &ac, &tr, &ak, &sh, &mk, NULL, NULL);
                 if (nmp) sixteen_mp = 0;
             } else sixteen_mp = 1;
             fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s", t0, s4, s16,

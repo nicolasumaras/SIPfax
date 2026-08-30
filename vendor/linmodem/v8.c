@@ -367,8 +367,42 @@ static int select_modulation(int mask)
 
 
 /* V8 protocol handler */
+/* SIPFAX: V.8 TIMING. The [phase] log added for phases 3/4 starts at V.34 entry, so the
+   first 5 s of every call - all of V.8 - has never been accounted for. It matters: we reach
+   data mode at t=15.5 s and this caller abandons at t=16.0 s, while slmodem gets there at
+   t=14.0 s, so the whole problem is a 1.5 s deficit and V.8 is the largest unexamined block.
+   Timestamp every state change off the V.8 sample clock and record when the caller's CM and
+   CJ actually arrive, so the time can be attributed to us or to the caller instead of guessed
+   at. JM_SEND in particular has a deliberate 400 ms floor (8.2.3 needs >=2 JM sequences before
+   a CJ is credible) and a comment claiming the peer always CJs at ~3 s - this measures whether
+   that is so. */
+long g_v8samp = 0;
 int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
 {
+    g_v8samp += nb_samples;
+    {   extern int v34_dbg;
+        static int last = -1; static long prev = 0, cm_at = -1, cj_at = -1;
+        if (v34_dbg) {
+            if (s->got_cm && cm_at < 0) {
+                cm_at = g_v8samp;
+                fprintf(stderr, "[v8t] t=%7.3fs  caller CM received\n", cm_at/8000.0);
+                fflush(stderr);
+            }
+            if (s->got_cj && cj_at < 0) {
+                cj_at = g_v8samp;
+                fprintf(stderr, "[v8t] t=%7.3fs  caller CJ received (%.3fs after CM)\n",
+                        cj_at/8000.0, cm_at >= 0 ? (cj_at-cm_at)/8000.0 : -1.0);
+                fflush(stderr);
+            }
+            if (s->state != last) {
+                fprintf(stderr, "[v8t] t=%7.3fs  %-16s -> %-16s (held %6.3fs)\n",
+                        g_v8samp/8000.0,
+                        last < 0 ? "start" : sm_states_str[last],
+                        sm_states_str[s->state], (g_v8samp - prev)/8000.0);
+                fflush(stderr); prev = g_v8samp; last = s->state;
+            }
+        }
+    }
     int ret = 0;
 
     /* modulation part */

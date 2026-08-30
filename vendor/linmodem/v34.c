@@ -4195,6 +4195,32 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                    ted_in_data = e ? atoi(e) : 1; }
             if (s->p4_e_rx && !ted_in_data) goto ted_done;
         }
+        {   /* SIPFAX: SMOOTH THE TED BEFORE THE LOOP. The loop must keep tracking - the far
+               end has an independent clock - but the Gardner error is noisy at symbol rate,
+               and the resulting phase dither smears a multi-ring constellation. Measured on
+               the caller's data: near-freezing the loop lifts envelope kurtosis from 1.32 to
+               1.63 (matching a fixed-phase reference chain) while lattice-rms collapses to
+               0.508 because the phase stops tracking; lowering the gains fails the same way.
+               Reducing the loop GAIN trades tracking for jitter. A pre-loop EMA does not: its
+               DC gain is 1, so the response to slow clock drift is unchanged, while noise
+               above the loop bandwidth - which cannot be real clock drift - is attenuated.
+               SIPFAX_TED_AVG=N sets the averaging length (1 = old behaviour).
+               MEASURED: NO EFFECT. N = 1/4/8/16/32/64/128 gives lattice-rms 0.310 on call4
+               and 0.321 on call3, unchanged to three decimals (one 0.235 at N=64 on call4
+               alone did not reproduce on call3). Left in place, defaulting to 1, purely so
+               the null is on the record - the jitter hypothesis it was built to test is dead,
+               and for the real reason see the commit that follows: the caller was never in
+               data mode at all, so none of this front-end work was measuring what it
+               claimed to. */
+            static int tavg = -1;
+            if (tavg < 0) { char *e = getenv("SIPFAX_TED_AVG"); tavg = e ? atoi(e) : 1;
+                            if (tavg < 1) tavg = 1; }
+            if (tavg > 1) {
+                double aa = 1.0 / (double)tavg;
+                s->ted_ema += aa * (ted - s->ted_ema);
+                ted = s->ted_ema;
+            }
+        }
         s->cma_pos  += dkp * ted;
         s->cma_tinc += dki * ted;
         if (s->cma_tinc >  0.005) s->cma_tinc =  0.005;   /* ~4000 ppm: past any real clock */

@@ -1165,12 +1165,27 @@ static void encode_mapping_frame(V34DSPState *s)
         xp_re = x_re;
         xp_im = x_im;
       } else {
-        int x2;
-        float dzeta,theta;
-        /* XXX: average power ? */
+        double x2, dzeta, theta, x2mean;
+        /* SIPFAX: answer the XXX above - the normalisation IS the average power, and
+           without it this was not a warp at all. dzeta was pinned at 0.3125, so theta came
+           out a constant 1.0529 for every symbol: a flat 5.3% gain, which is a scale, not a
+           non-linearity. The author's commented-out intent, x2/128.0, cannot work either -
+           at L=384 the mean |x|^2 is about 4.0e6, so that expression reaches ~244 and the
+           series explodes. Both problems have the same cause: zeta is a RATIO and needs the
+           constellation's mean power underneath it.
 
-        x2 = (x_re * x_re + x_im * x_im) >> 7;
-        dzeta = 0.3125 /* x2 / 128.0 */;
+           theta = 1 + z/6 + z^2/120 is the truncation of sinh(sqrt z)/sqrt z, the 9.7
+           warp: outer points expand more than inner ones, which is where the shaping gain
+           comes from. Scaling zeta by |x|^2 / mean|x|^2 makes it that, and keeping the
+           constant at 0.3125 means a symbol AT the mean power is warped exactly as much as
+           the old code warped everything, so the average level does not jump.
+           SIPFAX_NL_K overrides the constant. */
+        x2 = (double)x_re * x_re + (double)x_im * x_im;
+        x2mean = (s->nl_meanc2 > 0) ? s->nl_meanc2 * 16384.0 : x2;
+        { static double nlk = -1;
+          if (nlk < 0) { char *e = getenv("SIPFAX_NL_K"); nlk = e ? atof(e) : 0.3125; }
+          dzeta = (x2mean > 0) ? nlk * (x2 / x2mean) : nlk; }
+        if (dzeta > 4.0) dzeta = 4.0;   /* the 2-term series is only good for small z */
         theta = (1 + dzeta / 6.0 + dzeta * dzeta / 120.0);
         
         xp_re = rint(theta * x_re);
@@ -1905,12 +1920,26 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                             s->h[2][0]/16384.0, s->h[2][1]/16384.0);
                     }
                 }
+                {   /* SIPFAX: honour the peer's 9.7 request. use_non_linear was hardcoded
+                       0 at every construction site and never set from the MP, so the caller
+                       asked for the non-linear encoder on every call and we never even
+                       entered the block. SIPFAX_TX_NONLIN=0 disables. */
+                    static int nlen = -1;
+                    if (nlen < 0) { char *e = getenv("SIPFAX_TX_NONLIN"); nlen = e ? atoi(e) : 1; }
+                    if (nlen && s->peer_nonlin) {
+                        extern int v34_dbg;
+                        s->use_non_linear = 1;
+                        if (v34_dbg) fprintf(stderr, "[p4] TX: non-linear encoder ON "
+                                             "(peer requested it)\n");
+                    }
+                }
                 int ci, nq = s->L / 4; double acc = 0;
                 for (ci = 0; ci < nq; ci++)
                     acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
                          + (double)s->constellation[ci][1]*s->constellation[ci][1];
                 if (nq > 0 && acc > 0) {
                     double mp = acc / nq;
+                    s->nl_meanc2 = mp;      /* SIPFAX: normalisation for the 9.7 warp */
                     s->tx_amp = CALC_AMP(mp);
                     { extern int v34_dbg; if (v34_dbg)
                         fprintf(stderr, "[p4] TX: data constellation L=%d mean|c|^2=%.2f "
@@ -6612,7 +6641,7 @@ void V34_datacfg_dump(void)
     memset(&p, 0, sizeof(p)); memset(&s, 0, sizeof(s));
     e = getenv("SIPFAX_DATA_R"); if (e) R = atoi(e);
     p.S = V34_S3429; p.R = R; p.use_high_carrier = 1; p.calling = 0;
-    p.conv_nb_states = 64; { char *se=getenv("SIPFAX_DL_SHAPE"); p.expanded_shape = se?atoi(se):0; } p.use_non_linear = 0; p.use_aux_channel = 0;
+    p.conv_nb_states = 64; { char *se=getenv("SIPFAX_DL_SHAPE"); p.expanded_shape = se?atoi(se):0; } { char *nl=getenv("SIPFAX_DL_NONLIN"); p.use_non_linear = nl?atoi(nl):0; } p.use_aux_channel = 0;
     { extern void dsp_init(void); dsp_init(); }
     V34_static_init();
     V34_init_low(&s, &p, 0);
@@ -6709,6 +6738,7 @@ void V34_dataloop_test(void)
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
     { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
+    { char *nl=getenv("SIPFAX_DL_NONLIN"); pt.use_non_linear = nl?atoi(nl):0; }
     {   /* SIPFAX: enable the TRANSMIT precoder in the loopback so the receive side can be
            developed offline. linmodem already implements 9.6.2 on the transmit side, so
            feeding it non-zero coefficients and watching the bit match collapse proves the

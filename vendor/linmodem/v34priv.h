@@ -241,7 +241,8 @@ typedef struct V34DSPState {
        correction; cma_h* is the short post-matched-filter history the interpolator needs
        once the grid is no longer integer. cma_g* hold Gardner's y(n-1/2) and y(n-1). */
     double cma_pos, cma_tinc, cma_hi[8], cma_hq[8];
-    double ted_ema;   /* SIPFAX: pre-loop TED smoothing, see SIPFAX_TED_AVG */
+    double ted_ema;
+    double nl_meanc2;  /* SIPFAX: mean |c|^2 of the live constellation, for 9.7 */   /* SIPFAX: pre-loop TED smoothing, see SIPFAX_TED_AVG */
     /* SIPFAX: 3x-oversampled front end. At 24 kHz the 3429 baud symbol rate divides
        EXACTLY - 7.0 samples/symbol - so the symbol grid is integer and T/2 is 3.5 samples,
        against 2.3333 samples/symbol at 8 kHz where every output needs interpolation on a

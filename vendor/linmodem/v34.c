@@ -1856,6 +1856,33 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                         v34_tx_data_params(s, Rt);
                     }
                 }
+                {   /* SIPFAX: HONOUR THE PEER'S PRECODER REQUEST. The caller's MP carries
+                       h = 0.285 / 0.167 / 0.102 (LSB-first, monotonically decaying, all zeros
+                       inside the unit circle - a plausible channel estimate) and nonlin=1, and
+                       we have been ignoring both: s->h stays zero on the tx instance, so we
+                       transmit unprecoded while the caller equalises expecting 9.6.2 output.
+                       linmodem already implements the transmit side of 9.6.2 - it is exercised
+                       in the loopback through SIPFAX_DL_H - so this is a wiring gap, not
+                       missing code. SIPFAX_TX_PRECODE=0 disables.
+                       NOTE this is deliberately transmit-only: our RECEIVE inverse is still the
+                       known-broken 50.3% path (SIPFAX_RX_PRECODE), but that does not matter
+                       here, because the party that has to invert our precoding is the caller. */
+                    static int tp = -1; int hq, any = 0;
+                    if (tp < 0) { char *e = getenv("SIPFAX_TX_PRECODE"); tp = e ? atoi(e) : 1; }
+                    for (hq = 0; hq < 6; hq++) if (s->peer_h[hq]) any = 1;
+                    if (tp && any) {
+                        extern int v34_dbg;
+                        for (hq = 0; hq < 3; hq++) {
+                            s->h[hq][0] = s->peer_h[hq*2];
+                            s->h[hq][1] = s->peer_h[hq*2+1];
+                        }
+                        if (v34_dbg) fprintf(stderr, "[p4] TX: precoding with the peer's h = "
+                            "%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj\n",
+                            s->h[0][0]/16384.0, s->h[0][1]/16384.0,
+                            s->h[1][0]/16384.0, s->h[1][1]/16384.0,
+                            s->h[2][0]/16384.0, s->h[2][1]/16384.0);
+                    }
+                }
                 int ci, nq = s->L / 4; double acc = 0;
                 for (ci = 0; ci < nq; ci++)
                     acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
@@ -7002,6 +7029,12 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_tx.p4_mp_rate_ac = s->v34_rx.p4_mp_rate_ac;
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
+    {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed
+           for OUR transmitter to apply (9.6.2) - they are a request, not a description. Carry
+           them, and the non-linear-encoder request, to the tx instance. */
+        int hq; for (hq = 0; hq < 6; hq++) s->v34_tx.peer_h[hq] = s->v34_rx.peer_h[hq];
+        s->v34_tx.peer_nonlin = s->v34_rx.peer_nonlin;
+    }
     V34_mod(&s->v34_tx, output, nb_samples);
     {   /* Phase-3 output stage: /5 level-match then optional pre-emphasis, both TUNABLE
            at runtime for level/pre-emphasis sweeps (SIPFAX_P3_GAIN, SIPFAX_P3_PREEMPH). */

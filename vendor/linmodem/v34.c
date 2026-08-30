@@ -1274,6 +1274,7 @@ static int V34_baseband_to_carrier(V34DSPState *s,
             s->baud_phase -= s->baud_denom;
             s->tx_outbuf_ptr = (s->tx_outbuf_ptr + 1) & (TX_BUF_SIZE - 1);
             s->tx_buf_size--;
+            { extern long g_txsym_out; g_txsym_out++; }   /* SIPFAX: drain accounting */
         }
         
         /* center on the carrier */
@@ -1685,6 +1686,7 @@ static const char *v34_state_name(int st)
     return (st >= 0 && st < (int)(sizeof(n)/sizeof(n[0]))) ? n[st] : "?";
 }
 long g_txsamp = 0;
+long g_txsym_out = 0;   /* SIPFAX: symbols the modulator has actually consumed */
 static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
 {
     int n;
@@ -7192,27 +7194,48 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                    SIPFAX_J_HOLD ms after entering WAIT_J so the queued J and the tx filter
                    pipeline fully drain, then yield until the caller answers with its J.
                    SIPFAX_J_YIELD=0 restores the previous always-on behaviour. */
-                extern int v34_dbg;
+                extern int v34_dbg; extern long g_txsym_out;
                 static int yen = -1, yhold = -1; static long wait_j_start = -1;
+                static long drain_mark = -1;
                 static int announced = 0;
                 if (yen < 0)   { char *e = getenv("SIPFAX_J_YIELD"); yen = e ? atoi(e) : 1; }
-                if (yhold < 0) { char *e = getenv("SIPFAX_J_HOLD");  yhold = e ? atoi(e) : 800; }
+                if (yhold < 0) { char *e = getenv("SIPFAX_J_HOLD");  yhold = e ? atoi(e) : 0; }
                 /* 400 ms stalled 2 of 4 calls in WAIT_J - the queued J and the tx filter did
                    not always reach the wire before the mute engaged, and the caller never
                    answered. 800 ms: 3 of 3 reached MP, ac stayed at 26400 and S4_MP stayed at
                    0.920 s, so the longer hold costs neither gain. */
                 if (yen && s->v34_tx.state == V34_STARTUP3_WAIT_J && !s->v34_rx.J_received) {
-                    if (wait_j_start < 0) wait_j_start = s->p3n;
-                    if ((s->p3n - wait_j_start) * 1000 / 8000 >= yhold) {
+                    /* SIPFAX: DRAIN CHECK, not a timer. A fixed hold cannot win this race -
+                       the mute is chasing the J out of the transmit queue and the filter
+                       pipeline, and that drain time varies per call, which is why 400 ms and
+                       800 ms both stalled about 40% of calls (5 of 8 reached DATA overall).
+                       The queue depth is readable, so read it: on entering WAIT_J note how
+                       many symbols are outstanding, add the filter width, and wait until the
+                       modulator has actually consumed that many. g_txsym_out counts symbols
+                       leaving tx_buf, so this is the real event rather than a guess at it.
+                       SIPFAX_J_HOLD adds an extra fixed delay on top if ever needed. */
+                    if (wait_j_start < 0) {
+                        wait_j_start = s->p3n;
+                        drain_mark = g_txsym_out + s->v34_tx.tx_buf_size
+                                                 + s->v34_tx.tx_filter_wsize;
+                        if (v34_dbg)
+                            fprintf(stderr, "[v34p3] WAIT_J: %d symbols queued + %d filter "
+                                    "-> yield once %ld symbols have gone out\n",
+                                    s->v34_tx.tx_buf_size, s->v34_tx.tx_filter_wsize,
+                                    drain_mark - g_txsym_out);
+                    }
+                    if (g_txsym_out >= drain_mark
+                        && (s->p3n - wait_j_start) * 1000 / 8000 >= yhold) {
                         if (!announced && v34_dbg) {
-                            fprintf(stderr, "[v34p3] J is on the wire - yielding the floor "
-                                    "for the caller's phase 4 (held %d ms)\n", yhold);
+                            fprintf(stderr, "[v34p3] J has drained to the wire after %ld ms - "
+                                    "yielding the floor for the caller's phase 4\n",
+                                    (s->p3n - wait_j_start) * 1000 / 8000);
                             fflush(stderr); announced = 1;
                         }
                         yielding = 1;
                     }
                 } else if (s->v34_rx.J_received) {
-                    wait_j_start = -1; announced = 0;
+                    wait_j_start = -1; drain_mark = -1; announced = 0;
                 }
             }
             if (yielding) {

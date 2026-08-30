@@ -7226,13 +7226,35 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                     }
                     if (g_txsym_out >= drain_mark
                         && (s->p3n - wait_j_start) * 1000 / 8000 >= yhold) {
+                        /* SIPFAX: DUTY CYCLE, not a permanent mute. The drain check above
+                           measured the thing the fixed holds were guessing at: 97 queued
+                           symbols + 40 of filter = 137 symbols, which is about 40 ms at 3429
+                           baud. So the J was always on the wire within 40 ms, we were waiting
+                           400-800 ms, and calls STILL stalled ~40% of the time - the drain was
+                           never the cause.
+                           What actually stalls is muting FOREVER once drained. 11.3.1.2.4 says
+                           keep sending J until the caller responds; we sent it once and then
+                           went silent until J_received, so a caller that missed that single
+                           burst never got another and both sides waited. That is exactly the
+                           shape of an intermittent ~40% failure.
+                           Alternate instead: a short J burst, then a silent window for the
+                           caller, repeating. It gets J repeatedly AND gets quiet to answer in.
+                           SIPFAX_J_ON / SIPFAX_J_OFF are the two halves in ms. */
+                        static int jon = -1, joff = -1;
+                        long since, per, ph;
+                        if (jon  < 0) { char *e = getenv("SIPFAX_J_ON");  jon  = e ? atoi(e) : 120; }
+                        if (joff < 0) { char *e = getenv("SIPFAX_J_OFF"); joff = e ? atoi(e) : 380; }
+                        since = (s->p3n - wait_j_start) * 1000 / 8000;
+                        per = jon + joff; if (per < 1) per = 1;
+                        ph = since % per;
                         if (!announced && v34_dbg) {
-                            fprintf(stderr, "[v34p3] J has drained to the wire after %ld ms - "
-                                    "yielding the floor for the caller's phase 4\n",
-                                    (s->p3n - wait_j_start) * 1000 / 8000);
+                            fprintf(stderr, "[v34p3] J drained after %ld ms (%ld symbols) - "
+                                    "duty-cycling J %d ms on / %d ms off for the caller\n",
+                                    since, drain_mark - (g_txsym_out - (g_txsym_out - drain_mark)),
+                                    jon, joff);
                             fflush(stderr); announced = 1;
                         }
-                        yielding = 1;
+                        if (ph >= jon) yielding = 1;    /* silent half of the cycle */
                     }
                 } else if (s->v34_rx.J_received) {
                     wait_j_start = -1; drain_mark = -1; announced = 0;

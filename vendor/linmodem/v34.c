@@ -40,6 +40,7 @@ void print_bit_vector(char *str, u8 *tab, int n)
 static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
+static void v34_tx_data_params(V34DSPState *s, int R);   /* SIPFAX: TX rate from negotiated ac */
 static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq);
 static double data_lattice_rms(const double *bi, const double *bq, int n,
                                double g, double ct, double st);
@@ -1827,6 +1828,19 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                    Scale to the constellation actually in use, the same way S_POWER and
                    TRN4_POWER do: mean |c|^2 over the quarter constellation (rotation
                    preserves magnitude, so that is the full set's mean). */
+                {   /* SIPFAX: adopt the NEGOTIATED transmit rate before sizing anything.
+                       'ac' is the answer-to-call rate, i.e. what WE transmit. */
+                    static int cap = -1; int their_ac, Rt;
+                    if (cap < 0) { char *mc = getenv("SIPFAX_MP_AC"); cap = mc ? atoi(mc) : 0; }
+                    their_ac = s->p4_mp_rate_ac > 0 ? s->p4_mp_rate_ac : 4;
+                    Rt = ((cap > 0 && cap < their_ac) ? cap : their_ac) * 2400;
+                    if (Rt > 0 && Rt != s->R) {
+                        extern int v34_dbg;
+                        if (v34_dbg) fprintf(stderr, "[p4] TX: adopting negotiated ac=%d "
+                                             "(was R=%d)\n", Rt, s->R);
+                        v34_tx_data_params(s, Rt);
+                    }
+                }
                 int ci, nq = s->L / 4; double acc = 0;
                 for (ci = 0; ci < nq; ci++)
                     acc += (double)s->constellation[ci][0]*s->constellation[ci][0]
@@ -5997,6 +6011,40 @@ static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *
         }
     }
     return best;
+}
+
+/* SIPFAX: configure the TRANSMIT data-mode parameters from the negotiated rate.
+   V34_init hardcodes s->R = 19200 with a "TODO: derive S/R from the negotiation", and nothing
+   ever did - so at the Phase-4 -> data handoff the transmitter built a 19200 constellation
+   (logged live as L=88) while our own MP had told the caller ac=9600 (L=12). The caller
+   therefore tried to demodulate our data against a 9600 set, failed, and retrained; measured
+   on two live calls, it looped Phase 4 on a 1.51 s cycle for the whole window and then sent
+   the 1200 Hz abandon tone. This is the transmit-side mirror of the receive cap fixed earlier.
+   Deliberately NOT a call to v34_rx_data_params: that resets conv_reg, the scrambler register
+   and Z_1, which on a TX instance are the live encoder state and must run continuously. */
+static void v34_tx_data_params(V34DSPState *s, int R)
+{
+    int S = s->S, d, e;
+    s->R = R;
+    if (!s->use_high_carrier) { d = S_tab[S][2]; e = S_tab[S][3]; }
+    else                      { d = S_tab[S][4]; e = S_tab[S][5]; }
+    s->symbol_rate = 2400.0 * (float)S_tab[S][0] / (float)S_tab[S][1];
+    s->carrier_freq = s->symbol_rate * (float)d / (float)e;
+    s->J = S_tab[S][6];
+    s->P = S_tab[S][7];
+    s->N = (s->R * 28) / (s->J * 100);
+    s->b = s->N / s->P;
+    if ((s->b * s->P) < s->N) s->b++;
+    s->r = s->N - (s->b - 1) * s->P;
+    s->W = 0;
+    s->q = 0;
+    if (s->b <= 12) s->K = 0;
+    else { s->K = s->b - 12; while (s->K >= 32) { s->K -= 8; s->q++; } }
+    if (!s->expanded_shape) s->M = (int) ceil(pow(2.0, s->K / 8.0));
+    else                    s->M = (int) rint(1.25 * pow(2.0, s->K / 8.0));
+    s->L = 4 * s->M * (1 << s->q);
+    build_constellation(s);
+    build_rings(s);
 }
 
 static void v34_rx_data_params(V34DSPState *s, int R)

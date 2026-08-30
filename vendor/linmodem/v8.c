@@ -380,9 +380,12 @@ long g_v8samp = 0;
 int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
 {
     g_v8samp += nb_samples;
-    {   extern int v34_dbg;
+    {   /* SIPFAX: NOT gated on v34_dbg - that flag is set when the V.34 path starts, which
+           is after all of V.8, so gating on it produced no output at all on a live call. The
+           existing V.8 state print a few lines below is gated only on the state changing, and
+           this follows it. */
         static int last = -1; static long prev = 0, cm_at = -1, cj_at = -1;
-        if (v34_dbg) {
+        {
             if (s->got_cm && cm_at < 0) {
                 cm_at = g_v8samp;
                 fprintf(stderr, "[v8t] t=%7.3fs  caller CM received\n", cm_at/8000.0);

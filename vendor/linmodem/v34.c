@@ -1655,9 +1655,25 @@ static void V34_send_JP(V34DSPState *s)
 
 
 
+/* SIPFAX: PHASE-2 -> PHASE-4 TIMING. Getting to data mode late is what the live calls die
+   of: slmodem is transmitting data at t=12 and the caller follows, while we arrive at t=16 and
+   the caller has already started its abandon tone at t=17. The existing hook logged only a bare
+   state number at journal (one-second) resolution, which is too coarse to apportion the 16 s.
+   Timestamp every transition off the transmit sample clock instead, and name the states, so a
+   single call shows exactly which state each second went to and whether the wait was ours or
+   the caller's. */
+static const char *v34_state_name(int st)
+{
+    static const char *n[] = {
+        "S3_S1","S3_SINV1","S3_S2","S3_SINV2","S3_PP","S3_TRN","S3_J","S3_JP","S3_WAIT_J",
+        "S4_S","S4_WAIT_JP","S4_SINV","S4_TRN","S4_MP","S4_MPP","S4_E","DATA","S3_WAIT_S1" };
+    return (st >= 0 && st < (int)(sizeof(n)/sizeof(n[0]))) ? n[st] : "?";
+}
+long g_txsamp = 0;
 static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
 {
     int n;
+    g_txsamp += nb;
 
     for(;;) {
         /* modulate the symbols in the TX queue */
@@ -1685,7 +1701,13 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
 
         /* protocol state machine */
 
-        { extern int v34_dbg; if (v34_dbg && s->state != s->dbg_last2) { fprintf(stderr, "[enc] tx protocol state -> %d\n", s->state); fflush(stderr); s->dbg_last2 = s->state; } }
+        { extern int v34_dbg; extern long g_txsamp;
+          if (v34_dbg && s->state != s->dbg_last2) {
+              static long prev = 0;
+              fprintf(stderr, "[phase] t=%7.3fs  %-10s -> %-10s  (held %6.3fs)\n",
+                      g_txsamp/8000.0, v34_state_name(s->dbg_last2),
+                      v34_state_name(s->state), (g_txsamp - prev)/8000.0);
+              fflush(stderr); prev = g_txsamp; s->dbg_last2 = s->state; } }
         switch(s->state) {
 #if 0
             /* phase 2 */

@@ -81,7 +81,22 @@ long g_sym = 0, g_v0hn = 0;
 int g_u0hist[U0H];
 int  g_v0h[V0_PER];
 int  g_v0base[V0_PER];
-int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0;
+int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0, g_v0applied = 0;
+/* SIPFAX: automatic mapping-frame alignment, replacing the hand-set SIPFAX_DATA_SKIP.
+   Two things have to be right and the v0 lock pins both.
+   (1) 4D PAIRING. v0 recovery needs consecutive 2D symbols paired the way the encoder paired
+       them; measured, v0 locks for every ODD SIPFAX_DATA_SKIP and never for an even one. So a
+       failure to lock within the acquisition window means the pairing is off by one 2D symbol
+       - drop one and retry.
+   (2) FRAME GROUPING. With the pairing right, the locked phase phi and correctness are related
+       exactly: phi mod 20 == 19 decodes, everything else does not (measured over skip 1..39
+       plus 59: 99.8% and 99.7% at phi 59 and 79, 51-79% at all eighteen other phases). 20 4D
+       symbols is the rcnt cycle, P/gcd(r,P) = 5 mapping frames of 4. Dropping one 4D symbol
+       advances phi by one, so the correction is d = (19 - phi) mod 20 4D symbols. Verified
+       against the sweep: phi 51 -> d 8 -> skip 3+16 = 19; phi 58 -> d 1 -> 17+2 = 19;
+       phi 60 -> d 19 -> 21+38 = 59. */
+int  g_v0_pairtry = 0, g_v0_pairdrop = 0, g_v0_aligned = 0;
+long g_v0_realign = 0;
 static void v0_base_init(void)
 {
     int k; static int done = 0;
@@ -3320,6 +3335,30 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             s->phase_mse = 0;
         }
 
+        {   /* SIPFAX: ADOPT THE FRAME PHASE FROM THE v0 LOCK, retiring SIPFAX_DATA_SKIP.
+               v0 is deterministic in (sync_count, half_data_frame_count) with period
+               2*P * 2*J = 30*16 = 480 4D symbols, and the acquisition already recovers that
+               phase. The decoder's own counters simply start at zero at data-mode entry,
+               wherever in the superframe that happens to be, which is what the hand-set
+               SIPFAX_DATA_SKIP was compensating for by dropping symbols at the feed.
+               Given the locked phase, the true counters are available directly. Applied once,
+               on the first symbol after lock. SIPFAX_V0FRAME=0 disables. */
+            extern int g_v0lock, g_v0ph, g_v0applied; extern long g_sym;
+            static int en = -1;
+            if (en < 0) { char *e = getenv("SIPFAX_V0FRAME"); en = e ? atoi(e) : 0; }   /* measured: NO effect - the counters say WHICH frame we are in, not where frames START */
+            if (en && g_v0lock && !g_v0applied) {
+                long k = (((g_sym + g_v0ph) % 480) + 480) % 480;
+                int sc = (int)(k % (2*s->P));
+                int hd = (int)((k / (2*s->P)) % (2*s->J));
+                extern int v34_dbg;
+                if (v34_dbg) fprintf(stderr, "[v0] frame phase adopted: sync_count %d -> %d, "
+                                     "half_data_frame_count %d -> %d\n",
+                                     s->sync_count, sc, s->half_data_frame_count, hd);
+                s->sync_count = sc; s->half_data_frame_count = hd;
+                s->rcnt = (int)(((k / 4) * (long)s->r) % s->P);
+                g_v0applied = 1;
+            }
+        }
         /* synchronization bit */
         if (s->sync_count == 0) {
             v0 = (SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1;
@@ -3347,6 +3386,37 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
            drifts ahead and pairs each frame's U0 with a later symbol's Y0. The memcpy below
            writes 4 s16 = two 2D symbols into slots [count] and [count+1], i.e. one 4D
            symbol, so the matching Y0 index is count >> 1. */
+        {   /* SIPFAX: automatic alignment - see the note by g_v0_realign. Runs only when
+               SIPFAX_DATA_SKIP is not set, so the hand-set path is untouched. */
+            extern int g_v0lock, g_v0ph, g_v0_pairtry, g_v0_pairdrop, g_v0applied;
+            extern long g_v0_realign, g_sym, g_v0hn; extern int g_v0_aligned;
+            extern int g_v0h[]; extern int v34_dbg;
+            static int en = -1;
+            if (en < 0) { char *e = getenv("SIPFAX_V0ALIGN"); en = e ? atoi(e) : 1; }
+            if (en) {
+                if (g_v0lock && !g_v0_aligned) {
+                    g_v0_aligned = 1;
+                    g_v0_realign = ((19 - (long)g_v0ph) % 20 + 20) % 20;
+                    if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (mod20=%d) -> drop %ld "
+                                         "4D symbols\n", g_v0ph, g_v0ph % 20, g_v0_realign);
+                }
+                /* no lock in twice the acquisition window: the 4D pairing is off by one */
+                {   /* SIPFAX: how long to wait before concluding the 4D pairing is wrong. v0_try_lock
+                       evaluates once per 480-symbol period once it has a period of data, so a
+                       few evaluations are enough to decide; every symbol spent waiting is a
+                       symbol decoded on the wrong alignment. SIPFAX_V0PAIRWAIT overrides. */
+                    static long pw = -1;
+                    if (pw < 0) { char *e = getenv("SIPFAX_V0PAIRWAIT"); pw = e ? atol(e) : 1440; }
+                if (!g_v0lock && !g_v0_pairtry && g_v0hn > pw) {
+                    int q; for (q = 0; q < 480; q++) g_v0h[q] = 0;
+                    g_v0hn = 0; g_v0_pairtry = 1; g_v0_pairdrop = 1;
+                    if (v34_dbg) fprintf(stderr, "[v0] no lock - shifting the 4D pairing by "
+                                         "one 2D symbol and retrying\n");
+                }
+                }
+                if (g_v0_realign > 0) { g_v0_realign--; goto feed_skip; }
+            }
+        }
         memcpy(&s->rx_mapping_frame[s->rx_mapping_frame_count][0], 
                &y[0][0], 4 * sizeof(s16));
         s->y0_buf[(s->rx_mapping_frame_count >> 1) & 3] = s->y0_out;
@@ -3360,6 +3430,7 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
                 s->rx_mapping_frame_count = 0;
             }
         }
+        feed_skip: ;   /* SIPFAX: automatic alignment drops a 4D symbol here */
         s->phase_4d = 0;
     }
 }
@@ -5063,6 +5134,14 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        be swept. */
                     static int skip = -1;
                     if (skip < 0) { char *e4 = getenv("SIPFAX_DATA_SKIP"); skip = e4 ? atoi(e4) : 0; }
+                    {   /* SIPFAX: the 4D PAIRING shift must happen HERE, at the 2D symbol
+                           feed - the mapping-frame site downstream moves whole 4D symbols
+                           (4 s16 = two 2D symbols) and so can only change phi, never the
+                           pairing. v0 locks for every odd DATA_SKIP and no even one, so a
+                           failure to lock means we are on the wrong 2D parity: drop one. */
+                        extern int g_v0_pairdrop;
+                        if (g_v0_pairdrop) { g_v0_pairdrop = 0; skip++; }
+                    }
                     if (skip > 0) { skip--; }
                     else {
                         int si2 = (int)lrint(xi*128.0), sq2 = (int)lrint(xq*128.0);

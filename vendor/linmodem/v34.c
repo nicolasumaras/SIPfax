@@ -7166,7 +7166,11 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                 static int yen = -1, yhold = -1; static long wait_j_start = -1;
                 static int announced = 0;
                 if (yen < 0)   { char *e = getenv("SIPFAX_J_YIELD"); yen = e ? atoi(e) : 1; }
-                if (yhold < 0) { char *e = getenv("SIPFAX_J_HOLD");  yhold = e ? atoi(e) : 400; }
+                if (yhold < 0) { char *e = getenv("SIPFAX_J_HOLD");  yhold = e ? atoi(e) : 800; }
+                /* 400 ms stalled 2 of 4 calls in WAIT_J - the queued J and the tx filter did
+                   not always reach the wire before the mute engaged, and the caller never
+                   answered. 800 ms: 3 of 3 reached MP, ac stayed at 26400 and S4_MP stayed at
+                   0.920 s, so the longer hold costs neither gain. */
                 if (yen && s->v34_tx.state == V34_STARTUP3_WAIT_J && !s->v34_rx.J_received) {
                     if (wait_j_start < 0) wait_j_start = s->p3n;
                     if ((s->p3n - wait_j_start) * 1000 / 8000 >= yhold) {

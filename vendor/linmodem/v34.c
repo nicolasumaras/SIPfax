@@ -7242,8 +7242,37 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                            SIPFAX_J_ON / SIPFAX_J_OFF are the two halves in ms. */
                         static int jon = -1, joff = -1;
                         long since, per, ph;
-                        if (jon  < 0) { char *e = getenv("SIPFAX_J_ON");  jon  = e ? atoi(e) : 120; }
-                        if (joff < 0) { char *e = getenv("SIPFAX_J_OFF"); joff = e ? atoi(e) : 380; }
+                        since = (s->p3n - wait_j_start) * 1000 / 8000;
+                        /* SIPFAX: defaults restored to the best configuration measured.
+                           Four variants were tried and compared on live calls:
+
+                             400 ms J then mute      ac=26400   2 of 4 reached DATA
+                             800 ms J then mute      ac=26400   5 of 8 reached DATA
+                             drain-gated (40 ms)     - masked by a stale J_HOLD override
+                             120/380 ms duty cycle   ac=24000 and 9600, 2 of 5
+
+                           The duty cycle is worse on the metric that matters most - the
+                           caller's own estimate of our channel fell from a consistent 26400
+                           to 24000 and 9600 - because chopping phase 3 into 120 ms bursts
+                           gives it less continuous signal to measure. Reading the four
+                           together, the '800 ms hold' was never waiting for the 40 ms drain:
+                           it was SENDING J for 800 ms, and the amount of J before the silence
+                           is what tracks ac. So: send J for J_ON, then stay quiet.
+                           J_OFF = 0 means the silence is permanent (the 800 ms configuration);
+                           set J_OFF > 0 to duty-cycle instead. */
+                        if (jon  < 0) { char *e = getenv("SIPFAX_J_ON");  jon  = e ? atoi(e) : 800; }
+                        if (joff < 0) { char *e = getenv("SIPFAX_J_OFF"); joff = e ? atoi(e) : 0; }
+                        if (joff <= 0) {
+                            if (since >= jon) {
+                                if (!announced && v34_dbg) {
+                                    fprintf(stderr, "[v34p3] J sent for %ld ms - yielding the "
+                                            "floor for the caller's phase 4\n", since);
+                                    fflush(stderr); announced = 1;
+                                }
+                                yielding = 1;
+                            }
+                            goto duty_done;
+                        }
                         since = (s->p3n - wait_j_start) * 1000 / 8000;
                         per = jon + joff; if (per < 1) per = 1;
                         ph = since % per;
@@ -7255,6 +7284,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                             fflush(stderr); announced = 1;
                         }
                         if (ph >= jon) yielding = 1;    /* silent half of the cycle */
+                        duty_done: ;
                     }
                 } else if (s->v34_rx.J_received) {
                     wait_j_start = -1; drain_mark = -1; announced = 0;

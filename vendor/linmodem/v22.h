@@ -49,7 +49,18 @@ typedef struct {
     double agc;                      /* running amplitude estimate */
     double ted_i, ted_q;             /* previous symbol, for Gardner */
     double mid_i, mid_q;             /* mid-symbol sample */
-    double tphase;                   /* fractional timing offset in samples */
+    double tphase;                   /* fractional position within the half-symbol */
+    double step;                     /* samples per half symbol, adjusted by the loop */
+    int    nwrap;                    /* timing-loop sample wraps, for diagnosis */
+    double cph, cacc;                /* carrier phase correction and its integrator */
+    double tadj;                     /* fractional sampling delay, steered by Gardner */
+    double lp_i, lp_q;               /* image-rejection box output */
+    int    bx_i[8], bx_q[8], bx_p;   /* 7-sample box history */
+    double h_i[4], h_q[4];           /* recent baseband, for interpolation */
+    int    half;                     /* 0 = symbol instant, 1 = midpoint */
+    double pi_, pq_;                 /* previous symbol instant */
+    double mi_, mq_;                 /* previous midpoint */
+    double ted_acc;                  /* integral term */
 } V22DemodState;
 
 extern s16 v22_tx_filter[V22_TX_FILTER_SIZE];

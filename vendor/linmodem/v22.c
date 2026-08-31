@@ -168,6 +168,14 @@ void V22_demod_init(V22DemodState *s)
     memset(s->rx_buf, 0, sizeof(s->rx_buf));
     s->rx_ptr = 0; s->Z = 0; s->started = 0; s->sym_count = 0;
     s->agc = 0; s->ted_i = s->ted_q = 0; s->mid_i = s->mid_q = 0; s->tphase = 0;
+    /* SIPFAX: 8000 Hz / 600 baud = 13.333 samples per symbol, so 6.667 per half symbol.
+       The loop steers `step` around that. */
+    s->step = 8000.0 / 600.0 / 2.0;
+    s->lp_i = s->lp_q = 0; s->half = 0;
+    { char *p = getenv("SIPFAX_V22_TPH"); if (p) s->tphase = atof(p); }
+    memset(s->bx_i, 0, sizeof(s->bx_i)); memset(s->bx_q, 0, sizeof(s->bx_q)); s->bx_p = 0;
+    s->pi_ = s->pq_ = s->mi_ = s->mq_ = 0; s->ted_acc = 0;
+    memset(s->h_i, 0, sizeof(s->h_i)); memset(s->h_q, 0, sizeof(s->h_q));
 
     if (!s->calling) {
         /* call modem DPSK: 600 bps, carrier at 1200 Hz, 0 db */
@@ -193,6 +201,50 @@ void V22_demod_init(V22DemodState *s)
 
    The 2400 bps (16-QAM) branch additionally recovers the two in-quadrant bits from the
    amplitude, which is why the AGC matters there and not at 1200. */
+/* SIPFAX: sample the image-rejection box at a FRACTIONAL delay, in samples, back from the
+   newest sample. The box itself is the one that already worked - 7 taps, backward from the
+   baud instant - and the delay is what the timing loop steers. Rewriting this as a free-running
+   T/2 interpolator regressed 1200 bps to no-sync at every sampling phase, so the proven path
+   stays and only gains a controllable offset. */
+static void v22_boxsamp(V22DemodState *s, double off, double *oi, double *oq)
+{
+    static int len = -1;
+    int j, n;
+    double fr, ai = 0, aq = 0;
+    if (len < 0) { char *e = getenv("SIPFAX_V22AVG"); len = e ? atoi(e) : 7; if (len < 1) len = 1; }
+    /* SIPFAX: CUBIC, not linear, interpolation. Reordering the box and the interpolator does
+       nothing - both are linear filters, so they commute, and swapping them reproduced the
+       previous BER bit for bit. The accuracy of the interpolator itself is what matters: a
+       straight line between two samples is a poor fit to a signal still carrying the mixer
+       image at twice the carrier (2400 Hz, 3.3 samples per cycle at 8 kHz), and the resulting
+       error depends on the fractional delay. That is why a few percent of errors appeared only
+       once a clock offset made tadj sweep the whole [0,1) range, sat away from the wraps rather
+       than at them, and vanished at offsets small enough to pin tadj near zero. Four-point
+       Lagrange fits the curvature the straight line was missing. */
+    double b[4][2]; int t;
+    if (off < 0) off = 0;
+    off += 1.0;                       /* keep the n-1 tap inside written history */
+    n = (int)off; fr = off - n;
+    for (t = 0; t < 4; t++) {
+        double si = 0, sq = 0;
+        for (j = 0; j < len; j++) {
+            int k = (s->rx_ptr - 1 - (n - 1 + t) - j) & (V22_RX_BUF_SIZE - 1);
+            si += s->rx_buf[k][0]; sq += s->rx_buf[k][1];
+        }
+        b[t][0] = si / len; b[t][1] = sq / len;
+    }
+    {   double ym1 = b[0][0], y0 = b[1][0], y1 = b[2][0], y2 = b[3][0];
+        ai = y0 + 0.5 * fr * (y1 - ym1 + fr * (2*ym1 - 5*y0 + 4*y1 - y2
+                                               + fr * (3*(y0 - y1) + y2 - ym1)));
+        ym1 = b[0][1]; y0 = b[1][1]; y1 = b[2][1]; y2 = b[3][1];
+        aq = y0 + 0.5 * fr * (y1 - ym1 + fr * (2*ym1 - 5*y0 + 4*y1 - y2
+                                               + fr * (3*(y0 - y1) + y2 - ym1)));
+    }
+    *oi = ai; *oq = aq;
+}
+
+int g_v22_wrapped;   /* SIPFAX: set on a sample wrap, sampled per received bit */
+
 void V22_demod(V22DemodState *s, s16 *samples, unsigned int nb)
 {
     unsigned int i;
@@ -222,15 +274,52 @@ void V22_demod(V22DemodState *s, s16 *samples, unsigned int nb)
             int dz, b1, b2;
             s->baud_phase -= s->baud_denom;
 
-            {   static int off=-1, len=-1;
-                if (off<0) { char *e=getenv("SIPFAX_V22PH");  off = e?atoi(e):0; }
-                if (len<0) { char *e=getenv("SIPFAX_V22AVG"); len = e?atoi(e):7; if(len<1)len=1; }
-                for (j = 0; j < len; j++) {
-                    k = (s->rx_ptr - 1 - off - j) & (V22_RX_BUF_SIZE - 1);
-                    ai += s->rx_buf[k][0];
-                    aq += s->rx_buf[k][1];
+            {   /* SIPFAX: TIMING RECOVERY. The sampling instant used to free-run from phase
+                   zero, which only decodes because the loopback starts aligned; on a line the
+                   phase is arbitrary. s->tadj is a fractional delay in samples applied to the
+                   same box, steered by a Gardner detector that compares each symbol with the
+                   midpoint half a symbol earlier. */
+                static double kp = -1, ki = -1, sp = -1;
+                double mi, mq, e, half = (double)s->baud_denom / s->baud_num / 2.0;
+                /* SIPFAX: tuned against a swept clock offset AFTER carrier recovery went in.
+                   The earlier, hotter constants were compensating for carrier drift that the
+                   timing loop cannot fix, and once the carrier loop existed they made things
+                   worse - the timing loop only has to track the sampling instant, so it wants
+                   to be slow. ki is the term that matters: it settles at the fractional drift
+                   per symbol and IS the clock-offset estimate. */
+                if (kp < 0) { char *p = getenv("SIPFAX_V22_TKP"); kp = p ? atof(p) : 0.005; }
+                if (ki < 0) { char *p = getenv("SIPFAX_V22_TKI"); ki = p ? atof(p) : 5e-5; }
+                if (sp < 0) { char *p = getenv("SIPFAX_V22PH");   sp = p ? atof(p) : 0.0;
+                              s->tadj = sp; }
+                v22_boxsamp(s, s->tadj,        &ai, &aq);
+                v22_boxsamp(s, s->tadj + half, &mi, &mq);
+
+                e = (ai - s->ted_i) * mi + (aq - s->ted_q) * mq;
+                {   double n2 = (ai*ai + aq*aq) + (s->ted_i*s->ted_i + s->ted_q*s->ted_q) + 1e-9;
+                    e /= n2;
                 }
-                ai /= (double)len; aq /= (double)len;
+                if (e >  0.5) e =  0.5;
+                if (e < -0.5) e = -0.5;
+                s->ted_acc += ki * e;
+                /* SIPFAX: the integrator IS the clock-offset estimate - it settles at the
+                   fractional drift per symbol, 6.7e-4 for 50 ppm and 0.0133 for 1000 ppm - so
+                   the clamp has to leave room for the worst offset a real line presents, or the
+                   loop silently stops tracking at the stop. */
+                if (s->ted_acc >  0.06) s->ted_acc =  0.06;
+                if (s->ted_acc < -0.06) s->ted_acc = -0.06;
+                s->tadj += kp * e + s->ted_acc;
+                /* SIPFAX: WRAP, do not clamp. The far end's clock is not ours, so tadj drifts
+                   without bound; a clamp would ride to the stop and slip. When the delay passes a
+                   whole sample, hand that sample to the baud accumulator instead - the absolute
+                   sampling instant is unchanged, but tadj stays inside the box history and the
+                   loop keeps tracking. The tick moves one sample EARLIER to offset a tadj that
+                   grew by one, because a smaller delay samples later. */
+                while (s->tadj >= 1.0) { s->tadj -= 1.0; s->baud_phase += s->baud_num; s->nwrap++; g_v22_wrapped = 1; }
+                while (s->tadj <  0.0) { s->tadj += 1.0; s->baud_phase -= s->baud_num; s->nwrap++; g_v22_wrapped = 1; }
+                if (getenv("SIPFAX_V22TRC") && (s->sym_count % 64) == 0)
+                    fprintf(stderr, "[v22trc] sym %5ld bit ~%5ld tadj=%.3f acc=%+.5f wraps=%d\n",
+                            s->sym_count, s->sym_count * 2, s->tadj, s->ted_acc, s->nwrap);
+                s->ted_i = ai; s->ted_q = aq;
             }
 
             mag = sqrt(ai * ai + aq * aq);
@@ -241,7 +330,6 @@ void V22_demod(V22DemodState *s, s16 *samples, unsigned int nb)
                         s->sym_count, ai, aq, mag, s->agc, s->started); }
             if (!s->started) {
                 if (s->agc > 200.0 && s->sym_count > 16) s->started = 1;
-                s->ted_i = ai; s->ted_q = aq;
                 continue;
             }
 
@@ -249,6 +337,41 @@ void V22_demod(V22DemodState *s, s16 *samples, unsigned int nb)
                 fprintf(stderr, "[v22con] ai=%8.0f aq=%8.0f  |z|=%8.0f  quad=%d\n",
                         ai, aq, mag, (ai>=0)?((aq>=0)?0:3):((aq>=0)?1:2)); } }
             /* quadrant, then differential decode */
+            {   /* SIPFAX: CARRIER RECOVERY. A clock offset rescales time, so it drags the
+                   carrier with it - the receiver's NCO sits at exactly 1200 Hz, but 50 ppm puts
+                   the far end 0.06 Hz away, which is 69 degrees of rotation across a 3.2 s run.
+                   The quadrant decision uses fixed axes, so a drifting constellation walks
+                   points across the boundaries and mis-scores dz, and no amount of timing work
+                   fixes it: the residual few percent survived every timing change, sat away from
+                   the wraps, and appeared the moment the offset became nonzero. This is a
+                   decision-directed loop - the QPSK points sit mid-quadrant, so the signed
+                   cross-product with the decision is the phase error. */
+                static double ckp = -1, cki = -1;
+                double ri, rq, cs, sn2, e, di, dq, mg;
+                if (ckp < 0) { char *p = getenv("SIPFAX_V22_CKP"); ckp = p ? atof(p) : 0.05; }
+                if (cki < 0) { char *p = getenv("SIPFAX_V22_CKI"); cki = p ? atof(p) : 1e-3; }
+                /* SIPFAX: only for the modes this decision fits. The error term below assumes
+                   the point sits mid-quadrant, which is true for the 1200/2400 constellations
+                   and not for the 2-phase 600-bps modes - running it there made them worse
+                   under a clock offset (6.25% against 1.56% free-running) rather than better.
+                   The 600 modes are not offset-robust either way; that is untouched, not fixed. */
+                if (s->mod_type != V22_MOD_1200 && s->mod_type != V22_MOD_2400) goto no_carrier;
+                cs = cos(s->cph); sn2 = sin(s->cph);
+                ri = ai * cs - aq * sn2;
+                rq = ai * sn2 + aq * cs;
+                ai = ri; aq = rq;
+                di = (ai >= 0) ? 1.0 : -1.0;
+                dq = (aq >= 0) ? 1.0 : -1.0;
+                mg = sqrt(ai*ai + aq*aq) + 1e-9;
+                e = (aq * di - ai * dq) / (mg * 1.41421356);
+                if (e >  0.7) e =  0.7;
+                if (e < -0.7) e = -0.7;
+                s->cacc += cki * e;
+                if (s->cacc >  0.10) s->cacc =  0.10;
+                if (s->cacc < -0.10) s->cacc = -0.10;
+                s->cph -= ckp * e + s->cacc;
+                no_carrier: ;
+            }
             {   int Znew = (ai >= 0) ? ((aq >= 0) ? 0 : 3) : ((aq >= 0) ? 1 : 2);
                 dz = (Znew - s->Z) & 3;
                 s->Z = Znew;
@@ -410,6 +533,7 @@ void V22_test(void)
    over ssh. SIPFAX_V22LOOP=<600|v600|1200|2400> picks the modulation. */
 static int v22l_tx[4096], v22l_txn, v22l_rxn, v22l_err, v22l_sync, v22l_got, v22l_nput;
 static int v22l_rx[4096], v22l_rn;
+static int v22l_wrapat[4096];   /* SIPFAX: did a timing wrap land on this bit? */
 static unsigned int v22l_lfsr = 0x1234;
 static int v22l_get(void *o)
 {
@@ -438,7 +562,9 @@ static void v22l_put(void *o, int bit)
                    v22l_got = 1; v22l_rxn = e ? atoi(e) : 32; } v22l_sync = 0; }
         return;
     }
-    if (v22l_rn < 4096) v22l_rx[v22l_rn++] = bit;   /* SIPFAX: score offline, self-aligned */
+    if (v22l_rn < 4096) { extern int g_v22_wrapped;
+                          v22l_wrapat[v22l_rn] = g_v22_wrapped; g_v22_wrapped = 0;
+                          v22l_rx[v22l_rn++] = bit; }   /* SIPFAX: score offline, self-aligned */
 }
 void V22_loop_test(const char *what)
 {
@@ -466,25 +592,98 @@ void V22_loop_test(const char *what)
             fprintf(stderr, "[v22loop] block %d: peak=%d  first=%d %d %d %d  txn=%d filt_wsize=%d\n",
                     i, mx, buf[0], buf[1], buf[2], buf[3], v22l_txn, tx.tx_filter_wsize);
         }
-        V22_demod(&rx, buf, 64);
+        {   /* SIPFAX: emulate a CLOCK OFFSET between the two ends. Without one the loopback
+               samples at exactly the transmit rate, so a free-running sampler scores as well as
+               a tracking one and the harness cannot tell timing recovery from its absence - the
+               first phase sweep passed at 13 of 14 offsets with the loop switched off, which
+               proves nothing. SIPFAX_V22_PPM resamples the transmit stream so the receiver has
+               to track a clock that is genuinely not its own. */
+            static double ppm = -1e30, rp = 0.0;
+            static s16 acc[512]; static int accn = 0;
+            s16 out[256]; int n = 0, q;
+            if (ppm < -1e29) { char *p = getenv("SIPFAX_V22_PPM"); ppm = p ? atof(p) : 0.0; }
+            if (ppm == 0.0) { V22_demod(&rx, buf, 64); }
+            else {
+                double rate = 1.0 + ppm * 1e-6;
+                if (accn + 64 <= (int)(sizeof(acc)/sizeof(acc[0]))) {
+                    memcpy(acc + accn, buf, 64 * sizeof(s16)); accn += 64;
+                }
+                while ((int)rp + 1 < accn && n < 256) {
+                    int k = (int)rp; double fr = rp - k;
+                    out[n++] = (s16)(acc[k] + fr * (acc[k+1] - acc[k]));
+                    rp += rate;
+                }
+                q = (int)rp;
+                if (q > 0 && q <= accn) { memmove(acc, acc + q, (accn - q) * sizeof(s16));
+                                          accn -= q; rp -= q; }
+                V22_demod(&rx, out, n);
+            }
+        }
     }
     fprintf(stderr, "[v22loop] put_bit calls=%d sync=%d got=%d\n", v22l_nput, v22l_sync, v22l_got);
     {   /* SIPFAX: find the alignment rather than assuming it. Guessing it wrong reads as
            ~50% BER from a receiver that is decoding perfectly - which cost a full round of
-           debugging. Report the BEST alignment and the count of bits actually compared. */
-        int off, bestoff = 0, bester = 1 << 30, n;
+           debugging. Report the BEST alignment and the count of bits actually compared.
+
+           SIPFAX: score in BLOCKS, re-aligning each one within a few bits of the last. With a
+           clock offset the two streams slip against each other by design - a whole bit every
+           ~2000 bits at 500 ppm - so a single fixed alignment starts counting garbage partway
+           through and floors the BER at a few percent no matter how well the receiver tracks.
+           That floor is the scorer, not the demodulator, and it made a working timing loop look
+           identical to no loop at all. */
+        int off, bestoff = 0, bester = 1 << 30, n, tot = 0, scored = 0, blk;
+        int ess = 0, nss = 0;
         for (off = 0; off < 64; off++) {
             int e = 0, c = 0, q;
-            for (q = 0; q + off < 4096 && q < v22l_rn && q + off < v22l_txn; q++) {
+            for (q = 0; q + off < 1024 && q < v22l_rn && q + off < v22l_txn; q++) {
                 if (v22l_rx[q] != v22l_tx[q + off]) e++;
                 c++;
             }
             if (c > 512 && e < bester) { bester = e; bestoff = off; }
         }
-        n = 0;
         for (n = 0; n + bestoff < 4096 && n < v22l_rn && n + bestoff < v22l_txn; n++) ;
-        v22l_err = bester; v22l_rxn = n;
-        fprintf(stderr, "[v22loop] best alignment offset %d\n", bestoff);
+        for (blk = 0; blk + 256 <= n; blk += 256) {
+            int d, bd = 0, be = 1 << 30, q;
+            for (d = -4; d <= 4; d++) {
+                int e = 0, ok = 1;
+                for (q = 0; q < 256; q++) {
+                    int ti = blk + q + bestoff + d;
+                    if (ti < 0 || ti >= v22l_txn) { ok = 0; break; }
+                    if (v22l_rx[blk + q] != v22l_tx[ti]) e++;
+                }
+                if (ok && e < be) { be = e; bd = d; }
+            }
+            if (be < (1 << 30)) { tot += be; scored += 256; bestoff += bd;
+                if (blk >= 2048) { ess += be; nss += 256; }
+                if (getenv("SIPFAX_V22BLK"))
+                    fprintf(stderr, "[v22blk] block %2d  err=%3d  slip=%+d  off=%d\n",
+                            blk / 256, be, bd, bestoff);
+            }
+        }
+        v22l_err = tot; v22l_rxn = scored;
+        fprintf(stderr, "[v22loop] block-aligned scoring, final offset %d\n", bestoff);
+        /* SIPFAX: a timing loop has to ACQUIRE before it can track, and the errors it makes
+           while acquiring are a one-off cost, not an error rate - lumping them into a single
+           BER made a loop that settles to zero errors read as a 3% failure. On a real call the
+           V.22 training period covers acquisition. Report both. */
+        {   /* SIPFAX: are the errors AT the wraps? Each wrap hands one sample from the
+               interpolator to the baud accumulator, and if that handoff is not exact it costs a
+               burst. Counting errors near a wrap against errors away from one answers that
+               directly, instead of inferring it from an aggregate BER. */
+            int q, nw = 0, ew = 0, nf = 0, ef = 0, d, near;
+            for (q = 0; q < n && q + bestoff < v22l_txn; q++) {
+                near = 0;
+                for (d = -6; d <= 6; d++)
+                    if (q + d >= 0 && q + d < 4096 && v22l_wrapat[q + d]) { near = 1; break; }
+                if (near) { nw++; if (v22l_rx[q] != v22l_tx[q + bestoff]) ew++; }
+                else      { nf++; if (v22l_rx[q] != v22l_tx[q + bestoff]) ef++; }
+            }
+            fprintf(stderr, "[v22wrap] near-wrap bits=%d err=%d (%.2f%%)   away bits=%d err=%d (%.2f%%)\n",
+                    nw, ew, nw ? 100.0*ew/nw : 0.0, nf, ef, nf ? 100.0*ef/nf : 0.0);
+        }
+        if (nss > 0)
+            fprintf(stderr, "[v22loop] steady state (after acquisition): scored=%d errors=%d BER=%.4f%%\n",
+                    nss, ess, 100.0 * ess / nss);
     }
     /* SIPFAX: never print a BER without a scored-bit count. scored=0 with BER=0.0000%
        reads as a perfect pass and actually means the sync never fired - it fooled me twice. */

@@ -36,6 +36,8 @@ void V22_mod_init(V22ModState *s)
            guard tone at 1800 Hz, -7db */
         s->carrier_incr = (PHASE_BASE * 2400.0) / V34_SAMPLE_RATE;
         s->carrier2_incr = (PHASE_BASE * 1800.0) / V34_SAMPLE_RATE;
+        { char *p = getenv("SIPFAX_V22_GUARD");
+          s->guard_gain = p ? atof(p) : 0.25; }   /* calibrated below to -6 dB */
     }
 }
 
@@ -149,9 +151,14 @@ void V22_mod(V22ModState *s, s16 *samples, unsigned int nb)
         val = (si * dsp_cos(s->carrier_phase) - 
                sq * dsp_cos((PHASE_BASE/4) - s->carrier_phase)) >> COS_BITS;
         s->carrier_phase += s->carrier_incr;
-        if (!s->calling) {
-            /* a 1800 Hz tone is added for answer modem modulation at 6 dB below it */
-            val += (dsp_cos(s->carrier2_phase) >> 1);
+        if (!s->calling && s->guard_gain > 0.0) {
+            /* SIPFAX: 1800 Hz guard tone, S2.2, required to be 6 +/- 1 dB below the
+               data power - the >> 1 this replaces was not that, and made the guard the
+               LOUDER of the two. It is a national option, so make it switchable: this
+               peer is already known to be fussy about spurious tones (real Tone A had
+               to be sent clean - see v34_phase2.c), so SIPFAX_V22_GUARD=0 lets one call
+               settle whether the guard helps or hurts, instead of one release. */
+            val += (int)(s->guard_gain * dsp_cos(s->carrier2_phase));
             s->carrier2_phase += s->carrier2_incr;
         }
         samples[i] = val;
@@ -535,6 +542,295 @@ static int v22l_tx[4096], v22l_txn, v22l_rxn, v22l_err, v22l_sync, v22l_got, v22
 static int v22l_rx[4096], v22l_rn;
 static int v22l_wrapat[4096];   /* SIPFAX: did a timing wrap land on this bit? */
 static unsigned int v22l_lfsr = 0x1234;
+
+
+/* ===========================================================================
+   SIPFAX: V.22 / V.22bis HANDSHAKE - answer side, plus enough of the calling
+   side to test it without placing a call.
+   =========================================================================== */
+
+/* V.22/V.22bis S5.1: one self-synchronising polynomial, 1 + x^-14 + x^-17, used by
+   BOTH directions (unlike V.32, which gives each end its own). The register runs
+   continuously from module init and is never reset between handshake stages or on
+   retrain - resetting it is a classic interop failure. */
+static int v22_scramble(V22HsState *h, int bit)
+{
+    int o;
+    /* S5.1 anti-lockup: 64 consecutive ones at the OUTPUT invert the next input bit.
+       Measured: feeding all-1s from a zero register, the longest run this scrambler
+       actually produces is 16 bits, so this never fires during a handshake - it earns
+       its place only in data mode. */
+    if (h->ones_out >= 64) { bit ^= 1; h->ones_out = 0; }
+    o = bit ^ ((h->sreg >> 13) & 1) ^ ((h->sreg >> 16) & 1);
+    h->sreg = ((h->sreg << 1) | o) & 0x1ffff;
+    if (o) h->ones_out++; else h->ones_out = 0;
+    return o;
+}
+
+static int v22_descramble(V22HsState *h, int bit)
+{
+    int d = bit ^ ((h->dreg >> 13) & 1) ^ ((h->dreg >> 16) & 1);
+    h->dreg = ((h->dreg << 1) | bit) & 0x1ffff;   /* register holds RECEIVED bits */
+    return d;
+}
+
+static void v22_det_push(V22HsState *h, int raw, int d)
+{
+    /* SIPFAX: qualification must measure 270 +/- 40 ms of the far end's SCRAMBLED ones,
+       not a window straddling the unscrambled ones that preceded them. Because the
+       descrambler turns unscrambled ones into ones too, the window was already full of
+       ones when the scrambled signal began, so it declared as soon as the raw stream
+       merely started looking random - 168 ms, well under the 230 ms floor. A long run
+       of identical raw bits is the unscrambled signal by construction (scrambled data
+       gives 24 in a row with probability ~1e-7), so restart the window on it and the
+       qualification is a clean 336 bits = 280 ms of scrambled ones. */
+    if (raw == h->raw_last) h->raw_ones++; else { h->raw_ones = 0; h->raw_last = raw; }
+    if (h->raw_ones >= 24) {
+        h->nfill = h->nones = h->nzeros = h->nraw = h->hp = 0;
+        return;
+    }
+    if (h->nfill >= V22_DETW) {
+        if (h->hist[h->hp] & 1) h->nones--; else h->nzeros--;
+        if (h->hist[h->hp] & 2) h->nraw--;
+    } else {
+        h->nfill++;
+    }
+    h->hist[h->hp] = (unsigned char)((d ? 1 : 0) | (raw ? 2 : 0));
+    if (d) h->nones++; else h->nzeros++;
+    if (raw) h->nraw++;
+    h->hp = (h->hp + 1) % V22_DETW;
+}
+
+/* Have we seen the far end's SCRAMBLED binary 1 (or 0) for the qualification window? */
+static int v22_det_ready(V22HsState *h)
+{
+    int rawpct;
+    if (h->nfill < V22_DETW) return 0;
+    if (h->nones < V22_DETN && h->nzeros < V22_DETN) return 0;
+    /* SIPFAX: "descrambled output is all ones" is NOT sufficient, and believing it
+       would have been a silent bug. Feed the descrambler unscrambled ones and once its
+       register fills with ones it emits d = 1^1^1 = 1 - so the test fires on the
+       caller's UNSCRAMBLED binary 1 too, and we would leave USB1 for S11 before the
+       caller had finished its own USB1, then reach data while it is still handshaking.
+       The distinguishing property is on the LINE, not after the descrambler: scrambled
+       ones are pseudorandom, unscrambled ones are a constant bit pattern. Require the
+       raw stream to look random as well. */
+    rawpct = h->nraw * 100 / V22_DETW;
+    return rawpct > 25 && rawpct < 75;
+}
+
+static void v22_hs_reset(V22HsState *h, get_bit_func gb, put_bit_func pb, void *opaque)
+{
+    memset(h, 0, sizeof(*h));
+    h->get_bit = gb; h->put_bit = pb; h->opaque = opaque;
+}
+
+/* ----------------------------- answer side ------------------------------- */
+
+static int v22_ans_get_bit(void *o)
+{
+    V22Session *s = (V22Session *)o;
+    V22HsState *h = &s->hs;
+    int b;
+
+    h->bits++; h->total_bits++;
+    switch (h->state) {
+    case V22_ANS_USB1:
+        /* V.8 S8.2.3 sigA for V.22bis: unscrambled binary 1, high channel. Not through
+           the scrambler - that is the whole point of the signal. */
+        if (h->bits > 24000) { h->state = V22_ANS_FAIL; h->bits = 0; }   /* 20 s, ours */
+        return 1;
+    case V22_ANS_S11:
+        /* S6.3.1.2.2 c): 765 ms of scrambled binary 1, timed from the start of OUR OWN
+           transmission of it. The calling-side wording measures from its circuit 109;
+           copying that reference point into the answer machine is a ~300 ms error. */
+        if (h->bits > 918) { h->state = V22_ANS_DATA; h->bits = 0; }
+        return v22_scramble(h, 1);
+    case V22_ANS_DATA:
+        b = h->get_bit ? h->get_bit(h->opaque) : 1;
+        return v22_scramble(h, b);
+    default:
+        return 1;
+    }
+}
+
+static void v22_ans_put_bit(void *o, int bit)
+{
+    V22Session *s = (V22Session *)o;
+    V22HsState *h = &s->hs;
+    int d = v22_descramble(h, bit);
+
+    switch (h->state) {
+    case V22_ANS_USB1:
+        v22_det_push(h, bit, d);
+        if (v22_det_ready(h)) { h->state = V22_ANS_S11; h->bits = 0; }
+        break;
+    case V22_ANS_DATA:
+        if (h->put_bit) h->put_bit(h->opaque, d);
+        break;
+    default:
+        break;
+    }
+}
+
+/* ----------------------------- calling side ------------------------------ */
+/* Only as much as is needed to exercise the answer machine in loopback. */
+
+static int v22_call_get_bit(void *o)
+{
+    V22Session *s = (V22Session *)o;
+    V22HsState *h = &s->hs;
+    int b;
+
+    h->bits++; h->total_bits++;
+    switch (h->state) {
+    case V22_CALL_WAIT:
+        return 1;                                  /* output is gated to silence */
+    case V22_CALL_USB1:
+        if (h->bits > 186) { h->state = V22_CALL_S11; h->bits = 0; }   /* 155 ms */
+        return 1;
+    case V22_CALL_S11:
+        if (h->bits > 918) { h->state = V22_CALL_DATA; h->bits = 0; }  /* 765 ms */
+        return v22_scramble(h, 1);
+    default:
+        b = h->get_bit ? h->get_bit(h->opaque) : 1;
+        return v22_scramble(h, b);
+    }
+}
+
+static void v22_call_put_bit(void *o, int bit)
+{
+    V22Session *s = (V22Session *)o;
+    V22HsState *h = &s->hs;
+    int d = v22_descramble(h, bit);
+
+    if (h->state == V22_CALL_WAIT) {
+        /* the answer modem's unscrambled binary 1 is a constant stream on the line */
+        if (bit) h->raw_ones++; else h->raw_ones = 0;
+        if (h->raw_ones >= 48) { h->state = V22_CALL_USB1; h->bits = 0; s->silent = 0; }
+    } else if (h->state == V22_CALL_DATA) {
+        if (h->put_bit) h->put_bit(h->opaque, d);
+    }
+}
+
+/* ------------------------------- driver ---------------------------------- */
+
+void V22_answer_init(V22Session *s, get_bit_func gb, put_bit_func pb, void *opaque)
+{
+    memset(s, 0, sizeof(*s));
+    v22_hs_reset(&s->hs, gb, pb, opaque);
+    s->hs.state = V22_ANS_USB1;
+    s->mod.calling = 0;   s->mod.mod_type   = V22_MOD_1200;
+    s->mod.opaque = s;    s->mod.get_bit    = v22_ans_get_bit;
+    s->demod.calling = 0; s->demod.mod_type = V22_MOD_1200;
+    s->demod.opaque = s;  s->demod.put_bit  = v22_ans_put_bit;
+    V22_mod_init(&s->mod);
+    V22_demod_init(&s->demod);
+    s->silent = 0;        /* V8_SIGA already gave the 75 ms; transmit at once */
+}
+
+void V22_calling_init(V22Session *s, get_bit_func gb, put_bit_func pb, void *opaque)
+{
+    memset(s, 0, sizeof(*s));
+    v22_hs_reset(&s->hs, gb, pb, opaque);
+    s->hs.state = V22_CALL_WAIT;
+    s->mod.calling = 1;   s->mod.mod_type   = V22_MOD_1200;
+    s->mod.opaque = s;    s->mod.get_bit    = v22_call_get_bit;
+    s->demod.calling = 1; s->demod.mod_type = V22_MOD_1200;
+    s->demod.opaque = s;  s->demod.put_bit  = v22_call_put_bit;
+    V22_mod_init(&s->mod);
+    V22_demod_init(&s->demod);
+    s->silent = 1;        /* silent until the answer modem is heard */
+}
+
+void V22_session(V22Session *s, s16 *out, s16 *in, unsigned int nb)
+{
+    V22_demod(&s->demod, in, nb);
+    V22_mod(&s->mod, out, nb);
+    if (s->silent) memset(out, 0, nb * sizeof(s16));
+}
+
+int V22_session_state(V22Session *s) { return s->hs.state; }
+
+
+
+/* SIPFAX: handshake loopback. Runs the answer machine against the calling machine and
+   checks that BOTH reach data mode and that data then flows - no call required. */
+static int  v22h_txn, v22h_rxn, v22h_seed = 1;
+static int  v22h_tx[8192], v22h_rx[8192];
+
+static int v22h_get(void *o)
+{
+    int b;
+    (void)o;
+    v22h_seed = (v22h_seed * 1103515245 + 12345) & 0x7fffffff;
+    b = (v22h_seed >> 16) & 1;
+    if (v22h_txn < 8192) v22h_tx[v22h_txn++] = b;
+    return b;
+}
+static void v22h_put(void *o, int bit)
+{
+    (void)o;
+    if (v22h_rxn < 8192) v22h_rx[v22h_rxn++] = bit;
+}
+
+void V22_hs_test(void)
+{
+    static V22Session ans, call;
+    s16 a_out[64], c_out[64], a_in[64], c_in[64];
+    int i, as = -1, cs = -1;
+    double t;
+    const char *AN[] = { "USB1", "S11", "DATA", "FAIL" };
+    const char *CN[] = { "WAIT", "USB1", "S11", "DATA" };
+
+    { extern void dsp_init(void); dsp_init(); }
+    v22h_txn = v22h_rxn = 0; v22h_seed = 1;
+    V22_answer_init(&ans, NULL, v22h_put, NULL);      /* we are the ANSWER modem */
+    V22_calling_init(&call, v22h_get, NULL, NULL);    /* the peer, for the test only */
+    memset(a_in, 0, sizeof(a_in)); memset(c_in, 0, sizeof(c_in));
+
+    fprintf(stderr, "[v22hs] guard_gain=%.3f\n", ans.mod.guard_gain);
+    for (i = 0; i < 4000; i++) {                      /* 4000 x 64 = 32 s */
+        V22_session(&ans,  a_out, a_in, 64);
+        V22_session(&call, c_out, c_in, 64);
+        memcpy(a_in, c_out, sizeof(a_in));            /* each hears the other */
+        memcpy(c_in, a_out, sizeof(c_in));
+        t = (i + 1) * 64 / 8000.0;
+        if (ans.hs.state != as) {
+            as = ans.hs.state;
+            fprintf(stderr, "[v22hs] t=%6.3fs  ANSWER  -> %s\n", t, AN[as]);
+        }
+        if (call.hs.state != cs) {
+            cs = call.hs.state;
+            fprintf(stderr, "[v22hs] t=%6.3fs  caller  -> %s\n", t, CN[cs]);
+        }
+    }
+
+    fprintf(stderr, "[v22hs] final: answer=%s caller=%s  tx=%d rx=%d\n",
+            AN[ans.hs.state], CN[call.hs.state], v22h_txn, v22h_rxn);
+    if (ans.hs.state != V22_ANS_DATA || call.hs.state != V22_CALL_DATA) {
+        fprintf(stderr, "[v22hs] HANDSHAKE FAILED\n");
+        return;
+    }
+    {   /* the answer side must recover the caller's data. Align, then score - never
+           print a BER without the count of bits it was measured over. */
+        int off, best = 1 << 30, bo = 0, n, e, q;
+        for (off = 0; off < 512; off++) {
+            e = 0; n = 0;
+            for (q = 0; q + off < v22h_txn && q < v22h_rxn && n < 2048; q++, n++)
+                if (v22h_rx[q] != v22h_tx[q + off]) e++;
+            if (n > 512 && e < best) { best = e; bo = off; }
+        }
+        n = 0;
+        for (q = 0; q + bo < v22h_txn && q < v22h_rxn && n < 2048; q++) n++;
+        if (n < 512)
+            fprintf(stderr, "[v22hs] data: scored=%d -> TOO FEW BITS (no BER)\n", n);
+        else
+            fprintf(stderr, "[v22hs] data: scored=%d errors=%d BER=%.4f%%  %s\n",
+                    n, best, 100.0 * best / n, (100.0 * best / n < 1.0) ? "PASS" : "FAIL");
+    }
+}
+
 static int v22l_get(void *o)
 {
     int b;

@@ -543,6 +543,8 @@ int main(int argc, char **argv)
     {
         char *vl = getenv("SIPFAX_V22LOOP");
         if (vl) { extern void V22_loop_test(const char *); V22_loop_test(vl); return 0; }
+        { char *vh = getenv("SIPFAX_V22HS");
+          if (vh) { extern void V22_hs_test(void); V22_hs_test(); return 0; } }
     }
     {
         char *gd = getenv("SIPFAX_GEN_DATA");

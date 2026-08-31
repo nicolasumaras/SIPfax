@@ -6840,80 +6840,113 @@ static int p4_have_h;
    carrier phase and the gain, leaving the true post-cursor taps - exactly the V.34 precoder
    coefficients (9.6.2), relative to the main tap. */
 #define P4_HLAG 20
-/* SIPFAX: JOINT training channel estimator (carrier + channel) on the raw MF output.
-   Key vs the earlier attempt: the FSE OUTPUT (-> decision) lags the raw FSE INPUT by the
-   FSE group delay (~7-8 symbols), so raw LEADS the decision - correlate raw(n) with the
-   FUTURE decision d(n+L), not d(n-L). Then remove the carrier jointly (freq+phase from the
-   cursor product) before the tap LS. Validated in python on a live capture: cursor rho
-   0.27, decaying taps, 94% of raw power explained. Only advertises when the fit clears a
-   quality gate, so we never advertise noise. */
+#define P4_LST  8      /* channel taps estimated by LS */
+#define P4_LPRE 2      /* pre-cursor taps included (cursor at index P4_LPRE) */
+/* SIPFAX: complex Gaussian elimination with partial pivoting for the small LS solve. */
+static void p4_csolve(double Ar[P4_LST][P4_LST], double Ai[P4_LST][P4_LST],
+                      double br[P4_LST], double bi[P4_LST], int n,
+                      double xr[P4_LST], double xi[P4_LST])
+{
+    int i, j, k, p;
+    for (i = 0; i < n; i++) {
+        double best = -1; p = i;
+        for (k = i; k < n; k++) { double m = Ar[k][i]*Ar[k][i]+Ai[k][i]*Ai[k][i]; if (m > best) { best = m; p = k; } }
+        if (p != i) { for (j = 0; j < n; j++) { double t;
+            t=Ar[i][j];Ar[i][j]=Ar[p][j];Ar[p][j]=t; t=Ai[i][j];Ai[i][j]=Ai[p][j];Ai[p][j]=t; }
+            { double t; t=br[i];br[i]=br[p];br[p]=t; t=bi[i];bi[i]=bi[p];bi[p]=t; } }
+        {   double pr=Ar[i][i], pi=Ai[i][i], den=pr*pr+pi*pi;
+            if (den < 1e-12) den = 1e-12;
+            for (j = i; j < n; j++) { double zr=Ar[i][j], zi=Ai[i][j];
+                Ar[i][j]=(zr*pr+zi*pi)/den; Ai[i][j]=(zi*pr-zr*pi)/den; }
+            { double zr=br[i], zi=bi[i]; br[i]=(zr*pr+zi*pi)/den; bi[i]=(zi*pr-zr*pi)/den; }
+        }
+        for (k = 0; k < n; k++) if (k != i) {
+            double fr=Ar[k][i], fi=Ai[k][i];
+            for (j = i; j < n; j++) { double zr=Ar[i][j], zi=Ai[i][j];
+                Ar[k][j]-=fr*zr-fi*zi; Ai[k][j]-=fr*zi+fi*zr; }
+            { double zr=br[i], zi=bi[i]; br[k]-=fr*zr-fi*zi; bi[k]-=fr*zi+fi*zr; }
+        }
+    }
+    for (i = 0; i < n; i++) { xr[i]=br[i]; xi[i]=bi[i]; }
+}
+/* SIPFAX: FULL-LS channel estimator on the raw MF output. Corrects two things over the
+   correlation version: (1) raw LEADS the decision by the FSE group delay, so correlate with
+   the FUTURE decision d(n+L); (2) NO joint carrier-removal step - the carrier offset on this
+   path is ~0 (both ends lock to the probe) and the earlier "carrier estimate" was noise that
+   destroyed an already-aligned fit (bare corr 0.88 -> 0.19 after "derotation"). Bare full-LS
+   via normal equations R_dd h = R_rd explains 88% (3 taps) to 94% (10 taps) of the raw power
+   with clean decaying taps. Quality-gated. */
 static void p4_est_channel(const double *rawi, const double *rawq,
                            const double *si, const double *sq, int ns, int sixteen)
 {
     double scale = sixteen ? sqrt(10.0) : sqrt(2.0);
     extern int v34_dbg;
-    int i, L, kk, lo = 210, hi = ns - 4;
-    double Pd = 0, Pr = 0;
-    if (ns < 800) return;
+    int i, L, lo = 210, hi = ns - P4_HLAG - 10;
+    if (ns < 900) return;
     {   char *hd = getenv("SIPFAX_HDUMP");
         if (hd) { FILE *f = fopen(hd, "w"); int ii;
             for (ii = 0; ii < ns; ii++) { int q3, z3; double ex, ey;
                 p4_slice(si[ii]*scale, sq[ii]*scale, sixteen, &q3, &z3, &ex, &ey);
                 fprintf(f, "%.5f %.5f %.5f %.5f\n", rawi[ii], rawq[ii], ex/scale, ey/scale); }
             fclose(f); fprintf(stderr, "[p4] HDUMP %d symbols -> %s\n", ns, hd); } }
-    for (i = lo; i < hi; i++) { int q2, z2; double dx, dy;
-        p4_slice(si[i]*scale, sq[i]*scale, sixteen, &q2, &z2, &dx, &dy); dx /= scale; dy /= scale;
-        Pd += dx*dx + dy*dy; Pr += rawi[i]*rawi[i] + rawq[i]*rawq[i]; }
-    if (Pd <= 0 || Pr <= 0) return;
-    /* 1) cursor lag: raw(n) correlates with the FUTURE decision d(n+L) (raw leads by the
-       FSE group delay). */
+    /* 1) cursor lag: raw(n) correlates with the FUTURE decision d(n+L) */
     {   int Lc = -1; double best = 0;
         for (L = 2; L < P4_HLAG; L++) { double ar = 0, ai = 0;
-            for (i = lo; i < hi - L; i++) { int q2, z2; double dx, dy;
-                p4_slice(si[i+L]*scale, sq[i+L]*scale, sixteen, &q2, &z2, &dx, &dy); dx /= scale; dy /= scale;
+            for (i = lo; i < hi; i++) { int q2, z2; double dx, dy;
+                p4_slice(si[i+L]*scale, sq[i+L]*scale, sixteen, &q2, &z2, &dx, &dy); dx/=scale; dy/=scale;
                 ar += rawi[i]*dx + rawq[i]*dy; ai += rawq[i]*dx - rawi[i]*dy; }
             if (ar*ar + ai*ai > best) { best = ar*ar + ai*ai; Lc = L; } }
-        if (Lc < 0) return;
-        {   double rho = sqrt(best) / sqrt(Pr*Pd);
-            /* 2) joint carrier: p(n) = raw(n) conj(d(n+Lc)) ~ |.|^2 e^{j(th0 + dw n)} */
-            double dwc = 0, dws = 0, dw, th0, ar1 = 0, ai1 = 0;
-            double pr0 = 0, pi0 = 0; int have = 0;
-            for (i = lo; i < hi - Lc; i++) { int q2, z2; double dx, dy, pr, pi;
-                p4_slice(si[i+Lc]*scale, sq[i+Lc]*scale, sixteen, &q2, &z2, &dx, &dy); dx /= scale; dy /= scale;
-                pr = rawi[i]*dx + rawq[i]*dy; pi = rawq[i]*dx - rawi[i]*dy;
-                if (have) { dwc += pr*pr0 + pi*pi0; dws += pi*pr0 - pr*pi0; }
-                pr0 = pr; pi0 = pi; have = 1; }
-            dw = atan2(dws, dwc);
-            for (i = lo; i < hi - Lc; i++) { int q2, z2; double dx, dy, pr, pi, cc, ss;
-                p4_slice(si[i+Lc]*scale, sq[i+Lc]*scale, sixteen, &q2, &z2, &dx, &dy); dx /= scale; dy /= scale;
-                pr = rawi[i]*dx + rawq[i]*dy; pi = rawq[i]*dx - rawi[i]*dy;
-                cc = cos(-dw*i); ss = sin(-dw*i); ar1 += pr*cc - pi*ss; ai1 += pr*ss + pi*cc; }
-            th0 = atan2(ai1, ar1);
-            /* 3) derotate raw, LS taps ch(k) = sum r'(n) conj(d(n+Lc-k)) / Pd, k = 0..3 */
-            {   double hr[4] = {0}, hq[4] = {0}, cm;
-                for (i = lo; i < hi - Lc; i++) { double ph = -(th0 + dw*i), cc = cos(ph), ss = sin(ph);
-                    double ri = rawi[i]*cc - rawq[i]*ss, rq = rawi[i]*ss + rawq[i]*cc;
-                    for (kk = 0; kk < 4; kk++) { int j = i + Lc - kk; int q2, z2; double dx, dy;
-                        if (j < 0 || j >= ns) continue;
-                        p4_slice(si[j]*scale, sq[j]*scale, sixteen, &q2, &z2, &dx, &dy); dx /= scale; dy /= scale;
-                        hr[kk] += ri*dx + rq*dy; hq[kk] += rq*dx - ri*dy; } }
-                for (kk = 0; kk < 4; kk++) { hr[kk] /= Pd; hq[kk] /= Pd; }
-                cm = hr[0]*hr[0] + hq[0]*hq[0];
-                if (v34_dbg) fprintf(stderr, "[p4] JOINT chan: cursor lag %d rho %.3f freq %.2f Hz  |h0|=%.3f\n",
-                                     Lc, rho, dw*3428.571/(2*M_PI), sqrt(cm));
-                {   int good = (rho > 0.20) && (cm > 0.02);
-                    for (kk = 1; kk <= 3; kk++) {
-                        double nr = 0, ni = 0;
-                        if (cm > 0) { nr = (hr[kk]*hr[0] + hq[kk]*hq[0]) / cm; ni = (hq[kk]*hr[0] - hr[kk]*hq[0]) / cm; }
-                        if (nr > 1.99) nr = 1.99; if (nr < -1.99) nr = -1.99;
-                        if (ni > 1.99) ni = 1.99; if (ni < -1.99) ni = -1.99;
-                        p4_hest[kk-1][0] = good ? (s16)lrint(nr*16384.0) : 0;
-                        p4_hest[kk-1][1] = good ? (s16)lrint(ni*16384.0) : 0;
-                        if (v34_dbg) fprintf(stderr, "[p4]   h%d = %+.4f %+.4fj  |h|=%.4f%s\n",
-                                             kk, nr, ni, sqrt(nr*nr+ni*ni), good ? "" : " (GATED->0)");
+        if (Lc < 2) return;
+        /* 2) full-LS normal equations for P4_LST taps, cursor at index P4_LPRE */
+        {   double Ar[P4_LST][P4_LST], Ai[P4_LST][P4_LST], br[P4_LST], bi[P4_LST];
+            double xr[P4_LST], xi[P4_LST], Pr = 0, res = 0;
+            int a, b2, cur; double dvr[P4_LST], dvq[P4_LST];
+            for (a = 0; a < P4_LST; a++) { br[a]=bi[a]=0; for (b2=0;b2<P4_LST;b2++){Ar[a][b2]=Ai[a][b2]=0;} }
+            for (i = lo; i < hi; i++) {
+                for (a = 0; a < P4_LST; a++) { int j = i + Lc - (a - P4_LPRE); int q2, z2; double dx, dy;
+                    p4_slice(si[j]*scale, sq[j]*scale, sixteen, &q2, &z2, &dx, &dy); dvr[a]=dx/scale; dvq[a]=dy/scale; }
+                for (a = 0; a < P4_LST; a++) {
+                    br[a] += rawi[i]*dvr[a] + rawq[i]*dvq[a];
+                    bi[a] += rawq[i]*dvr[a] - rawi[i]*dvq[a];
+                    for (b2 = 0; b2 < P4_LST; b2++) {
+                        Ar[a][b2] += dvr[a]*dvr[b2] + dvq[a]*dvq[b2];
+                        Ai[a][b2] += dvq[a]*dvr[b2] - dvr[a]*dvq[b2];
                     }
-                    p4_have_h = good ? 1 : 0;
                 }
+                Pr += rawi[i]*rawi[i] + rawq[i]*rawq[i];
+            }
+            p4_csolve(Ar, Ai, br, bi, P4_LST, xr, xi);
+            /* residual: Pr - Re{ sum_a conj(x[a]) b_orig[a] }; recompute b_orig via a 2nd pass
+               is costly, so use res = Pr - sum_a Re{ x[a] * conj(b_ls[a]) } where b_ls is the
+               ORIGINAL cross-corr (we overwrote br/bi in the solve) - so recompute cross-corr. */
+            {   double cr[P4_LST], ci[P4_LST];
+                for (a=0;a<P4_LST;a++){cr[a]=ci[a]=0;}
+                for (i = lo; i < hi; i++) for (a = 0; a < P4_LST; a++) {
+                    int j=i+Lc-(a-P4_LPRE); int q2,z2; double dx,dy;
+                    p4_slice(si[j]*scale, sq[j]*scale, sixteen, &q2,&z2,&dx,&dy); dx/=scale; dy/=scale;
+                    cr[a]+=rawi[i]*dx+rawq[i]*dy; ci[a]+=rawq[i]*dx-rawi[i]*dy; }
+                res = Pr; for (a=0;a<P4_LST;a++) res -= xr[a]*cr[a] + xi[a]*ci[a];
+            }
+            /* cursor = largest tap */
+            { double bm=0; cur=P4_LPRE; for (a=0;a<P4_LST;a++){ double m=xr[a]*xr[a]+xi[a]*xi[a]; if(m>bm){bm=m;cur=a;} } }
+            {   double expl = (Pr>0)? 1.0 - res/Pr : 0.0;
+                double cmag = xr[cur]*xr[cur]+xi[cur]*xi[cur];
+                int good = (expl > 0.60) && (cmag > 0);
+                if (v34_dbg) fprintf(stderr,"[p4] FULL-LS chan: cursor lag %d idx %d explained %.3f\n", Lc, cur, expl);
+                for (a = 1; a <= 3; a++) {
+                    int src = cur + a; double nr = 0, ni = 0;
+                    if (src < P4_LST && cmag > 0) {
+                        nr = (xr[src]*xr[cur]+xi[src]*xi[cur])/cmag;
+                        ni = (xi[src]*xr[cur]-xr[src]*xi[cur])/cmag;
+                    }
+                    if (nr>1.99) nr=1.99; if (nr<-1.99) nr=-1.99;
+                    if (ni>1.99) ni=1.99; if (ni<-1.99) ni=-1.99;
+                    p4_hest[a-1][0] = good ? (s16)lrint(nr*16384.0) : 0;
+                    p4_hest[a-1][1] = good ? (s16)lrint(ni*16384.0) : 0;
+                    if (v34_dbg) fprintf(stderr,"[p4]   h%d = %+.4f %+.4fj  |h|=%.4f%s\n",
+                                         a, nr, ni, sqrt(nr*nr+ni*ni), good?"":" (GATED->0)");
+                }
+                p4_have_h = good ? 1 : 0;
             }
         }
     }

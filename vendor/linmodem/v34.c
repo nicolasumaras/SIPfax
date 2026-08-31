@@ -4438,6 +4438,21 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             }
         }
     }
+    if (s->data_on && s->cma_phase != 2) {
+        /* SIPFAX: DATA MODE - stop adapting, for the same reason the 16-point Phase-4 guard
+           below exists, only more so. Blind CMA drives its output to a CONSTANT MODULUS, and
+           a shaped data constellation carries a large part of its information in amplitude:
+           at R=16800 the caller sends L=56 with shell mapping. Measured on a live call, the
+           caller's data arrives with per-symbol |z|^2 kurtosis 1.471 (shaped) and reaches our
+           slicer at 1.001 (constant envelope) - CMA had flattened every ring onto one. That
+           is why acquisition scored lattice-rms 0.512 against a 0.577 no-lock floor and why
+           an exhaustive gain/phase sweep could not do better than 0.490: the amplitude
+           information was already gone before the fit. The Phase-3/4 taps already equalise
+           this channel; keep them. */
+        s->cma_phase = 2; s->cma_phn = 0;
+        { extern int v34_dbg; static int once = 0; if (v34_dbg && !once) { once = 1;
+            fprintf(stderr, "[cma] data mode: freezing taps (blind CMA flattens shaped data)\n"); } }
+    }
     if (srx_rx16() && s->p4_mode != 0 && s->cma_phase != 2) {
         /* SIPFAX: 16-point Phase 4 - stop adapting. Blind CMA flattens the amplitudes the
            16-point constellation carries its data in (measured kurtosis 1.001 = constant
@@ -4811,7 +4826,21 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        Search gain first, then phase over 0..90 deg at that gain - a joint
                        coarse search finds false minima. Both are static here, so this is
                        one-shot; the DD loop then only has to track drift. */
-                    if (s->data_acq_n < DATA_ACQ_N) {
+                    static int acqn = -1;
+                    if (acqn < 0) { char *e = getenv("SIPFAX_ACQ_N");
+                                    /* SIPFAX: 400, not 2000. The fit solves for ONE gain and
+                                       ONE phase, but the caller's carrier walks: the per-window
+                                       diagnostic below shows the best-fit phase moving between
+                                       200-symbol windows (62, 23, 21, 19, 54 deg ...), so a long
+                                       window asks the fit an impossible question. Measured on a
+                                       live capture, lattice-rms against window length:
+                                       2000 -> 0.309, 800 -> 0.170, 400 -> 0.118, 256 -> 0.104,
+                                       where under 0.2 is a lock. 400 takes the lock with more
+                                       samples behind the gain estimate than 256. */
+                                    acqn = e ? atoi(e) : DATA_ACQ_N;
+                                    if (acqn < 64) acqn = 64;
+                                    if (acqn > DATA_ACQ_N) acqn = DATA_ACQ_N; }
+                    if (s->data_acq_n < acqn) {
                         double dth0 = data_carrier(s);
                         double ct0 = cos(-dth0), st0 = sin(-dth0);
                         /* SIPFAX: the acquisition window starts the instant E is detected,
@@ -4832,12 +4861,46 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                            acquisition was fitted to the wrong signal entirely. */
                         static long acqdly = -1, acqseen = 0;
                         if (acqdly < 0) { char *ea = getenv("SIPFAX_ACQ_DELAY");
-                                          acqdly = ea ? atol(ea) : 6000; }
+                                          /* SIPFAX: was 6000. The kurtosis prefix test below
+                                             discriminates training from data directly, which
+                                             is what the fixed delay was approximating - and
+                                             1.75 s is a third of the caller's whole data
+                                             window, so guessing costs more than it buys. */
+                                          acqdly = ea ? atol(ea) : 0; }
                         if (acqseen < acqdly) { acqseen++; }
                         else {
                         s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
                         s->data_acq_q[s->data_acq_n] = (oi*st0 + oq*ct0) * gc;
                         s->data_acq_n++;
+                        {   /* SIPFAX: REJECT A BAD WINDOW EARLY, AND SLIDE. The fixed
+                               SIPFAX_ACQ_DELAY above is a guess at where the caller's data
+                               starts; when it guesses wrong the whole 2000-symbol window is
+                               training and has to be thrown away, and each retry costs
+                               another 2000 symbols. Measured on a live call that is fatal:
+                               the caller's shaped data lasts about 5 s, of which the fixed
+                               delay eats 1.75 s, so acquisition kept landing either on the
+                               4-point Phase-4 tail before the data or on the Tone B after
+                               it - it accepted a window of kurtosis 1.001 while the data
+                               either side of it measured 1.39-1.59. Testing a short prefix
+                               instead rejects a wrong window in 256 symbols (75 ms) rather
+                               than 2000, so the collector slides forward until it is
+                               genuinely on shaped data. */
+                            static int npre = -1; static double kpre = -1;
+                            if (npre < 0) { char *e = getenv("SIPFAX_ACQ_PRE");
+                                            npre = e ? atoi(e) : 256; }
+                            if (kpre < 0) { char *e = getenv("SIPFAX_ACQ_KURT");
+                                            kpre = e ? atof(e) : 1.25; }
+                            if (npre > 0 && s->data_acq_n == npre) {
+                                double a2 = 0, a4 = 0; int jj;
+                                for (jj = 0; jj < npre; jj++) {
+                                    double p = s->data_acq_i[jj]*s->data_acq_i[jj]
+                                             + s->data_acq_q[jj]*s->data_acq_q[jj];
+                                    a2 += p; a4 += p*p;
+                                }
+                                a2 /= npre; a4 /= npre;
+                                if (a2 > 0 && a4/(a2*a2) < kpre) s->data_acq_n = 0;
+                            }
+                        }
                         }
                     } else
                     {
@@ -4896,9 +4959,50 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                                          cos(-th2*M_PI/180.0), sin(-th2*M_PI/180.0));
                             if (e2 < be) { be = e2; bp = th2; }
                         }
-                        s->data_agc *= bg;
-                        s->data_th  += bp*M_PI/180.0;
-                        s->data_acq_done = 1;
+                        {   /* SIPFAX: DO NOT ACQUIRE ON A SIGNAL THAT IS NOT THE CALLER'S
+                               DATA. The acquisition window opens the moment WE enter data
+                               mode, but the caller is still finishing Phase 4 - so on a live
+                               call we were fitting a gain and a carrier phase to its 4/16-point
+                               TRAINING constellation and then decoding its data with them.
+                               The evidence was in our own diagnostics: amplitude kurtosis
+                               1.001, where 1.00 is a CONSTANT ENVELOPE and a shaped L=56 data
+                               constellation measures ~1.5-1.8 (this caller's data has been
+                               measured at 1.766); and the point-usage histogram used only 14
+                               of 56 points, the first 12 never touched. The result was
+                               lattice-rms 0.512 against a 0.577 no-lock floor - and an
+                               exhaustive 2-D gain/phase sweep reached only 0.490, i.e. NO
+                               setting worked, because the fault was the WINDOW, not the fit.
+                               Shaped data has a non-constant envelope; training does not. */
+                            static int retries = -1, kdbg = 0;
+                            static double kmin = -1;
+                            double k2 = 0, k4 = 0, kurt; int jk;
+                            if (retries < 0) { char *e = getenv("SIPFAX_ACQ_RETRY");
+                                               retries = e ? atoi(e) : 40; }
+                            if (kmin < 0)    { char *e = getenv("SIPFAX_ACQ_KURT");
+                                               kmin = e ? atof(e) : 1.25; }
+                            for (jk = 0; jk < s->data_acq_n; jk++) {
+                                double p = s->data_acq_i[jk]*s->data_acq_i[jk]
+                                         + s->data_acq_q[jk]*s->data_acq_q[jk];
+                                k2 += p; k4 += p*p;
+                            }
+                            if (s->data_acq_n > 0) { k2 /= s->data_acq_n; k4 /= s->data_acq_n; }
+                            kurt = (k2 > 0) ? k4/(k2*k2) : 0.0;
+                            if (kurt < kmin && retries > 0) {
+                                retries--;
+                                s->data_acq_n = 0;      /* discard the window, listen again */
+                                { extern int v34_dbg; if (v34_dbg && (kdbg++ % 8) == 0)
+                                    fprintf(stderr, "[data] acq kurtosis %.3f < %.2f (training,"
+                                            " not data) - rewinding, %d left\n",
+                                            kurt, kmin, retries); }
+                            } else {
+                                { extern int v34_dbg; if (v34_dbg)
+                                    fprintf(stderr, "[data] acq kurtosis %.3f -> accepting\n",
+                                            kurt); }
+                                s->data_agc *= bg;
+                                s->data_th  += bp*M_PI/180.0;
+                                s->data_acq_done = 1;
+                            }
+                        }
                         {   /* SIPFAX: a low lattice score is NOT on its own evidence of a
                                decode - the acquisition minimises distance to the lattice,
                                and squashing every symbol onto the innermost ring minimises
@@ -4972,6 +5076,40 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                    symbol even with the DD gains at zero. */
                                 double dps = (dsum/dn) / 200.0 * M_PI / 180.0;
                                 s->data_frq = dps;
+                                {   /* SIPFAX: DE-DRIFT THE WINDOW BEFORE FITTING IT. The
+                                       gain/phase fit below solves for ONE constant rotation
+                                       over the whole 2000-symbol window, but the measurement
+                                       just above says the carrier walks -1.9 deg per 200
+                                       symbols - about 19 degrees across that window. No
+                                       single phase fits a constellation that is turning, so
+                                       the fit was being asked an impossible question and the
+                                       residual showed up as a smear: lattice-rms stuck at
+                                       0.31 with the constellation collapsing onto 16 of 56
+                                       points. The rate is already estimated here; apply it to
+                                       the stored samples so the fit sees a still picture.
+                                       SIPFAX_ACQ_DEDRIFT=0 restores the old behaviour. */
+                                    static int dd = -1;
+                                    if (dd < 0) { char *e = getenv("SIPFAX_ACQ_DEDRIFT");
+                                                  /* measured: no change to lattice-rms and rho
+                                                     got worse, so OFF until it earns its place */
+                                                  dd = e ? atoi(e) : 0; }
+                                    if (dd) {
+                                        int jd; double mid = 0.5*(s->data_acq_n - 1);
+                                        for (jd = 0; jd < s->data_acq_n; jd++) {
+                                            double ph = -dps * (jd - mid);   /* centre the
+                                                           correction so the mean phase, which
+                                                           the sweep still solves for, is not
+                                                           moved by this */
+                                            double c = cos(ph), sn = sin(ph);
+                                            double vi = s->data_acq_i[jd], vq = s->data_acq_q[jd];
+                                            s->data_acq_i[jd] = vi*c - vq*sn;
+                                            s->data_acq_q[jd] = vi*sn + vq*c;
+                                        }
+                                        fprintf(stderr, "[data] de-drifted acquisition window "
+                                                "by %+.2f deg end-to-end\n",
+                                                -dps*(s->data_acq_n-1)*180.0/M_PI);
+                                    }
+                                }
                                 fprintf(stderr, "[data] carrier offset %+.4f Hz (%+.1f ppm)"
                                         " -> seeding data_frq %+.3e rad/sym\n",
                                         dps*3428.571/(2*M_PI), dps*3428.571/(2*M_PI)/1959.184*1e6,

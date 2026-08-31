@@ -65,6 +65,7 @@ enum { TX_INFO0A, TX_TONEA, TX_L1L2, TX_INFO1A, TX_SILENCE };
 
 typedef struct {
     int state; long tstate;
+    long p2abs, p2held;   /* SIPFAX: absolute phase-2 clock and time held per state */
     int txmode;
     unsigned char info0a[49], info1a[70];
     int info_bit, info_n, info_lastsym; long info_t; double info_symphase;
@@ -86,6 +87,7 @@ typedef struct {
 void v34_phase2_init(V34Phase2 *p){
     memset(p,0,sizeof(*p));
     p->state=R_OPEN; p->txmode=TX_INFO0A; p->symrate=-1; p->last=-1; p->rev_sent=0;
+    p->p2abs=0; p->p2held=0;
     /* INFO1a field values COPIED from slmodem's decoded working frame on this line
        (infodec.py on sl-down.s16 @7.41s: pre=6 rate=9 sr=5/5, CRC OK — identical
        layout to ours, only these two values differed; the modem rejected pre=0/rate=14
@@ -196,12 +198,21 @@ static void brev_scan(V34Phase2 *p, short *in, int n){
 /* main process: returns 0 running, 1 done, -1 fail */
 int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
     if(p->state!=p->last){
-        fprintf(stderr,"[v34p2] -> %s (toneb_run=%d saw_wide=%d brev=%d symrate=%d t=%ldms)\n",
-                RN[p->state],p->toneb_run,p->saw_wide,p->got_brev,p->symrate,(long)(p->tstate/8));
-        fflush(stderr); p->last=p->state;
+        /* SIPFAX: the old line printed p->tstate, which is RESET on most state changes, so it
+           showed per-state elapsed and never the absolute position or a clean held figure -
+           phase 2 was the one block of the call with no usable timing at all. It is now the
+           largest unexplained slice: the call reaches data mode at t=15.5 s against slmodem's
+           t=14.0 s, and with V.8 measured and spec-bound and phases 3/4 already accounted for,
+           phase 2 (~2.6 s) and phase-3 TRN (1.78 s) are the only places that 1.5 s can be. */
+        fprintf(stderr,"[v34p2] t=%7.3fs  -> %-7s (held %6.3fs) toneb_run=%d saw_wide=%d "
+                "brev=%d symrate=%d\n",
+                p->p2abs/8000.0, RN[p->state], (p->p2abs - p->p2held)/8000.0,
+                p->toneb_run,p->saw_wide,p->got_brev,p->symrate);
+        fflush(stderr); p->last=p->state; p->p2held = p->p2abs;
     }
     p2_emit(p,out,n);
     p->tstate+=n;
+    p->p2abs+=n;
 
     /* classify the modem's signal this block */
     int cls=classify(in,n);

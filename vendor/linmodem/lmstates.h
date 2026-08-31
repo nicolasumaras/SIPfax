@@ -16,6 +16,7 @@ TAG(SM_V21)
 TAG(SM_V23)
 TAG(SM_V34)
 TAG(SM_V90)
+TAG(SM_V22)
 
 /* V8_process: call */
 TAG(V8_WAIT_1SECOND)

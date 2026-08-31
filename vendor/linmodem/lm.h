@@ -91,6 +91,7 @@ struct sm_state {
         V23State v23_state;
         V34State v34_state;
         V90State v90_state;
+        V22Session v22_state;
     } u;
 
     /* serial state */

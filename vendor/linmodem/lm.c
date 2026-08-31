@@ -331,6 +331,18 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     sm->u.v34_state.v34_rx.opaque = sm;
                     sm->state = SM_V34;
                     break;
+                case V8_MOD_V22:
+                    /* SIPFAX: V.8 selected V.22bis. sigA follows the 75 ms of silence
+                       V8_SIGA already provides, so the handshake transmits immediately -
+                       there is no V.25 answer tone on this path. */
+                    if (sm->calling)
+                        V22_calling_init(&sm->u.v22_state, serial_get_bit,
+                                         serial_put_bit, sm);
+                    else
+                        V22_answer_init(&sm->u.v22_state, serial_get_bit,
+                                        serial_put_bit, sm);
+                    sm->state = SM_V22;
+                    break;
                 case V8_MOD_V90:
                     V90_init(&sm->u.v90_state, sm->calling);
                     sm->u.v90_state.opaque = sm;
@@ -368,6 +380,16 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
         {
             int ret;
             ret = V34_process(&sm->u.v34_state, output, input, nb_samples);
+            if (ret || sm->hangup_request)
+                sm->state = SM_GO_ONHOOK;
+        }
+        break;
+
+        /* V22/V22bis handling */
+    case SM_V22:
+        {
+            int ret;
+            ret = V22_process(&sm->u.v22_state, output, input, nb_samples);
             if (ret || sm->hangup_request)
                 sm->state = SM_GO_ONHOOK;
         }
@@ -468,6 +490,12 @@ void lm_init(struct sm_state *sm, struct sm_hw_info *hw, const char *name)
         char *mx = getenv("SIPFAX_LINMODEM_MAX");
         if (mx && !strcmp(mx, "v34"))
             default_lm_config.available_modulations &= ~V8_MOD_V90;
+        /* SIPFAX: "v22" drops V.90 AND V.34 so V.22bis becomes the highest mode common
+           to both ends, which is the only way to exercise the V.22 answer handshake on a
+           real call - the caller always prefers V.34 when it is on offer, and after V.34
+           fails it asks for a retrain (Tone B) rather than renegotiating down. */
+        if (mx && !strcmp(mx, "v22"))
+            default_lm_config.available_modulations &= ~(V8_MOD_V90 | V8_MOD_V34);
     }
 }
 

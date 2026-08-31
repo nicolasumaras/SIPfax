@@ -37,7 +37,9 @@ void V22_mod_init(V22ModState *s)
         s->carrier_incr = (PHASE_BASE * 2400.0) / V34_SAMPLE_RATE;
         s->carrier2_incr = (PHASE_BASE * 1800.0) / V34_SAMPLE_RATE;
         { char *p = getenv("SIPFAX_V22_GUARD");
-          s->guard_gain = p ? atof(p) : 0.25; }   /* calibrated below to -6 dB */
+          s->guard_gain = p ? atof(p) : 0.34; }
+        /* 0.25 measured -8.7 dB against the data component on the line (guard rms 1449 vs
+           data 3953); S2.2 wants 6 +/- 1 dB, i.e. a 0.5 ratio, so 0.34. */
     }
 }
 
@@ -113,8 +115,12 @@ static void V22_mod_baseband(V22ModState *s, s16 *x_ptr, s16 *y_ptr)
     *y_ptr = y;
 }
 
+static int v22_txdiv = 0;
+
 void V22_mod(V22ModState *s, s16 *samples, unsigned int nb)
 {
+    if (!v22_txdiv) { char *p = getenv("SIPFAX_V22_TXDIV"); v22_txdiv = p ? atoi(p) : 5;
+                      if (v22_txdiv < 1) v22_txdiv = 1; }
     int i, j, k, val, si, sq, ph;
     
     for(i=0;i<nb;i++) {
@@ -161,7 +167,14 @@ void V22_mod(V22ModState *s, s16 *samples, unsigned int nb)
             val += (int)(s->guard_gain * dsp_cos(s->carrier2_phase));
             s->carrier2_phase += s->carrier2_incr;
         }
-        samples[i] = val;
+        /* SIPFAX: LEVEL. Measured on the line, V22_mod at full scale transmits rms 8683
+           while every real signal in these captures - the caller's V.8, its tones, our
+           ANSam, our V.34 - sits at rms 1750-2330. That is ~12 dB hot, and a hot signal
+           has broken THIS caller twice before, both recorded in the tree: fsk.c divides
+           by 5 to stop the ANSam->JM level jump overloading its AGC, and v8.c does the
+           same for a signal that was "~10 dB hot, which overloaded the calling modem's
+           V.8 detector". /5 lands at rms ~1737, inside the measured band. */
+        samples[i] = val / v22_txdiv;
     }
 }
 
@@ -752,6 +765,28 @@ void V22_session(V22Session *s, s16 *out, s16 *in, unsigned int nb)
 
 int V22_session_state(V22Session *s) { return s->hs.state; }
 
+/* SIPFAX: the sm_process entry point, matching V21_process / V34_process - returns
+   non-zero to hang up. Also logs each handshake transition with a timestamp, because on
+   a live call the only evidence of how far we got is what reaches the journal. */
+int V22_process(V22Session *s, s16 *output, s16 *input, int nb_samples)
+{
+    static const char *AN[] = { "USB1", "S11", "DATA", "FAIL" };
+    static const char *CN[] = { "WAIT", "USB1", "S11", "DATA" };
+    int before = s->hs.state;
+
+    V22_session(s, output, input, (unsigned int)nb_samples);
+    s->nsamp += nb_samples;
+    if (s->hs.state != before) {
+        const char **nm = s->mod.calling ? CN : AN;
+        fprintf(stderr, "[v22] t=%7.3fs %s -> %s\n",
+                s->nsamp / 8000.0, nm[before], nm[s->hs.state]);
+        fflush(stderr);
+    }
+    if (!s->mod.calling && s->hs.state == V22_ANS_FAIL)
+        return 1;
+    return 0;
+}
+
 
 
 /* SIPFAX: handshake loopback. Runs the answer machine against the calling machine and
@@ -834,7 +869,13 @@ void V22_hs_test(void)
 static int v22l_get(void *o)
 {
     int b;
-    if (v22l_txn < 32) { b = 1; }          /* preamble for sync */
+    /* SIPFAX: 256, not 32. The demodulator drops symbols until its AGC gate opens, and
+       how long that takes depends on LEVEL - so lowering the transmit level made it miss
+       the 16 preamble ones the harness needs to sync, and the test reported NO SYNC from
+       a receiver that was decoding cleanly (agc 608, clean quadrants, handshake passing
+       at the same level). A preamble that only just suffices is a level-dependent false
+       negative. */
+    if (v22l_txn < 256) { b = 1; }         /* preamble for sync */
     else {
         v22l_lfsr = (v22l_lfsr << 1) | (((v22l_lfsr >> 15) ^ (v22l_lfsr >> 13)) & 1);
         b = v22l_lfsr & 1;
@@ -850,12 +891,12 @@ static void v22l_put(void *o, int bit)
         if (bit) v22l_sync++;
         /* SIPFAX: align to the TRANSMITTED index, not to how many ones we happened to see.
            The demodulator drops symbols until it has signal, so it observes fewer than the
-           31 preamble ones; rxn = sync+1 then pointed at the wrong tx bit and every
+           preamble ones; rxn = sync+1 then pointed at the wrong tx bit and every
            comparison after it was offset - which reads as ~50% BER from a receiver that is
-           actually decoding correctly. The tx preamble is 31 ones with a zero at index 31,
-           so the bit after the sync zero is always tx index 32. */
+           actually decoding correctly. The tx preamble is 255 ones with a zero at index
+           255, so the bit after the sync zero is always tx index 256. */
         else { if (v22l_sync >= 16) { char *e=getenv("SIPFAX_V22ALIGN");
-                   v22l_got = 1; v22l_rxn = e ? atoi(e) : 32; } v22l_sync = 0; }
+                   v22l_got = 1; v22l_rxn = e ? atoi(e) : 256; } v22l_sync = 0; }
         return;
     }
     if (v22l_rn < 4096) { extern int g_v22_wrapped;
@@ -929,9 +970,14 @@ void V22_loop_test(const char *what)
            identical to no loop at all. */
         int off, bestoff = 0, bester = 1 << 30, n, tot = 0, scored = 0, blk;
         int ess = 0, nss = 0;
-        for (off = 0; off < 64; off++) {
+        /* SIPFAX: search a WIDE offset range. 64 bits was not enough: lowering the
+           transmit level delays the AGC gate that starts slicing, which shifts the whole
+           received stream, and the search then found nothing and reported NO SYNC from a
+           receiver that was decoding perfectly (agc 608, clean quadrants). A too-narrow
+           alignment search reads exactly like a broken demodulator. */
+        for (off = 0; off < 1024; off++) {
             int e = 0, c = 0, q;
-            for (q = 0; q + off < 1024 && q < v22l_rn && q + off < v22l_txn; q++) {
+            for (q = 0; q + off < 2048 && q < v22l_rn && q + off < v22l_txn; q++) {
                 if (v22l_rx[q] != v22l_tx[q + off]) e++;
                 c++;
             }

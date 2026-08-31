@@ -129,6 +129,7 @@ typedef struct {
     V22DemodState demod;
     V22HsState    hs;
     int silent;                 /* gate the transmitter (calling side, before start) */
+    long nsamp;
 } V22Session;
 
 void V22_answer_init(V22Session *s, get_bit_func gb, put_bit_func pb, void *opaque);
@@ -136,4 +137,5 @@ void V22_calling_init(V22Session *s, get_bit_func gb, put_bit_func pb, void *opa
 void V22_session(V22Session *s, s16 *out, s16 *in, unsigned int nb);
 int  V22_session_state(V22Session *s);
 const char *V22_state_name(V22Session *s);
+int  V22_process(V22Session *s, s16 *output, s16 *input, int nb_samples);
 void V22_hs_test(void);

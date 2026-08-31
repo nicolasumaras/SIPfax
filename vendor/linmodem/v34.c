@@ -102,9 +102,19 @@ static void v0_base_init(void)
 {
     int k; static int done = 0;
     if (done) return; done = 1;
-    for (k = 0; k < V0_PER; k++)
-        g_v0base[k] = ((k % 30) == 0)
-            ? ((SYNC_PATTERN >> (15 - ((k / 30) % 16))) & 1) : 0;
+    {   /* SIPFAX: DETECTOR-SIDE ONLY overrides, so the convention can be bisected against a
+           real transmitter. The encoder keeps the shipped constant, which is the point: every
+           link in the chain from constellation index to sync bit is written twice in this
+           file with the same expression, so a wrong-but-consistent convention scores 99.7%
+           in loopback and still fails against a real peer. Sweeping these two on a live
+           capture is the only way to see it. */
+        static unsigned int pat = 0; static int grid = 0;
+        if (!pat)  { char *e = getenv("SIPFAX_SYNC_PAT"); pat  = e ? (unsigned)strtoul(e,0,0) : SYNC_PATTERN; }
+        if (!grid) { char *e = getenv("SIPFAX_V0GRID");   grid = e ? atoi(e) : 30; if (grid < 1) grid = 30; }
+        for (k = 0; k < V0_PER; k++)
+            g_v0base[k] = ((k % grid) == 0)
+                ? ((pat >> (15 - ((k / grid) % 16))) & 1) : 0;
+    }
 }
 static void v0_try_lock(long need)
 {
@@ -124,8 +134,42 @@ static void v0_try_lock(long need)
        over the runner-up AND that the winner account for at least 3/4 of every observed one
        (which a wrong rotation cannot, since it predicts ones where none were seen). */
     { int tot = 0, k2; for (k2 = 0; k2 < V0_PER; k2++) tot += g_v0h[k2];
-      if (!(best > 0 && best * 4 >= (second > 0 ? second : 1) * 5 && best * 4 >= tot * 3))
+      if (!(best > 0 && best * 4 >= (second > 0 ? second : 1) * 5 && best * 4 >= tot * 3)) {
+          /* SIPFAX: a failed lock used to return in silence, so every investigation could
+             only report "no lock" and had to guess why. Print what the search already
+             computed. The shape of the histogram says which convention is wrong:
+               tot ~25% of the symbols and the counts flat  -> the trellis/labelling is
+                 wrong and these are not sync bits at all (ground truth gives tot/n ~2.9%);
+               tot small and the ones SHARP but on a 60-grid -> the sync bit is once per
+                 data frame, not per half frame, so (k % 30) here is wrong;
+               tot small, ones sharp on the 30-grid, spelling a word that is not 0x77FA or
+                 a rotation of it -> SYNC_PATTERN's value or bit order is wrong. */
+          extern int v34_dbg;
+          static long lastprint = -1;
+          if (v34_dbg && g_v0hn - lastprint >= 480) {
+              int j, bg = bestph % 30;
+              lastprint = g_v0hn;
+              fprintf(stderr, "[v0] no lock at %ld syms: tot=%d (%.1f%%) best=%d second=%d "
+                      "phase=%d grid=%d\n", g_v0hn, tot, 100.0*tot/(g_v0hn?g_v0hn:1),
+                      best, second, bestph, bg);
+              fprintf(stderr, "[v0]   ones on residue %d, 16 slots:", bg);
+              for (j = 0; j < 16; j++) fprintf(stderr, " %d", g_v0h[(bg + 30*j) % V0_PER]);
+              fprintf(stderr, "\n");
+              {   /* where do the ones actually sit modulo 30 and modulo 60? a sharp peak on
+                     one residue confirms the grid; a split says the grid is wrong. */
+                  int m30[30], m60[60], q;
+                  for (q = 0; q < 30; q++) m30[q] = 0;
+                  for (q = 0; q < 60; q++) m60[q] = 0;
+                  for (q = 0; q < V0_PER; q++) { m30[q % 30] += g_v0h[q]; m60[q % 60] += g_v0h[q]; }
+                  fprintf(stderr, "[v0]   ones mod 30:");
+                  for (q = 0; q < 30; q++) fprintf(stderr, " %d", m30[q]);
+                  fprintf(stderr, "\n[v0]   ones mod 60:");
+                  for (q = 0; q < 60; q++) fprintf(stderr, " %d", m60[q]);
+                  fprintf(stderr, "\n");
+              }
+          }
           return;
+      }
       g_v0margin = tot; }
     if (1) {
         { int tot2 = 0, k3; for (k3 = 0; k3 < V0_PER; k3++) tot2 += g_v0h[k3];
@@ -5455,6 +5499,18 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     fprintf(stderr, "[data] %ld syms, metric %.1f, freq %.2e rad/sym\n",
                             s->data_n, s->data_mse_n ? s->data_mse_acc/s->data_mse_n : 0.0,
                             s->data_frq); }
+                {   /* SIPFAX: IS THE TRELLIS ACTUALLY TRACKING? These counters were already
+                       accumulated but only ever printed by the offline test path, so the live
+                       path - the one that fails - never showed them. If nearly all 64 states
+                       tie at the minimum, the branch metrics carry no information and the
+                       fault is upstream of the trellis, in the constellation labelling / 4D
+                       subset mapping. A healthy decoder has a small number of tied states and
+                       a wide spread. */
+                    extern int v34_dbg; extern long g_ss_n, g_ss_tied; extern double g_ss_spread;
+                    if (v34_dbg && g_ss_n && (s->data_n % 20000) == 0)
+                        fprintf(stderr, "[acs] state metrics: mean spread %.1f over 64 states; "
+                                "mean %.1f states share the minimum  (n=%ld)\n",
+                                g_ss_spread/g_ss_n, (double)g_ss_tied/g_ss_n, g_ss_n); }
             }
         }
         for (r = 0; r < 4; r++) {

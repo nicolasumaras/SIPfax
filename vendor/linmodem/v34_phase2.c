@@ -80,6 +80,7 @@ typedef struct {
     short probe[24000]; int probe_len;
     int symrate;
     int retries;
+    int act_run, sil_run;   /* SIPFAX: post-probe burst tracker (R_PRX) */
     int seg;
     int last;
 } V34Phase2;
@@ -219,6 +220,11 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
     if(cls==TONEB) p->toneb_run++; else p->toneb_run=0;
     if(cls==WIDE){ p->wide_run++; p->saw_wide=1; } else p->wide_run=0;
     if(cls==INFOC) p->info_run++; else p->info_run=0;   /* modem DPSK = its INFO1c */
+    {   /* SIPFAX: classifier tape, R_PRX only - measure real INFO1c run structure */
+        static int cd = -1;
+        if (cd < 0) { char *e = getenv("SIPFAX_P2CLS"); cd = e ? atoi(e) : 0; }
+        if (cd && p->state==R_PRX) fprintf(stderr, "%d", cls);
+    }
     if(cls==TONEB){
         double ph=ph1200(in,0,n);
         if(p->tb_have){double d=ph-p->tb_ph;while(d>M_PI)d-=2*M_PI;while(d<-M_PI)d+=2*M_PI;if(fabs(fabs(d)-M_PI)<0.6)p->got_brev=1;}
@@ -352,19 +358,31 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
                lands 22-27 ms after the caller's INFO1c ends; going silent and waiting put
                ours 929-934 ms late, past the 700 ms recovery deadline of 11.2.2.1.6 - so
                the caller abandoned Phase 2 and restarted with INFO0c every single call. */
-            p->retries=1; if(p->txmode!=TX_TONEA) set_tx(p,TX_TONEA);
+            p->retries=1; p->act_run=0; p->sil_run=0; p->seg=0;
+            if(p->txmode!=TX_TONEA) set_tx(p,TX_TONEA);
         }
-        if(p->retries==1 && cls==INFOC){
-            p->retries=2; p->seg=0;
-            fprintf(stderr,"[v34p2] caller INFO1c arriving\n");fflush(stderr);
-        }
-        /* One stray non-INFO block used to end this 20 ms into INFO1c; two blocks of
-           quiet (40 ms) debounces that while still replying inside slmodem's 22-27 ms
-           class. Tone A stays up throughout - INFO1a follows immediately. */
-        if(p->retries==2 && cls==INFOC) p->seg=0;
-        if(p->retries==2 && p->info_run==0 && ++p->seg >= 2){
-            fprintf(stderr,"[v34p2] caller INFO1c done -> INFO1a NOW\n");fflush(stderr);
-            p->state=R_INFO1A; p->tstate=0; p->retries=0;
+        if(p->retries==1){
+            /* SIPFAX: mirror slmodem's MEASURED choreography (golden RTP capture,
+               CONNECT 33600): Tone A rises mid-probe and stays PURE; the caller runs
+               its L2 seamlessly into INFO1c and goes quiet; slmodem answers the end of
+               that composite burst with INFO1a 22-30 ms later. It never classifies
+               INFO1c at all. The old code here fired INFO1a off a single misclassified
+               20 ms block DURING the caller's burst, stomping the Tone A that
+               11.2.1.1.7 requires before the caller will even send INFO1c - so the
+               caller either fell back to the 11.2.2.1.6 recovery path (~50% of calls)
+               or restarted Phase 2 with Tone B (the other 50%, and 100% of watchdog
+               rounds). Answer the burst end, nothing else. */
+            if(cls!=SIL){ p->act_run++; p->sil_run=0; }
+            else p->sil_run++;
+            if(p->act_run>=3 && p->seg==0){
+                p->seg=1;
+                fprintf(stderr,"[v34p2] caller INFO1c arriving\n");fflush(stderr);
+            }
+            if(p->sil_run>=2){
+                fprintf(stderr,"[v34p2] caller burst ended (INFO1c %s) -> INFO1a NOW\n",
+                        p->seg?"seen":"not seen");fflush(stderr);
+                p->state=R_INFO1A; p->tstate=0; p->retries=0;
+            }
         }
         if(p->tstate>(long)(2.5*S)){
             if(p->symrate<0)p->symrate=5;

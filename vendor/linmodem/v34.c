@@ -41,6 +41,10 @@ static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 static void v34_tx_data_params(V34DSPState *s, int R);   /* SIPFAX: TX rate from negotiated ac */
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin, const s16 h[3][2], double nlnorm);  /* SIPFAX */
+int g_japplied = 0;              /* SIPFAX: J-obey latch, reset on watchdog restart */
+int g_mp_type = -1, g_mp_aux = -1, g_mp_asym = -1;   /* SIPFAX: extra MP fields for the p4blk reporter */
+long g_b1c = 0, g_b1o = 0;       /* SIPFAX: RX descrambled-ones health meter */
 static int  data_slice(V34DSPState *s, double xi, double xq, double *di, double *dq);
 static double data_lattice_rms(const double *bi, const double *bq, int n,
                                double g, double ct, double st);
@@ -80,6 +84,7 @@ long g_sym = 0, g_v0hn = 0;
    time. */
 #define U0H 128
 int g_u0hist[U0H];
+int g_c0hist[U0H];   /* SIPFAX: the C0 folded into U0 at that time (9.6.3.3) */
 int  g_v0h[V0_PER];
 int  g_v0base[V0_PER];
 int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0, g_v0applied = 0;
@@ -1113,6 +1118,13 @@ static void encode_mapping_frame(V34DSPState *s)
   }
     
   /* send an auxilary channel bit if needed */
+  if (s->b1_mf > 0) {
+      /* SIPFAX: B1 (10.1.3.1) - one data frame of scrambled ONES before user data.
+         The aux channel does not run during B1. */
+      int poly1 = s->calling ? V34_GPC : V34_GPA;
+      s->b1_mf--;
+      for(i=0;i<mp_size;i++) data[i] = scramble_bit(s, 1, poly1);
+  } else {
   s->acnt += s->W;
   if (s->acnt < s->P) {
       data[0] = get_bit(s);
@@ -1122,6 +1134,7 @@ static void encode_mapping_frame(V34DSPState *s)
   }
 
   for(i=1;i<mp_size;i++) data[i] = get_bit(s);
+  }
   { extern FILE *g_mftx; if (!g_mftx) { char *e = getenv("SIPFAX_MFDUMP_TX");
       if (e) g_mftx = fopen(e,"w"); }
     if (g_mftx) { int z; for (z=0;z<mp_size;z++) fputc('0'+(data[z]&1), g_mftx); fputc('\n', g_mftx); } }
@@ -1223,6 +1236,13 @@ static void encode_mapping_frame(V34DSPState *s)
       
       x_re = (Y[i][0] << 7) - p_re;
       x_im = (Y[i][1] << 7) - p_im;
+      {   /* SIPFAX: precoder trace for the channel-sim validation */
+          static FILE *pf = 0; static int pn = 0;
+          if (!pf) { char *e = getenv("SIPFAX_PC_TXDBG"); if (e) pf = fopen(e, "w"); }
+          if (pf && pn < 400) { pn++;
+              fprintf(pf, "%d %d %d %d %d %d %d %d %d %d\n",
+                      u_re, u_im, p_re, p_im, c_re, c_im, Y[i][0], Y[i][1], x_re, x_im); }
+      }
 
       for(k=2;k>=1;k--) {
         s->x[k][0] = s->x[k-1][0];
@@ -1297,13 +1317,29 @@ FILE *g_txsymf = 0;
 /* SIPFAX: measurement tap - see v34_shaped_meanc2() */
 static double shp_acc; static long shp_n; static int shp_on;
 
+static double shp_maxsi;   /* SIPFAX: peak |component| seen by the measurement tap */
 static void put_sym(V34DSPState *s, int si, int sq)
 {
-    if (shp_on) { shp_acc += (double)si*si + (double)sq*sq; shp_n++; return; }
+    if (shp_on) { shp_acc += (double)si*si + (double)sq*sq; shp_n++;
+                  { double a1 = si < 0 ? -si : si, a2 = sq < 0 ? -sq : sq;
+                    if (a1 > shp_maxsi) shp_maxsi = a1;
+                    if (a2 > shp_maxsi) shp_maxsi = a2; }
+                  return; }
     if (g_txsymf) fprintf(g_txsymf, "%d %d\n", si, sq);
     if (g_symtap) { g_symtap(si, sq); return; }
-    s->tx_buf[s->tx_buf_ptr][0] = (si * s->tx_amp) >> 7;
-    s->tx_buf[s->tx_buf_ptr][1] = (sq * s->tx_amp) >> 7;
+    {   /* SIPFAX: SATURATE. tx_buf is s16 and (si*tx_amp)>>7 exceeds it on the outer
+           points of large constellations - at 16800/tx_amp 3080 a peak symbol computes
+           to ~52000 and WRAPPED to a large negative, i.e. the wire carried a violent
+           wrong symbol precisely on outer points. The dataloop taps symbols before this
+           store, which is why every symbol-level validation passed while the caller
+           rejected the audio. tx_amp is now capped so this clamps rarely, but clamping
+           is the correct failure mode either way. */
+        int v1 = (si * s->tx_amp) >> 7, v2 = (sq * s->tx_amp) >> 7;
+        if (v1 > 32767) v1 = 32767; else if (v1 < -32768) v1 = -32768;
+        if (v2 > 32767) v2 = 32767; else if (v2 < -32768) v2 = -32768;
+        s->tx_buf[s->tx_buf_ptr][0] = v1;
+        s->tx_buf[s->tx_buf_ptr][1] = v2;
+    }
 
     s->tx_buf_ptr = (s->tx_buf_ptr + 1) & (TX_BUF_SIZE - 1);
     s->tx_buf_size++;
@@ -1350,8 +1386,16 @@ static int V34_baseband_to_carrier(V34DSPState *s,
         }
         
         /* center on the carrier */
-        samples[i] = (si * dsp_cos(s->carrier_phase) - 
-            sq * dsp_cos((PHASE_BASE/4) - s->carrier_phase)) >> COS_BITS;
+        {   /* SIPFAX: data-mode headroom compensation. tx_amp is capped so symbol
+               peaks fit the s16 tx_buf; the wire power lost to that cap is restored
+               here where the numbers are small. 0 means unity (128/128). */
+            int pg = s->tx_postgain ? s->tx_postgain : 128;
+            int sv = (si * dsp_cos(s->carrier_phase) -
+                sq * dsp_cos((PHASE_BASE/4) - s->carrier_phase)) >> COS_BITS;
+            sv = (sv * pg) >> 7;
+            if (sv > 32767) sv = 32767; else if (sv < -32768) sv = -32768;
+            samples[i] = sv;
+        }
         s->carrier_phase += s->carrier_incr;
     }
     return i;
@@ -1621,7 +1665,23 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         } else {
             r_ca = 12; r_ac = 12; trel = 0; msk = 0x0fff;
         }
+        {   /* SIPFAX: the SIPFAX_MP_CA/MP_AC caps and the shaping bit were read ONLY on
+               the SLCOMPAT branch, so the default (mirror) path IGNORED them and sent the
+               initializer shape=0. Two live consequences, measured off the wire with the
+               role-adapted p4blk reader: (1) every call advertised shape=0 - the caller
+               was told MINIMUM shaping for its transmissions while our receiver decoded
+               with the expanded set (L=48 vs 56); (2) every SIPFAX_MP_AC experiment
+               advertised the MIRRORED ac (26400) while the E-path transmitted at the
+               capped rate (16800) - the caller conditioned its receiver at 26400 and got
+               16800: garbage by construction, and an invalid test of everything else in
+               those calls. Caps and shape now apply on every path. */
+            char *mc = getenv("SIPFAX_MP_CA"), *ma = getenv("SIPFAX_MP_AC");
+            if (mc) { int v = atoi(mc); if (v > 0 && v < r_ca) r_ca = v; }
+            if (ma) { int v = atoi(ma); if (v > 0 && v < r_ac) r_ac = v; }
+            { char *ms = getenv("SIPFAX_MP_SHAPE"); shape = ms ? atoi(ms) : 1; }
+        }
         mp_params_done:
+        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac;
         put_bits(&p, 17, 0x1ffff); /* frame sync */
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
@@ -1630,7 +1690,14 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         put_bits(&p, 4, r_ac); /* answer to call max rate (negotiated) */
         put_bits(&p, 1, 0); /* no aux channel */
         put_bits(&p, 2, trel); /* trellis: match the caller's selection */
-        put_bits(&p, 1, 0); /* non linear encoder disabled */
+        {   /* SIPFAX: bit 31 - the 9.7 warp we ask the CALLER to apply toward us.
+               slmodem advertises 1 and this caller has likely never met an answerer
+               that says 0; our RX has no dewarp yet, so this is default 0, but
+               SIPFAX_MP_NONLIN=1 exercises the caller's well-tested path. */
+            static int mn = -1;
+            if (mn < 0) { char *e = getenv("SIPFAX_MP_NONLIN"); mn = e ? atoi(e) : 0; }
+            put_bits(&p, 1, mn ? 1 : 0);
+        }
         put_bits(&p, 1, shape); /* constellation shaping (1=expanded, as slmodem) */
         put_bits(&p, 1, do_ack); /* acknowledge bit */
 
@@ -1957,9 +2024,20 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
             break;
         case V34_STARTUP4_MPP:
             V34_send_MP(s, 1, 1);                /* MP' until caller's MP' or E */
-            if (s->p4_mpp_rx || s->p4_e_rx) {
-                { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: caller MP'/E in -> E\n"); }
-                s->state = V34_STARTUP4_E;
+            s->mpp_sent++;
+            {   /* SIPFAX: the caller's MP' usually lands during our MP hold, so this
+                   state used to exit after ONE frame - the wire showed exactly one
+                   ack=1 frame before E, where slmodem sends FOUR. A caller that needs
+                   consecutive MP' to latch our acknowledge (or loses one frame to a
+                   CRC hiccup) then never sees our ack at all, and no E or B1 after it
+                   means anything - matching the observed content-insensitive abort.
+                   Send at least slmodem's four. SIPFAX_MPP_MIN overrides. */
+                static int mn2 = -1;
+                if (mn2 < 0) { char *e = getenv("SIPFAX_MPP_MIN"); mn2 = e ? atoi(e) : 4; }
+                if (s->mpp_sent >= mn2 && (s->p4_mpp_rx || s->p4_e_rx)) {
+                    { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: caller MP'/E in, %d MP' sent -> E\n", s->mpp_sent); }
+                    s->state = V34_STARTUP4_E;
+                }
             }
             break;
         case V34_STARTUP4_E:
@@ -1987,6 +2065,11 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                     static int cap = -1; int their_ac, Rt;
                     if (cap < 0) { char *mc = getenv("SIPFAX_MP_AC"); cap = mc ? atoi(mc) : 0; }
                     their_ac = s->p4_mp_rate_ac > 0 ? s->p4_mp_rate_ac : 4;
+                    /* SIPFAX: the negotiated answer->call rate is min of BOTH MP ac
+                       fields (11.4.1.2.3). Use what our MP actually ADVERTISED - the
+                       cap used to apply here but not in the builder, so we told the
+                       caller one rate and transmitted another. */
+                    if (s->p4_adv_ac > 0 && s->p4_adv_ac < their_ac) their_ac = s->p4_adv_ac;
                     Rt = ((cap > 0 && cap < their_ac) ? cap : their_ac) * 2400;
                     if (Rt > 0 && Rt != s->R) {
                         extern int v34_dbg;
@@ -2047,6 +2130,84 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                         fprintf(stderr, "[p4] TX: data constellation L=%d mean|c|^2=%.2f "
                                 "-> tx_amp %d (was %d)\n", s->L, mp, (int)CALC_AMP(mp),
                                 s->tx_amp); }
+                }
+            }
+            {   /* SIPFAX: adopt the trellis the caller REQUIRES of our transmitter.
+                   MP bits 29:30 are "Receiver requires remote-end transmitter to use
+                   selected trellis encoder" (Table 20/V.34). The caller has commanded
+                   64-state on every call while this instance still encoded with the
+                   init-time 16-state, so its Viterbi decoder saw sequence constraints
+                   that were never obeyed. SIPFAX_TX_TRELLIS=0 restores the old
+                   behaviour. */
+                static int tt = -1;
+                if (tt < 0) { char *e = getenv("SIPFAX_TX_TRELLIS"); tt = e ? atoi(e) : 1; }
+                if (tt) {
+                    int ns = (s->p4_trellis == 1) ? 32 : (s->p4_trellis == 2) ? 64 : 16;
+                    if (ns != s->conv_nb_states) {
+                        extern int v34_dbg;
+                        if (v34_dbg) fprintf(stderr, "[p4] TX: caller requires %d-state trellis (was %d-state)\n",
+                                             ns, s->conv_nb_states);
+                        s->conv_nb_states = ns;
+                    }
+                }
+            }
+            {   /* SIPFAX: transmit POWER CONTINUITY into B1/data. 10.1.3.1 NOTE: "The
+                   transmitter should compensate for modulation factors including the
+                   effects of non-linear encoding and precoding so that the average
+                   signal power transmitted in Phases 3 and 4 is maintained in segment
+                   B1 and the subsequent data mode." slmodem holds the boundary flat;
+                   we dropped 1.2 dB, because tx_amp came from the UNIFORM
+                   quarter-constellation mean while shell shaping concentrates usage on
+                   the inner rings. Measure the true mean over the encoder itself with
+                   the negotiated trellis, the peer's precoder taps and the 9.7 warp
+                   active. Also corrects the 9.7 normaliser: zeta divides by the average
+                   energy of x(n) - the shaped, precoded mean - not the uniform mean.
+                   SIPFAX_TX_POW=0 disables. */
+                static int tw = -1;
+                if (tw < 0) { char *e = getenv("SIPFAX_TX_POW"); tw = e ? atoi(e) : 1; }
+                if (tw && s->b > 12) {
+                    double shp0 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 0, s->h, 0.0);
+                    double shp2 = shp0;
+                    if (shp0 > 0) {
+                        s->nl_meanc2 = shp0;
+                        if (s->use_non_linear)
+                            shp2 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 1, s->h, shp0);
+                        if (shp2 > 0) {
+                            int amp_full = CALC_AMP(shp2), amp = amp_full, pg = 128;
+                            double mx = shp_maxsi;   /* peak |component| from the warped run */
+                            if (mx > 0) {
+                                int cap = (int)(32767.0 * 128.0 / (mx * 1.02));
+                                if (amp > cap) { pg = (int)(128.0 * amp / cap + 0.5); amp = cap; }
+                            }
+                            s->tx_amp = amp;
+                            s->tx_postgain = pg;
+                            { extern int v34_dbg; if (v34_dbg)
+                                fprintf(stderr, "[p4] TX: shaped mean |x|^2 %.2f -> warped %.2f, peak %d -> tx_amp %d postgain %d/128\n",
+                                        shp0, shp2, (int)mx, amp, pg); }
+                        }
+                    }
+                }
+            }
+            {   /* SIPFAX: B1 (10.1.3.1). "Prior to transmission of B1, the scrambler,
+                   trellis encoder, differential encoder, and the precoding filter tap
+                   delay line are initialized to zeroes." B1 is one data frame of
+                   scrambled ONES positioned as the LAST data frame of a superframe, so
+                   a new superframe starts exactly where user data does (11.4.1.2.4).
+                   None of this happened - data mode continued from whatever state
+                   Phase 4 left, so our B1 was unrecognisable and the superframe had no
+                   defined phase. SIPFAX_TX_B1=0 disables. */
+                static int tb = -1;
+                if (tb < 0) { char *e = getenv("SIPFAX_TX_B1"); tb = e ? atoi(e) : 1; }
+                if (tb) {
+                    s->scrambler_reg = 0;
+                    s->Z_1 = 0; s->U0 = 0; s->conv_reg = 0;
+                    memset(s->x, 0, sizeof(s->x));
+                    s->sync_count = 0;
+                    s->half_data_frame_count = 2*s->J - 2;
+                    s->mapping_frame = 0; s->rcnt = 0; s->acnt = 0;
+                    s->b1_mf = s->P;
+                } else {
+                    s->b1_mf = 0;
                 }
             }
             { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: E sent -> DATA (B1)\n"); }
@@ -2669,6 +2830,49 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
 
     trellis_ptr = s->trellis_ptr;
     v0_base_init();
+    {   /* SIPFAX: PRECODER FRONT CHAIN (9.6.2 + 9.6.3.3). When the peer precodes, the
+           encoder folds C0(m) - the modulo bit from c(2m), c(2m+1) - into U0, so the
+           branch half holding the transmitted tuple is (parity ^ v0 ^ C0), not
+           (parity ^ v0). c(n) depends only on the receiver's own reconstruction of
+           PAST symbols, so it is knowable before this 4D symbol is scored: run the
+           9.6.2 filter on zero-delay odd-lattice decisions of the incoming soft
+           symbols. The encoder applies U0 one 4D symbol late (it returns U0 at the end
+           of symbol m and folds it into m+1), so the half uses the PREVIOUS symbol's
+           C0, exactly like v0. Measured through a clean simulated channel with the
+           caller's own h: 55.9% bit match without this, vs 99.7% unprecoded. */
+        int c0_new = 0;
+        static int fcen = -1;
+        if (fcen < 0) { char *e = getenv("SIPFAX_FC"); fcen = e ? atoi(e) : 1; }
+        if (fcen && s->rx_precode) {
+            int i2, w3 = (s->b < 56) ? 1 : 2, csum = 0;
+            for (i2 = 0; i2 < 2; i2++) {
+                int px = 0, py = 0, k3, p_re, p_im, c_re, c_im, yd_re, yd_im;
+                for (k3 = 0; k3 < 3; k3++) {
+                    px += s->fx[k3][0]*s->h[k3][0] - s->fx[k3][1]*s->h[k3][1];
+                    py += s->fx[k3][1]*s->h[k3][0] + s->fx[k3][0]*s->h[k3][1];
+                }
+                p_re = shr_round0(px, 14);
+                p_im = shr_round0(py, 14);
+                c_re = shr_round0(p_re, 7 + w3) << w3;
+                c_im = shr_round0(p_im, 7 + w3) << w3;
+                csum += c_re + c_im;
+                yd_re = clamp(2*shr_round0((int)yy[i2][0] - 128, 8) + 1, C_RADIUS);
+                yd_im = clamp(2*shr_round0((int)yy[i2][1] - 128, 8) + 1, C_RADIUS);
+                for (k3 = 2; k3 >= 1; k3--) {
+                    s->fx[k3][0] = s->fx[k3-1][0];
+                    s->fx[k3][1] = s->fx[k3-1][1];
+                }
+                s->fx[0][0] = (yd_re << 7) - p_re;
+                s->fx[0][1] = (yd_im << 7) - p_im;
+            }
+            c0_new = (csum >> 1) & 1;
+        }
+        {   static FILE *ff = 0; static int fn = 0;
+            if (!ff) { char *e = getenv("SIPFAX_FCDBG"); if (e) ff = fopen(e, "w"); }
+            if (ff && fn < 400) { fn++; fprintf(ff, "%d %d\n", c0_new, s->fc_c0); } }
+        s->fc_c0_use = s->fc_c0;
+        s->fc_c0 = c0_new;
+    }
 
     /* compute the number of bits used in the transitions from each state */
     switch(s->conv_nb_states) {
@@ -2875,7 +3079,8 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                 extern int g_u0hist[];
                 long ie = g_sym - (TRELLIS_LENGTH - 1);
                 if (!g_v0lock && ie >= 0) {
-                    int est = g_u0hist[ie & (U0H-1)] ^ (j & 1);
+                    extern int g_c0hist[];
+                    int est = g_u0hist[ie & (U0H-1)] ^ (j & 1) ^ g_c0hist[ie & (U0H-1)];
                     if (est) g_v0h[(int)(ie % 480)]++;
                     g_v0hn++;
                 }
@@ -2909,6 +3114,16 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         yout[0][1] = tcm_decision(q[1], s->state_memory[trellis_ptr][1]);
         yout[1][0] = tcm_decision(q[2], s->state_memory[trellis_ptr][2]);
         yout[1][1] = tcm_decision(q[3], s->state_memory[trellis_ptr][3]);
+        {   /* SIPFAX: decision-site tape - delayed soft vs decisions vs branch levels */
+            static FILE *df = 0; static int dn = 0;
+            if (!df) { char *e = getenv("SIPFAX_DECSITE"); if (e) df = fopen(e, "w"); }
+            if (df && dn < 400) { dn++;
+                fprintf(df, "%d %d %d %d  %d %d %d %d  %d %d %d %d\n",
+                        s->state_memory[trellis_ptr][0], s->state_memory[trellis_ptr][1],
+                        s->state_memory[trellis_ptr][2], s->state_memory[trellis_ptr][3],
+                        yout[0][0], yout[0][1], yout[1][0], yout[1][1],
+                        q[0], q[1], q[2], q[3]); }
+        }
         {   /* SIPFAX: COSET CORRECTNESS. In a noise-free symbol loopback the unconstrained
                nearest point IS the transmitted point, so the level that minimises tcm_dist
                over l = 0..3 is the level the encoder actually sent. Comparing that against
@@ -2933,6 +3148,8 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
       } }
     /* undo the rotation */    
+    { static int yr = -1; if (yr < 0) { char *e = getenv("SIPFAX_YROT"); yr = e ? atoi(e) : 0; }   /* SIPFAX: default OFF - the fixup rotated by u0(now)^u0(emitted), see above */
+      if (!yr) goto yrot_done; }
     if (s->state_decision[j][k] >= u0_thresh) {
         x = yout[1][1];
         y = - yout[1][0];
@@ -2940,12 +3157,37 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         yout[1][1] = y;
     }
     /* rotate only if u0 is set */
-    if (u0 ^ (s->state_decision[j][k] >= u0_thresh)) {
-        x = - yout[1][1];
-        y = yout[1][0];
-        yout[1][0] = x;
-        yout[1][1] = y;
+    {   /* SIPFAX: u0 here must be the U0 OF THE SYMBOL BEING EMITTED, not the one just
+           scored. u0_memory is a ring of exactly TRELLIS_LENGTH entries and the traceback
+           walks TRELLIS_LENGTH-1 back, so u0_memory[trellis_ptr] IS the current symbol's
+           U0 - 29 symbols in the future of the yout being handed out. The re-rotation
+           therefore applied u0(now) ^ u0(emitted) - a coin flip - to the second 2D symbol
+           of every emitted pair. Unprecoded, that only corrupts I0 through the (Z1-Z0)
+           difference (the quarter-constellation index is rotation-invariant), which is
+           the loopback's chronic last 0.3%. Precoded it is fatal: one rotated coordinate
+           poisons the 9.6.2 reconstruction filter and every symbol after it (measured:
+           50-56% bit match through a clean channel, 100% of second-symbol errors exactly
+           CW-90 on U0=1). g_u0hist is the same signal kept 128 deep - read it at the
+           emitted index. SIPFAX_U0EMIT=0 restores the old indexing. */
+        extern int g_u0hist[]; extern long g_sym;
+        static int ue = -1;
+        int u0r = u0;
+        if (ue < 0) { char *e = getenv("SIPFAX_U0EMIT"); ue = e ? atoi(e) : 1; }
+        if (ue) {
+            static int off = -999;
+            long ie;
+            if (off == -999) { char *e = getenv("SIPFAX_U0EMITOFF"); off = e ? atoi(e) : (TRELLIS_LENGTH - 1); }
+            ie = g_sym - off;
+            if (ie >= 0) u0r = g_u0hist[ie & (U0H-1)];
+        }
+        if (u0r ^ (s->state_decision[j][k] >= u0_thresh)) {
+            x = - yout[1][1];
+            y = yout[1][0];
+            yout[1][0] = x;
+            yout[1][1] = y;
+        }
     }
+    yrot_done: ;
 #else
     /* no trellis */
     yout[0][0] = s->state_memory[trellis_ptr][0];
@@ -3038,7 +3280,9 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
         }
     }
     s->u0_memory[trellis_ptr] = (jmin >= nb_trans);
-    { extern int g_u0hist[]; extern long g_sym; g_u0hist[g_sym & (U0H-1)] = (jmin >= nb_trans); }
+    { extern int g_u0hist[], g_c0hist[]; extern long g_sym;
+      g_u0hist[g_sym & (U0H-1)] = (jmin >= nb_trans);
+      g_c0hist[g_sym & (U0H-1)] = s->fc_c0_use; }
 
     /* init the error table to +infinity */
     for(state=0;state<s->conv_nb_states;state++) {
@@ -3110,7 +3354,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                     ix = ((g_sym - 1) + g_v0ph + gen) % 480; if (ix < 0) ix += 480;
                     v0h = g_v0base[ix];
                 }
-                n = (((state & 1) ^ v0h) ? nb_trans : 0);
+                n = (((state & 1) ^ v0h ^ s->fc_c0_use) ? nb_trans : 0);
                 half_done: ;
             }
             else if (half == 2) {
@@ -3123,11 +3367,10 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                    it needs the PREVIOUS symbol,s v0, hence the default offset of -1. */
                 vi = g_v0ori + voff;
                 if (g_v0orc && vi >= 0 && vi < g_v0orn) v0h = g_v0orc[vi];
-                n = (((state & 1) ^ v0h) ? nb_trans : 0);
+                n = (((state & 1) ^ v0h ^ s->fc_c0_use) ? nb_trans : 0);
             }
             else if (half)       n = (jmin >= nb_trans) ? nb_trans : 0;
-            else if (state & 1)  n = nb_trans;
-            else                 n = 0;
+            else                 n = (((state & 1) ^ s->fc_c0_use) ? nb_trans : 0);
         }
         for(j=0;j<nb_trans;j++) {
             int nn = n;
@@ -3288,6 +3531,18 @@ static void put_bit(V34DSPState *s, int b)
     else
         poly = V34_GPA;
     b = unscramble_bit(s, b, poly);
+    {   /* SIPFAX: live decode health meter. A compliant caller opens data mode with one
+           data frame of scrambled ONES (B1, 10.1.3.1) and idles structured data after;
+           the ones-fraction of the first descrambled bits is ground truth the receive
+           chain never had on live data. ~97%+ early = decoding; ~50% = not. */
+        extern long g_b1c, g_b1o;
+        if (g_b1c < 2400) {
+            g_b1c++; g_b1o += (b & 1);
+            if (g_b1c == 600 || g_b1c == 2400)
+                fprintf(stderr, "[data] RX descrambled bits %ld: %.1f%% ones\n",
+                        g_b1c, 100.0 * g_b1o / g_b1c);
+        }
+    }
     //    fprintf(stderr, "recv: %d\n", b);
     if (s->put_bit) s->put_bit(s->opaque, b);   /* SIPFAX: offline harnesses have no sink */
 }
@@ -3353,6 +3608,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
           xr = (x << 7) - p_re;
           xi = (y << 7) - p_im;
           { static int sgn = -2; if (sgn == -2) { char *e = getenv("SIPFAX_PC_SIGN"); sgn = e ? atoi(e) : -1; }
+            { static FILE *pf = 0; static int pn = 0;
+              if (!pf) { char *e2 = getenv("SIPFAX_PC_RXDBG"); if (e2) pf = fopen(e2, "w"); }
+              if (pf && pn < 400) { pn++;
+                  fprintf(pf, "%d %d %d %d %d %d %d %d %d %d\n",
+                          x, y, p_re, p_im, c_re, c_im, x + sgn*c_re, y + sgn*c_im, xr, xi); } }
             x = clamp(x + sgn*c_re, C_RADIUS);
             y = clamp(y + sgn*c_im, C_RADIUS); }
           for (k2 = 2; k2 >= 1; k2--) {
@@ -3523,6 +3783,27 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
     static int delay = 0;
     int mse,v0;
 
+    {   /* SIPFAX: 9.7 DEWARP. If the transmitter applied the non-linear encoder
+           (theta = 0.3125), received points sit at x_prime = x * Phi(zeta(x)), with
+           Phi = 1 + z/6 + z^2/120 and zeta = 0.3125 |x|^2 / mean|x|^2 - up to ~20%
+           radial expansion at the constellation edge. Invert by fixed-point iteration.
+           SIPFAX_RX_DEWARP=<mean|x|^2 in lattice units^2> enables (e.g. 23.92). */
+        static double dwm = -1;
+        if (dwm < 0) { char *e = getenv("SIPFAX_RX_DEWARP"); dwm = e ? atof(e) : 0; }
+        if (dwm > 0) {
+            double X2M = dwm * 16384.0;
+            double xr = si, xi = sq, r2p = xr*xr + xi*xi, g = 1.0;
+            int it;
+            for (it = 0; it < 4; it++) {
+                double r2 = r2p * g * g;
+                double z = 0.3125 * r2 / X2M;
+                double phi = 1.0 + z/6.0 + z*z/120.0;
+                g = 1.0 / phi;
+            }
+            si = (int)lrint(si * g);
+            sq = (int)lrint(sq * g);
+        }
+    }
     lm_dump_qam(si / (10.0 * 128.0), sq / (10.0 * 128.0));
 
     s->yy[s->phase_4d][0] = si;
@@ -4105,8 +4386,34 @@ static double v34_shaped_meanc2(int R, int nb_states)
     memset(&tx, 0, sizeof(tx));
     V34_mod_init(&tx, &p);
     tx.get_bit = enc_get_bit; tx.opaque = 0;
-    shp_acc = 0; shp_n = 0; shp_on = 1;
+    shp_acc = 0; shp_n = 0; shp_maxsi = 0; shp_on = 1;
     for (i = 0; i < 4000; i++) encode_mapping_frame(&tx);
+    shp_on = 0;
+    return shp_n ? shp_acc / (double)shp_n / (128.0*128.0) : 0.0;
+}
+
+/* SIPFAX: like v34_shaped_meanc2 but with the full transmit configuration - trellis,
+   shaping, the peer's precoder taps and the 9.7 warp - so tx_amp can be set from the
+   power actually leaving the modulator. nlnorm is the 9.7 normaliser (average energy
+   of x(n)); pass 0 with nonlin off. */
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin,
+                                    const s16 h[3][2], double nlnorm)
+{
+    V34State p;
+    static V34DSPState tx2;         /* static: far too big for the stack */
+    long i;
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = R; p.conv_nb_states = nb_states;
+    p.use_high_carrier = 1; p.calling = 0;
+    { char *e = getenv("SIPFAX_SHAPE"); p.expanded_shape = e ? atoi(e) : 1; }
+    p.use_non_linear = nonlin;
+    if (h) memcpy(p.h, h, sizeof(p.h));
+    memset(&tx2, 0, sizeof(tx2));
+    V34_mod_init(&tx2, &p);
+    tx2.get_bit = enc_get_bit; tx2.opaque = 0;
+    tx2.nl_meanc2 = nlnorm;
+    shp_acc = 0; shp_n = 0; shp_maxsi = 0; shp_on = 1;
+    for (i = 0; i < 4000; i++) encode_mapping_frame(&tx2);
     shp_on = 0;
     return shp_n ? shp_acc / (double)shp_n / (128.0*128.0) : 0.0;
 }
@@ -4888,6 +5195,29 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                   /* with SRX tracking, data_th holds only the RESIDUAL on top of srx_th */
                   s->data_th = g_data_srx ? 0.0 : s->srx_th; }
                 s->data_frq = 0.0;
+                {   /* SIPFAX: SEED THE SYMBOL CLOCK. The Gardner loop's ki is ~1e6
+                       symbols per 50 ppm - it cannot acquire a real clock offset within a
+                       call (measured: half-converged at data entry, symbols mush from the
+                       first window; +/-50 ppm alone reproduces the live blob exactly).
+                       The block path MEASURES the offset in one shot during Phase 4
+                       (p4_ted_last); seed the tracking loop from it and let the TED hold
+                       the residual. SIPFAX_DATA_CLK_PPM forces a value for calibration;
+                       SIPFAX_DATA_CLK_SEED=0 disables the auto-seed. */
+                    extern double p4_ted_last;
+                    char *ec = getenv("SIPFAX_DATA_CLK_PPM");
+                    static int as = -1; static double sgn2 = -99;
+                    if (as < 0) { char *e9 = getenv("SIPFAX_DATA_CLK_SEED"); as = e9 ? atoi(e9) : 1;
+                                  char *s9 = getenv("SIPFAX_DATA_CLK_SIGN"); sgn2 = s9 ? atof(s9) : -1.0; }
+                    if (ec) {
+                        s->cma_tinc = atof(ec)*1e-6*(7.0/6.0);
+                        fprintf(stderr, "[data] clock seeded %+.1f ppm (manual)\n", atof(ec));
+                    } else if (as && p4_ted_last != 0.0) {
+                        double ppm9 = p4_ted_last/(7.0/2.0)*1e6;   /* P4_SPS=7 */
+                        s->cma_tinc = sgn2 * ppm9 * 1e-6 * (7.0/6.0);
+                        fprintf(stderr, "[data] clock seeded %+.1f ppm (from block-path measurement %+.1f)\n",
+                                sgn2*ppm9, ppm9);
+                    }
+                }
                 s->data_on = 1; s->data_n = 0;
                 { extern int v34_dbg; if (v34_dbg)
                     fprintf(stderr, "[data] entering data mode: target mean power %.0f (rx16_rms %.0f)\n",
@@ -5071,6 +5401,28 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             pw0 += s->data_acq_i[qi]*s->data_acq_i[qi]
                                  + s->data_acq_q[qi]*s->data_acq_q[qi];
                         pw0 /= s->data_acq_n;
+                        {   /* SIPFAX: CLOUD-DERIVED GAIN. data_agc comes open-loop from
+                               rx16_rms, which is measured by a path with no timing tracking
+                               and decays steadily under any real clock offset (0.99 -> 0.54
+                               across phase 4 at just 5 ppm) - the data cloud then sits at a
+                               scale far off the lattice that no sweep covers, which is the
+                               live blob. The cloud's own mean power against the known shaped
+                               mean is the right scale: modulation-derived, drift-immune.
+                               SIPFAX_ACQ_CLOUDGAIN=0 disables. */
+                            static int cg = -1;
+                            if (cg < 0) { char *e = getenv("SIPFAX_ACQ_CLOUDGAIN"); cg = e ? atoi(e) : 1; }
+                            if (cg && pw0 > 1e-12) {
+                                double fcl = sqrt(s->data_meanc2 / pw0);
+                                int qj;
+                                for (qj = 0; qj < s->data_acq_n; qj++) {
+                                    s->data_acq_i[qj] *= fcl; s->data_acq_q[qj] *= fcl;
+                                }
+                                s->data_agc *= fcl;
+                                pw0 = s->data_meanc2;
+                                { extern int v34_dbg; if (v34_dbg)
+                                    fprintf(stderr, "[data] acq cloud-gain correction x%.3f\n", fcl); }
+                            }
+                        }
                         /* SIPFAX: the lattice score alone is minimised by SHRINKING - squash
                            every symbol onto the innermost ring (+-1,+-1) and the distance to
                            the nearest lattice point goes to zero while all information is
@@ -5160,7 +5512,14 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                     fprintf(stderr, "[data] acq kurtosis %.3f -> accepting\n",
                                             kurt); }
                                 s->data_agc *= bg;
-                                s->data_th  += bp*M_PI/180.0;
+                                {   /* SIPFAX: under 9.6.2 precoding the raw cloud has NO
+                                       lattice - the sweep's phase is then noise, and the
+                                       phase-4-continuous seed in data_th is the only good
+                                       reference. SIPFAX_ACQ_KEEPPH=1 keeps it. */
+                                    static int kph = -1;
+                                    if (kph < 0) { char *e = getenv("SIPFAX_ACQ_KEEPPH"); kph = e ? atoi(e) : 0; }
+                                    if (!kph) s->data_th += bp*M_PI/180.0;
+                                }
                                 s->data_acq_done = 1;
                             }
                         }
@@ -5500,7 +5859,9 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 }
                 {   static double mu_agc = -1;
                     if (mu_agc < 0) { char *e7 = getenv("SIPFAX_DATA_AGC");
-                                      mu_agc = e7 ? atof(e7) : 0.0;   /* OFF: needs correct phase first */ }
+                                      /* SIPFAX: ON - tracks the slow amplitude decay of a
+                                         frozen FSE under clock drift */
+                                      mu_agc = e7 ? atof(e7) : 1e-3; }
                     if (mu_agc > 0 && nrm2 > 0) {
                         double ay = sqrt(xi*xi + xq*xq), ad = sqrt(nrm2);
                         if (ay > 1e-6) s->data_agc *= (1.0 + mu_agc*(ad/ay - 1.0));
@@ -5918,7 +6279,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
            (our own signal resolves to lattice-rms 0.166). Normalised by the tap-line energy
            so the step is scale-free. Off by default; SIPFAX_DATA_DDMU sets the step. */
         static double ddmu = -1;
-        if (ddmu < 0) { char *e = getenv("SIPFAX_DATA_DDMU"); ddmu = e ? atof(e) : 0.0; }
+        if (ddmu < 0) { char *e = getenv("SIPFAX_DATA_DDMU"); ddmu = e ? atof(e) : 1e-4; }   /* SIPFAX: ON - the FSE must keep absorbing clock drift in data mode */
         if (s->p4_e_rx && ddmu > 0 && s->data_ev) {
             double nrm = 1e-9; int k2;
             for (k2 = 0; k2 < CMANT; k2++)
@@ -6092,7 +6453,8 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
    -1. With the loop enabled at these values the per-block EVM V across the caller's TRN
    flattens (37.6/3.6/15.6 -> 3.9/3.4/3.8). Leaving it off cost lattice-rms 0.498 against
    0.166 on a signal that resolves. */
-static double p4_ted_kp = 0.10, p4_ted_ki = 0.002, p4_ted_sign = -1.0, p4_ted_last = 0.0;
+static double p4_ted_kp = 0.10, p4_ted_ki = 0.002, p4_ted_sign = -1.0;
+double p4_ted_last = 0.0;   /* SIPFAX: exported - seeds the data-mode clock */
 static void p4_ted_init(void)
 {
     static int done; char *e;
@@ -6267,6 +6629,13 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
         reg = (reg << 1) & 0x7fffff;
         if (raw[i]) reg ^= (unsigned int)poly;
     }
+    {   /* SIPFAX: dump the descrambled phase-4 bitstream of this window - MP frames,
+           MP-prime, the 20-ones E, and the point where B1 makes the 4-pt reading fall
+           apart - so the E/B1 seam can be diffed bit-for-bit against slmodem's. */
+        static FILE *bf = 0; static int opened = 0;
+        if (!opened) { char *e = getenv("SIPFAX_P4B_BITS"); opened = 1; if (e) bf = fopen(e, "w"); }
+        if (bf) { int z; for (z = 0; z < nb; z++) fputc(db[z] ? 49 : 48, bf); fputc(10, bf); fflush(bf); }
+    }
     for (i = 0; i + 190 < nb; i++) {    /* hunt the 17-bit all-ones sync, then verify CRC */
         int k, ok = 1, type, L, co, cn = 0, rxc = 0;
         static u8 cov[200];
@@ -6301,6 +6670,8 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
                extracted. Measured: captures decode nonlin=1 offline while the live journal
                recorded zero "non-linear encoder ON" events on the same calls. */
             if (out_nonlin) *out_nonlin = db[i+31];
+            { extern int g_mp_type, g_mp_aux, g_mp_asym;
+              g_mp_type = type; g_mp_aux = db[i+28]; g_mp_asym = db[i+50]; }
             if (out_ack) { if (found == 1) *out_ack = db[i+33]; else *out_ack |= db[i+33]; }
             if (out_mask) { unsigned int m = 0; for (k = 0; k < 15; k++) m |= (unsigned int)db[i+35+k] << k; *out_mask = m; }
             if (out_h && type == 1) {
@@ -6631,6 +7002,8 @@ static void v34_rx_data_params(V34DSPState *s, int R)
             s->mapping_frame = 0;
             s->acnt = 0;
             s->rcnt = 0;
+            memset(s->fx, 0, sizeof(s->fx));
+            s->fc_c0 = 0; s->fc_c0_use = 0;
             { extern int v34_dbg; if (v34_dbg)
                 fprintf(stderr, "[data] decoder state reset (rcnt/acnt/phase_4d/Z_1/U0/"
                         "conv_reg/scrambler/mapping_frame); equaliser preserved\n"); }
@@ -6918,9 +7291,21 @@ void V34_stream_decode_file(const char *path)
            straight into data mode, so a known-good modulated signal can be fed through
            the real receive chain and scored with the same trellis metric. */
         char *fd = getenv("SIPFAX_FORCE_DATA");
+        { char *sc = getenv("SIPFAX_STREAM_CALLING");
+          if (sc) { rx.calling = atoi(sc); p.calling = rx.calling;
+                    fprintf(stderr, "[stream] rx role calling=%d\n", rx.calling); } }
+        { char *hh = getenv("SIPFAX_RX_H");
+          if (hh) { char hb[128], *tok; int vv[6]={0,0,0,0,0,0}, k=0;
+              strncpy(hb,hh,127); hb[127]=0; tok=strtok(hb,",");
+              while (tok && k<6) { vv[k++]=atoi(tok); tok=strtok(NULL,","); }
+              for (k=0;k<3;k++){ rx.h[k][0]=vv[2*k]; rx.h[k][1]=vv[2*k+1]; }
+              rx.rx_precode = 1;
+              fprintf(stderr, "[stream] RX precoder inverse ON, h=(%d,%d)(%d,%d)(%d,%d)\n",
+                      vv[0],vv[1],vv[2],vv[3],vv[4],vv[5]); } }
         if (fd) {
             rx.p4_mp_rx = 1; rx.p4_mp_rate_ca = atoi(fd) / 2400;
             rx.p4_trellis = 2; rx.p4_e_rx = 1;
+            { char *tl = getenv("SIPFAX_STREAM_TREL"); if (tl) rx.p4_trellis = atoi(tl); }
             /* let the CMA acquire timing and taps normally - forcing cma_phase=2 would
                skip acquisition and test nothing but the decoder. SIPFAX_FORCE_DATA_AT
                defers the data-mode switch by N seconds so the file can carry 4-point TRN
@@ -7075,6 +7460,35 @@ static void dataloop_symsink(int si, int sq)
         double a = si*dl_scale, b = sq*dl_scale;
         { static int z=-1; if(z<0){char*e=getenv("SIPFAX_DL_ZERO");z=e?atoi(e):0;}
           if(z){ a=0; b=0; } }
+        {   /* SIPFAX: symbol-spaced channel 1 + h1 z^-1 + h2 z^-2 + h3 z^-3 (Q14) - the
+               baseband-equivalent line the 9.6.2 precoder pre-inverts. Without it the
+               precoder+inverse pair cannot be validated: the earlier "inverse is wrong
+               (50.3%)" measurement tested the inverse WITHOUT the channel it assumes.
+               SIPFAX_DL_CHAN="h1r,h1i,h2r,h2i,h3r,h3i" in Q14. */
+            static int have = -1; static int ch[3][2]; static double xh[3][2];
+            if (have < 0) {
+                char *e = getenv("SIPFAX_DL_CHAN"); have = 0;
+                if (e) { char b2[128], *tok; int vv[6]={0,0,0,0,0,0}, k=0;
+                    strncpy(b2,e,127); b2[127]=0; tok=strtok(b2,",");
+                    while (tok && k<6) { vv[k++]=atoi(tok); tok=strtok(NULL,","); }
+                    for (k=0;k<3;k++){ ch[k][0]=vv[2*k]; ch[k][1]=vv[2*k+1]; }
+                    have = 1;
+                    fprintf(stderr,"[dataloop] CHANNEL ON: 1 + (%d,%d)z-1 + (%d,%d)z-2 + (%d,%d)z-3 (Q14)\n",
+                            ch[0][0],ch[0][1],ch[1][0],ch[1][1],ch[2][0],ch[2][1]);
+                }
+            }
+            if (have) {
+                double yr = a, yi = b; int k;
+                for (k=0;k<3;k++) {
+                    yr += (xh[k][0]*ch[k][0] - xh[k][1]*ch[k][1]) / 16384.0;
+                    yi += (xh[k][1]*ch[k][0] + xh[k][0]*ch[k][1]) / 16384.0;
+                }
+                xh[2][0]=xh[1][0]; xh[2][1]=xh[1][1];
+                xh[1][0]=xh[0][0]; xh[1][1]=xh[0][1];
+                xh[0][0]=a; xh[0][1]=b;
+                a = yr; b = yi;
+            }
+        }
         if (dl_sigma > 0) { a += dl_sigma*dl_gauss(); b += dl_sigma*dl_gauss(); }
         baseband_decode_pub(g_rx_state, (int)lrint(a), (int)lrint(b));
     }
@@ -7287,26 +7701,34 @@ void V34_p4block_test(void)
                                                2/3 scores 0.71, 4/6 gives 0.975, 6/10 gives 0.985 */
             if ((ev = getenv("SIPFAX_P4B_NCMA")) != 0) nc = atoi(ev);
             if ((ev = getenv("SIPFAX_P4B_NDD")) != 0) nd = atoi(ev);
+            int p4poly;
+            { static int gp = -1; if (gp < 0) { char *e2 = getenv("SIPFAX_P4B_GPA"); gp = e2 ? atoi(e2) : 0; }
+              p4poly = gp ? V34_GPA : V34_GPC; }
             ns = p4_equalize(zi, zq, nz, off, 0, nc, nd, 1, si, sq);
-            s4  = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 0, V34_GPC);
+            s4  = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 0, p4poly);
             ns = p4_equalize(zi, zq, nz, off, 1, nc, nd, 1, si, sq);
-            s16 = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC);
+            s16 = p4_trn_score(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, p4poly);
         }
         if (0) ns = p4_equalize(zi, zq, nz, off, 0, 2, 3, 1, si, sq);
-        {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp;
+        {   int ca = 0, ac = 0, tr = 0, ak = 0, sh = 0, nmp; short hco[6]; int nlo = 0; memset(hco,0,sizeof(hco));
             unsigned int mk = 0;
-            nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, V34_GPC,
-                               &ca, &ac, &tr, &ak, &sh, &mk, NULL, NULL);
+            nmp = p4_mp_decode(si+200, sq+200, ns-200 > 0 ? ns-200 : 0, 1, ( getenv("SIPFAX_P4B_GPA") && atoi(getenv("SIPFAX_P4B_GPA")) ) ? V34_GPA : V34_GPC,
+                               &ca, &ac, &tr, &ak, &sh, &mk, hco, &nlo);
             if (!nmp) {
                 int ns4 = p4_equalize(zi, zq, nz, off, 0, 6, 10, 1, si, sq);
-                nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, V34_GPC,
-                                   &ca, &ac, &tr, &ak, &sh, &mk, NULL, NULL);
+                nmp = p4_mp_decode(si+200, sq+200, ns4-200 > 0 ? ns4-200 : 0, 0, ( getenv("SIPFAX_P4B_GPA") && atoi(getenv("SIPFAX_P4B_GPA")) ) ? V34_GPA : V34_GPC,
+                                   &ca, &ac, &tr, &ak, &sh, &mk, hco, &nlo);
                 if (nmp) sixteen_mp = 0;
             } else sixteen_mp = 1;
             fprintf(stderr, "[p4blk] t=%5.1f   %.3f    %.3f%s", t0, s4, s16,
                     (s16 >= 0.90) ? "   <== 16-POINT TRN" : (s4 >= 0.90 ? "   <== 4-point TRN" : ""));
             if (nmp) fprintf(stderr, "   MP: %d frames %s ca=%d ac=%d trel=%d shape=%d ACK=%d mask=0x%04x",
                              nmp, sixteen_mp ? "16pt" : "4pt", ca*2400, ac*2400, tr, sh, ak, mk);
+            if (nmp) { extern int g_mp_type, g_mp_aux, g_mp_asym;
+                       fprintf(stderr, " type=%d aux=%d asym=%d nonlin=%d h=%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj",
+                             g_mp_type, g_mp_aux, g_mp_asym,
+                             nlo, hco[0]/16384.0, hco[1]/16384.0, hco[2]/16384.0,
+                             hco[3]/16384.0, hco[4]/16384.0, hco[5]/16384.0); }
             fprintf(stderr, "\n");
         }
     }
@@ -7383,6 +7805,67 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
         }
         return 0;
     }
+    {   /* SIPFAX: TONE B WATCHDOG. On every failed call the caller eventually abandons
+           the handshake or data mode and drops back to Phase 2, transmitting sustained
+           Tone B (1200 Hz) - observed unanswered for 50 s while this state machine sat
+           in Phase 3/4/data. A caller in Phase 2 is a caller renegotiating (11.5.2):
+           answer it by restarting V.34 from Phase 2, this modem's normal answer flow.
+           The serial hooks survive the re-init. Restarts are capped so a pathological
+           line cannot loop forever. SIPFAX_TONEB_WD=0 disables. */
+        static int wd = -1;
+        if (wd < 0) { char *e = getenv("SIPFAX_TONEB_WD"); wd = e ? atoi(e) : 1; }
+        if (wd && nb_samples > 0) {
+            double cg = cos(2.0 * M_PI * 1200.0 / 8000.0);
+            double sg = sin(2.0 * M_PI * 1200.0 / 8000.0);
+            double ar = 0, ai = 0, pw = 0; int n2;
+            for (n2 = 0; n2 < nb_samples; n2++) {
+                double v = input[n2], tr;
+                tr = ar * cg - ai * sg + v;
+                ai = ar * sg + ai * cg;
+                ar = tr;
+                pw += v * v;
+            }
+            s->tb_p12 += (ar * ar + ai * ai) * 2.0 / nb_samples;
+            s->tb_ptot += pw;
+            s->tb_blocks++;
+            if (s->tb_blocks >= 10) {           /* ~200 ms at 160-sample blocks */
+                int tone = (s->tb_ptot > 1e6) && (s->tb_p12 > 0.8 * s->tb_ptot);
+                s->tb_p12 = 0; s->tb_ptot = 0; s->tb_blocks = 0;
+                s->tb_hits = tone ? s->tb_hits + 1 : 0;
+                if (s->tb_hits >= 3 && s->tb_restarts < 3) {
+                    get_bit_func gb = s->v34_tx.get_bit; void *go = s->v34_tx.opaque;
+                    put_bit_func pb = s->v34_rx.put_bit; void *po = s->v34_rx.opaque;
+                    int rst = s->tb_restarts + 1;
+                    fprintf(stderr, "[v34] sustained Tone B outside Phase 2 -> caller is renegotiating; restarting Phase 2 (restart %d)\n", rst);
+                    fflush(stderr);
+                    /* SIPFAX: V34_init does NOT memset - it relies on virgin process
+                       memory. A restart on a used state inherited stale fields (measured:
+                       trn_rounds left TRN at 1 round = 0.3 s instead of 6 = 1.8 s, and the
+                       phase-3 clock carried on). Wipe everything; the hooks are restored
+                       below and phase2/p3rep are the only heap pointers. */
+                    if (s->p3rep) { free(s->p3rep); }
+                    memset(s, 0, sizeof(*s));
+                    s->tb_restarts = rst - 1;
+                    { extern int g_japplied; g_japplied = 0; }
+                    { extern int sipfax_jmute; sipfax_jmute = -1; }
+                    { extern int g_v0lock, g_v0h[]; extern long g_v0hn, g_sym;
+                      extern int g_v0_pairtry, g_v0_pairdrop, g_v0_aligned;
+                      extern long g_b1c, g_b1o;
+                      g_v0lock = 0; g_v0hn = 0; g_sym = 0;
+                      g_v0_pairtry = 0; g_v0_pairdrop = 0; g_v0_aligned = 0;
+                      g_b1c = 0; g_b1o = 0;
+                      memset(g_v0h, 0, sizeof(int) * 480); }
+                    V34_init(s, 0);
+                    s->tb_hits = 0; s->tb_p12 = 0; s->tb_ptot = 0; s->tb_blocks = 0;
+                    s->tb_restarts = rst;
+                    s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
+                    s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
+                    memset(output, 0, nb_samples * sizeof(s16));
+                    return 0;
+                }
+            }
+        }
+    }
     { static int rxcma = -1; if (rxcma < 0) { char *e = getenv("SIPFAX_RX_CMA"); rxcma = e ? atoi(e) : 0; }
       if (rxcma) { extern void V34_demod_cma(V34DSPState*, const s16*, unsigned int); V34_demod_cma(&s->v34_rx, input, nb_samples); }
       else V34_demod(&s->v34_rx, input, nb_samples); }
@@ -7416,12 +7899,12 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
            began completing properly: with a correct INFO exchange this caller asks for
            J4POINTS (vote J4=192 J16=180), not the J16 it demanded when it had only ever
            seen our broken Phase 2. The caller's J is the authority for BOTH flags. */
-        static int applied = 0;
-        if (s->v34_rx.J_received && !applied) {
+        extern int g_japplied;
+        if (s->v34_rx.J_received && !g_japplied) {
             static int obey = -1;
             if (obey < 0) { char *e = getenv("SIPFAX_J16_OBEY"); obey = e ? atoi(e) : 1; }
             if (obey) {
-                applied = 1;
+                g_japplied = 1;
                 s->v34_tx.is_16states = s->v34_rx.rx_j16 ? 1 : 0;
                 s->v34_tx.mp_16point  = s->v34_rx.rx_j16 ? 1 : 0;
                 { extern int v34_dbg; if (v34_dbg)
@@ -7439,6 +7922,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
        decoder stores them on v34_rx while V34_send_MP builds the frame from v34_tx. */
     s->v34_tx.p4_mp_rate_ca = s->v34_rx.p4_mp_rate_ca;
     s->v34_tx.p4_mp_rate_ac = s->v34_rx.p4_mp_rate_ac;
+    s->v34_tx.p4_trellis = s->v34_rx.p4_trellis;   /* SIPFAX: MP 29:30 - trellis REQUIRED of our TX */
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed

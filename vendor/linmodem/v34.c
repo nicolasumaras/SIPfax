@@ -6529,6 +6529,7 @@ static void p4_ted_init(void)
     e = getenv("SIPFAX_TED_SIGN"); if (e) p4_ted_sign = atof(e);
 }
 
+static double p4_rawi[P4_MAXSY], p4_rawq[P4_MAXSY];   /* SIPFAX: on-time pre-equaliser sample per symbol, for data-aided channel h */
 static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                        int sixteen, int ncma, int ndd, int reset, double *si, double *sq)
 {
@@ -6601,7 +6602,14 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                     wi[k] += mu*(ei*bufi[k] + eq*bufq[k])/nrm;
                     wq[k] += mu*(eq*bufi[k] - ei*bufq[k])/nrm;
                 }
-                if (ns < P4_MAXSY) { si[ns] = ypi; sq[ns] = ypq; ns++; }
+                if (ns < P4_MAXSY) {
+                    /* SIPFAX: store the raw FSE-INPUT sample DEROTATED by the same carrier
+                       th as the decision, so raw and decision share one frame and the
+                       channel correlation does not wash out as th drifts across the burst. */
+                    double cth=cos(-th), sth=sin(-th);
+                    p4_rawi[ns] = yi*cth - yq*sth; p4_rawq[ns] = yi*sth + yq*cth;
+                    si[ns] = ypi; sq[ns] = ypq; ns++;
+                }
             }
             {   /* Gardner TED, normalised so the gains are independent of level */
                 double ted = (oi - gpi)*gmi + (oq - gpq)*gmq;
@@ -6808,6 +6816,66 @@ static void p4_block_reset(void)
 static s16 p4_hest[3][2];
 static int p4_have_h;
 
+/* SIPFAX: DATA-AIDED CHANNEL ESTIMATE (the real h, before equalisation).
+   p4_est_precoder measures the residual AFTER the FSE has already flattened the 4-point
+   TRN, so it reads the noise floor (~0.005) and we advertise h=0 - which tells the caller
+   NOT to precode, forcing us to equalise a real channel for a 56-point constellation, which
+   our 4-point-trained CMA cannot do. Instead estimate the channel the caller must pre-invert
+   directly: correlate the RAW matched-filter output (FSE input, p4_rawi/q) against the
+   DECISIONS. h(k)=E[r(n) d*(n-k)]/E[|d|^2]. Normalising by the cursor tap cancels the (const)
+   carrier phase and the gain, leaving the true post-cursor taps - exactly the V.34 precoder
+   coefficients (9.6.2), relative to the main tap. */
+#define P4_HLAG 24
+static void p4_est_channel(const double *rawi, const double *rawq,
+                           const double *si, const double *sq, int ns, int sixteen)
+{
+    double scale = sixteen ? sqrt(10.0) : sqrt(2.0);
+    /* R[lag] = sum_n raw(n) * conj(d(n-lag)), lag = 0..P4_HLAG-1. The decision d comes
+       from the FSE output, delayed ~P4_NT/2 T/2-samples (~7-8 symbols) from the raw FSE
+       INPUT, so the cursor sits at a positive lag; search the whole range. */
+    double Rr[P4_HLAG]={0}, Ri[P4_HLAG]={0}, Pd=0;
+    double dbi[P4_HLAG]={0}, dbq[P4_HLAG]={0};
+    int i, k, nn=0;
+    if (ns < 600) return;
+    for (i = 200; i < ns; i++) {
+        int q2, z2; double dx, dy;
+        p4_slice(si[i]*scale, sq[i]*scale, sixteen, &q2, &z2, &dx, &dy);
+        dx /= scale; dy /= scale;
+        for (k = P4_HLAG-1; k >= 1; k--) { dbi[k]=dbi[k-1]; dbq[k]=dbq[k-1]; }
+        dbi[0]=dx; dbq[0]=dy;
+        if (nn >= P4_HLAG) {
+            double ri=rawi[i], rq=rawq[i];
+            for (k = 0; k < P4_HLAG; k++) {
+                Rr[k] += ri*dbi[k] + rq*dbq[k];
+                Ri[k] += rq*dbi[k] - ri*dbq[k];
+            }
+            Pd += dx*dx + dy*dy;
+        }
+        nn++;
+    }
+    if (Pd <= 0 || nn < 400) return;
+    {   int cur=0; double best=0, hr[P4_HLAG], hi[P4_HLAG];
+        extern int v34_dbg;
+        for (k=0;k<P4_HLAG;k++){ hr[k]=Rr[k]/Pd; hi[k]=Ri[k]/Pd;
+            double m=hr[k]*hr[k]+hi[k]*hi[k]; if(m>best){best=m;cur=k;} }
+        if (v34_dbg) {
+            fprintf(stderr, "[p4] DATA-AIDED channel: cursor lag %d |h|=%.3f; tail: ", cur, sqrt(best));
+            for (k=cur;k<cur+5 && k<P4_HLAG;k++) fprintf(stderr,"%.3f ", sqrt(hr[k]*hr[k]+hi[k]*hi[k]));
+            fprintf(stderr,"\n");
+        }
+        {   double cr=hr[cur], ci=hi[cur], cm=cr*cr+ci*ci;
+            for (k=1;k<=3;k++){
+                int src=cur+k; double nr=0, ni=0;
+                if (src<P4_HLAG && cm>0){ nr=(hr[src]*cr+hi[src]*ci)/cm; ni=(hi[src]*cr-hr[src]*ci)/cm; }
+                p4_hest[k-1][0]=(s16)lrint(nr*16384.0);
+                p4_hest[k-1][1]=(s16)lrint(ni*16384.0);
+                if (v34_dbg) fprintf(stderr, "[p4]   h%d = %+.4f %+.4fj  |h|=%.4f\n", k, nr, ni, sqrt(nr*nr+ni*ni));
+            }
+        }
+    }
+    p4_have_h = 1;
+}
+
 static void p4_est_precoder(const double *si, const double *sq, int ns, int sixteen)
 {
     double scale = sixteen ? sqrt(10.0) : sqrt(2.0);
@@ -6891,7 +6959,12 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
     }
     {                                          /* decode what the passes produced */
         int nmp;
-        if (!p4_have_h) p4_est_precoder(p4_si, p4_sq, p4_ns, p4_six);
+        if (!p4_have_h) {
+            static int rh = -1;
+            if (rh < 0) { char *e = getenv("SIPFAX_REAL_H"); rh = e ? atoi(e) : 1; }
+            if (rh) p4_est_channel(p4_rawi, p4_rawq, p4_si, p4_sq, p4_ns, p4_six);
+            else    p4_est_precoder(p4_si, p4_sq, p4_ns, p4_six);
+        }
         nmp = p4_mp_decode(p4_si+200, p4_sq+200, p4_ns-200 > 0 ? p4_ns-200 : 0,
                                p4_six, V34_GPC, ca, ac, trel, ack, shape, mask, hout,
                                nlout);

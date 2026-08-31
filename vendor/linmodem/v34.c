@@ -5109,7 +5109,12 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        for a multi-ring set, so there is no reason its solution should be
                        right here. SIPFAX_EQ_DELTA=1 replaces the taps with a delta at
                        data-mode entry: if the score collapses, the equaliser is the fault. */
+                    extern int p4_have_h;
                     char *e = getenv("SIPFAX_EQ_DELTA");
+                    /* SIPFAX: when the caller is precoding toward us (we advertised a real
+                       h), the channel is pre-cancelled and our CMA channel-inverse taps
+                       would UNDO the precoding - freeze to a delta so the precoded
+                       (channel-flat) signal reaches the slicer as u+c for the THP modulo. */
                     if (e && atoi(e)) {
                         int q; double e2 = 0;
                         for (q = 0; q < CMANT; q++) e2 += s->cma_wi[q]*s->cma_wi[q]
@@ -5165,14 +5170,20 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        are the ones the caller ADVERTISED (peer_h, decoded from its MP);
                        the 9.6.2 inverse at decode_mapping_frame reads s->h, so load them
                        there. SIPFAX_RX_PRECODE=1 to try it. */
+                    extern s16 p4_hest[3][2]; extern int p4_have_h;
                     char *ep = getenv("SIPFAX_RX_PRECODE");
-                    if (ep && atoi(ep)) {
-                        int hi5, hj5;
-                        for (hi5 = 0; hi5 < 3; hi5++)
-                            for (hj5 = 0; hj5 < 2; hj5++)
-                                s->h[hi5][hj5] = s->peer_h[hi5*2+hj5];
+                    /* SIPFAX: default ON once we have advertised a real channel estimate -
+                       the caller then precodes its TX toward us with THAT h, so our RX must
+                       invert with OUR advertised h (p4_hest), not peer_h. */
+                    int rxp = ep ? atoi(ep) : 0;   /* SIPFAX: default OFF - with our h only rho~0.88 the precoding leaves residual ISI, and the delta+THP path (0.584) is worse than CMA (0.559); needs a more accurate h and/or a residual EQ after the THP modulo before this helps */
+                    if (rxp && p4_have_h) {
+                        int hi5;
+                        for (hi5 = 0; hi5 < 3; hi5++) {
+                            s->h[hi5][0] = p4_hest[hi5][0];
+                            s->h[hi5][1] = p4_hest[hi5][1];
+                        }
                         s->rx_precode = 1;
-                        fprintf(stderr, "[data] RX precoder inverse ON, peer h = "
+                        fprintf(stderr, "[data] RX precoder inverse ON (our advertised h) = "
                                 "%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj\n",
                                 s->h[0][0]/16384.0, s->h[0][1]/16384.0,
                                 s->h[1][0]/16384.0, s->h[1][1]/16384.0,
@@ -5757,11 +5768,16 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                That is a plain FIR over received symbols and can be applied
                                right here. Both signs, since the convention is what is in
                                doubt. peer_h is only trustworthy from a CRC-clean MP. */
+                            /* SIPFAX: invert with OUR ADVERTISED h (p4_hest) - the
+                               caller precodes its TX toward us with the h WE sent in MP,
+                               NOT peer_h (which is the caller's h for OUR transmit). Using
+                               peer_h here was inverting the wrong channel. */
                             double hr[3], hi4[3]; int hk, sgn;
-                            for (hk = 0; hk < 3; hk++) {
-                                hr[hk]  = s->peer_h[hk*2]   / 16384.0;
-                                hi4[hk] = s->peer_h[hk*2+1] / 16384.0;
-                            }
+                            { extern s16 p4_hest[3][2]; extern int p4_have_h;
+                              for (hk = 0; hk < 3; hk++) {
+                                hr[hk]  = (p4_have_h ? p4_hest[hk][0] : 0) / 16384.0;
+                                hi4[hk] = (p4_have_h ? p4_hest[hk][1] : 0) / 16384.0;
+                              } }
                             if (hr[0] || hi4[0] || hr[1] || hi4[1]) {
                                 for (sgn = -1; sgn <= 1; sgn += 2) {
                                     static double ti[2048], tq[2048];

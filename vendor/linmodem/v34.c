@@ -1037,22 +1037,6 @@ static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
 
   /* compute the next trellis state */
   trans = (Y[3] << 3) | (Y[4] << 2) | (Y[2] << 1) | Y[1];
-  {   /* SIPFAX: dump what the encoder ACTUALLY emits for this branch - the branch index
-         (trans), the y0 that selects the table half, and the four coset labels the decoder
-         will compare against, computed the same way the encoder does: ((coord+3)>>1)&3.
-         The decoder's ACS scores branch (trans + 16*y0) using the tuples in that row block,
-         so if the emitted tuple is not IN that block, the table's row order disagrees with
-         the encoder's trans packing and every branch metric is attached to the wrong
-         branch. */
-      extern FILE *g_tblf;
-      if (!g_tblf) { char *e = getenv("SIPFAX_TBLDUMP"); if (e) g_tblf = fopen(e,"w"); }
-      if (g_tblf) {
-          int c0l = ((yy[0][0] + 3) >> 1) & 3, c1l = ((yy[0][1] + 3) >> 1) & 3;
-          int c2l = ((yy[1][0] + 3) >> 1) & 3, c3l = ((yy[1][1] + 3) >> 1) & 3;
-          fprintf(g_tblf, "%d %d %d %d %d %d\n", trans, s->conv_reg & 1,
-                  c0l, c1l, c2l, c3l);
-      }
-  }
 
   { extern FILE *gt_f; if (gt_f) fprintf(gt_f, "%d %d %d %d %d %d ", yy[0][0], yy[0][1], yy[1][0], yy[1][1], trans, s->conv_reg); }
   s->conv_reg = trellis_next_state(s->conv_nb_states, s->conv_reg, trans);
@@ -1066,6 +1050,23 @@ static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
     v0 = 0;
   }
 
+  {   /* SIPFAX: dump (trans, U0, coset tuple) so the branch table can be rebuilt from the
+         ENCODER, which is the authority on the split. The earlier dump emitted conv_reg&1
+         (= Y0), but the table's two halves are indexed by U0 - and U0 = Y0 ^ C0 ^ V0 is only
+         known here, at the return. Bellard's table has 8 tuples per (trans, half) and its
+         two halves are related by rotating the SECOND 2D symbol 90 degrees, (u,v)->(3-v,u),
+         which is exactly what V.34 9.6.1 prescribes for U0 - verified: half1 == rot(half0)
+         for 16 of 16 trans values. Rebuilding from the encoder avoids having to guess which
+         8 of a trans's 16 tuples belong to which half. */
+      extern FILE *g_tblf;
+      if (!g_tblf) { char *e = getenv("SIPFAX_TBLDUMP"); if (e) g_tblf = fopen(e,"w"); }
+      if (g_tblf) {
+          int c0l = ((yy[0][0] + 3) >> 1) & 3, c1l = ((yy[0][1] + 3) >> 1) & 3;
+          int c2l = ((yy[1][0] + 3) >> 1) & 3, c3l = ((yy[1][1] + 3) >> 1) & 3;
+          fprintf(g_tblf, "%d %d %d %d %d %d\n", trans, (Y[0] ^ c0 ^ v0) & 1,
+                  c0l, c1l, c2l, c3l);
+      }
+  }
   return Y[0] ^ c0 ^ v0;
 }
 
@@ -2732,9 +2733,29 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                       YY[1] = (ss[0][0] & ~ss[1][0] & 1) ^ ss[0][1] ^ ss[1][1];
                       tr = (YY[3]<<3) | (YY[4]<<2) | (YY[2]<<1) | YY[1];
                       if (cnt[tr] < 16) {
-                          for (q9 = 0; q9 < 4; q9++) {
-                              built[tr*16 + cnt[tr]][q9]        = (u8)c[q9];
-                              built[(tr+16)*16 + cnt[tr]][q9]   = (u8)c[q9];
+                          /* SIPFAX: the two U0 halves are NOT the same tuples. The comment
+                             above claimed "y0 is free ... so the two y0 halves must hold the
+                             SAME 16 tuples", and that is what made this table score at chance
+                             (4.1% state tracking): with identical halves the ACS has nothing
+                             to distinguish U0=0 from U0=1, so the bit it is supposed to
+                             recover carries no metric.
+
+                             V.34 9.6.1 says what the halves differ by. The mapper rotates
+                             u(2m+1) by [Z(m) + 2*I1 + U0(m)] * 90 degrees clockwise, so U0
+                             applies one extra 90-degree rotation to the SECOND 2D symbol
+                             only. On the coset labels that rotation is exact: with
+                             Re = 2u-3 and Im = 2v-3, (Re,Im) -> (-Im,Re) gives
+                             (u,v) -> (3-v, u). SIPFAX_TBLROT picks which half carries it. */
+                          static int trot = -1;
+                          if (trot < 0) { char *e = getenv("SIPFAX_TBLROT"); trot = e ? atoi(e) : 1; }
+                          {   int r2 = (3 - c[3]) & 3, r3 = c[2] & 3;   /* 2nd symbol rotated 90 */
+                              int h0[4], h1[4];
+                              h0[0]=c[0]; h0[1]=c[1]; h0[2]=c[2]; h0[3]=c[3];
+                              h1[0]=c[0]; h1[1]=c[1]; h1[2]=r2;    h1[3]=r3;
+                              for (q9 = 0; q9 < 4; q9++) {
+                                  built[tr*16 + cnt[tr]][q9]      = (u8)(trot ? h0[q9] : h1[q9]);
+                                  built[(tr+16)*16 + cnt[tr]][q9] = (u8)(trot ? h1[q9] : h0[q9]);
+                              }
                           }
                           cnt[tr]++;
                       }
@@ -2747,7 +2768,15 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                   done = 1;
               }
               p = &built[0][0];
-          } else
+          } else if (torig && fig9_s1(1,0)) {
+              /* SIPFAX: the Figure 9 labelling needs its own branch table - the shipped one
+                 was generated under the old labelling, and the relabelling does not induce a
+                 permutation of trans, so it cannot be reused. This one is produced by the
+                 construction that reproduces the shipped table bit for bit when fed the OLD
+                 labelling, so only the labelling input differs. */
+              p = &trellis_trans_16_fig9[0][0];
+          }
+          else
           p = torig ? &trellis_trans_16[0][0] : &trellis_trans_16b[0][0]; }
         break;
     }

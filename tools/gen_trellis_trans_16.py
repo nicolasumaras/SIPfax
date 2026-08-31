@@ -32,12 +32,22 @@ USAGE
     python3 gen_trellis_trans_16.py --label y0 --verify v34table.c
     python3 gen_trellis_trans_16.py --label x0 > table.c     # Figure 9 variant, see NOTE
 
-NOTE ON --label x0
+NOTE ON --label x0 AND --rot
     Figure 9/V.34 gives a middle subset bit that depends only on Re (x0); the tree uses y0,
-    which disagrees at 8 of 16 points. Regenerating the table with x0 and switching the
-    labelling to match does NOT work - the loopback falls to chance (50%). So either the
-    reading is wrong or more of the chain must move with it. Kept here for the record; do
-    not ship it without new evidence.
+    which disagrees at 8 of 16 points.
+
+    The extra thing that must change with the labelling is --rot: which member of each
+    rotation class is the half0 representative. Measured in loopback at 16800 with the x0
+    labelling: --rot 0 and 2 give 84.8%, --rot 1 and 3 give 100.0%. With --rot 1 the x0
+    labelling is fully self-consistent, 100.0% at 7200, 16800 and 33600.
+
+    It is still NOT the live bug. Scored like-for-like on a real capture the sync-bit
+    estimate moves only 24.9% -> 26.1%, where 2.5% would be correct, so both labellings
+    extract the same poor structure from a real transmitter. Kept for the record.
+
+    (An earlier report that this pair collapsed to chance was wrong: the table had been
+    dropped from v34table.c while v34priv.h still declared it without extern, and -fcommon
+    silently supplied a zero-filled array. Verify the table is really there.)
 """
 import argparse, re, sys
 
@@ -57,13 +67,19 @@ def trans_of(c, rule):
 
 rot = lambda c: (c[0], c[1], (3 - c[3]) & 3, c[2])   # 9.6.1: 90 deg on the 2nd 2D symbol
 
-def build(rule):
+def rotn(c, n):
+    for _ in range(n % 4):
+        c = rot(c)
+    return c
+
+def build(rule, k=0):
     allc = [(a, b, c, d) for a in range(4) for b in range(4)
                           for c in range(4) for d in range(4)]
     blocks = {}
     for t in range(16):
         s = [c for c in allc if trans_of(c, rule) == t]
-        h0 = sorted(c for c in s if trans_of(rot(c), rule) == t)
+        base = sorted(c for c in s if trans_of(rot(c), rule) == t)
+        h0 = [rotn(c, k) for c in base]
         blocks[t] = h0
         blocks[t + 16] = [rot(c) for c in h0]
     assert all(len(v) == 8 for v in blocks.values()), "blocks must hold 8 tuples"
@@ -76,9 +92,11 @@ def build(rule):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", choices=("y0", "x0"), default="y0")
+    ap.add_argument("--rot", type=int, default=0, choices=(0, 1, 2, 3),
+                    help="which member of each rotation class is the half0 representative")
     ap.add_argument("--verify", metavar="v34table.c")
     a = ap.parse_args()
-    blocks = build(a.label)
+    blocks = build(a.label, a.rot)
     if a.verify:
         rows = [tuple(int(x) for x in m) for m in re.findall(
             r"\{\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\}",

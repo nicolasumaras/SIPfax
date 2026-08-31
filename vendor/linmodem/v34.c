@@ -1493,6 +1493,11 @@ static void V34_mod_MP(V34DSPState *s, u8 *buf, int size, int is_16states)
 
 /* send MP sequence. 'type' select its type (0 or 1). 'do_ack' selects
    if it is an acknowledge sequence */
+/* SIPFAX: our RECEIVER's own residual-ISI estimate, defined further down. Tentative
+   declarations so the MP builder can advertise it. */
+static s16 p4_hest[3][2];
+static int p4_have_h;
+
 static void V34_send_MP(V34DSPState *s, int type, int do_ack)
 {
     u8 buf[188],*p;
@@ -1566,6 +1571,13 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     }
     
     if (type == 1) {
+        { extern int v34_dbg; static int shown = 0;
+          if (v34_dbg && !shown) { shown = 1;
+            fprintf(stderr, "[p4] TX: MP advertises OUR h = %.4f%+.4fj %.4f%+.4fj %.4f%+.4fj%s\n",
+                    (p4_have_h?p4_hest[0][0]:0)/16384.0, (p4_have_h?p4_hest[0][1]:0)/16384.0,
+                    (p4_have_h?p4_hest[1][0]:0)/16384.0, (p4_have_h?p4_hest[1][1]:0)/16384.0,
+                    (p4_have_h?p4_hest[2][0]:0)/16384.0, (p4_have_h?p4_hest[2][1]:0)/16384.0,
+                    p4_have_h ? "" : "  (no estimate yet -> zeros)"); } }
         for(i=0;i<3;i++) {
             for(j=0;j<2;j++) {
                 int hb;
@@ -1576,8 +1588,24 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
                    H(z) zeros at 1.865 and 1.000 (non-minimum-phase - impossible for a
                    channel estimate), while LSB-first gives 0.285, 0.167, 0.102,
                    monotonically decaying, all zeros inside the unit circle. */
-                for (hb = 0; hb < 16; hb++)
-                    put_bits(&p, 1, (s->h[i][j] >> hb) & 1);
+                {   /* SIPFAX: advertise OUR OWN estimate, not s->h.
+                       s->h holds the PEER's coefficients - we load it from peer_h (see the
+                       assignments near the E transition) because we precode OUR transmit
+                       with what the peer asked for, which is correct. But this field is the
+                       opposite direction: it is what WE want the peer to pre-cancel, and it
+                       must come from OUR receiver. Sending s->h echoed the caller's own
+                       coefficients straight back, so it precoded its transmission with a
+                       description of ITS receive channel - values of 0.12 to 0.29, not the
+                       ~0.005 our line actually needs. Tomlinson-Harashima output is
+                       deliberately off-lattice (lattice modulo a region), and our receiver
+                       has no inverse, so its data arrived uniformly smeared at the right
+                       scale: measured median distance to the nearest lattice point 0.508,
+                       where 0.50 is no information at all, while Phase 4 through the same
+                       front end runs at 3-5% EVM. */
+                    s16 hv = p4_have_h ? p4_hest[i][j] : 0;
+                    for (hb = 0; hb < 16; hb++)
+                        put_bits(&p, 1, (hv >> hb) & 1);
+                }
             }
         }
     }
@@ -4906,6 +4934,40 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     {
                         double bg = 1.0, be = 1e30, bp = 0.0, gdb, th2;
                         double pw0 = 0, pwmin; int qi;
+                        {   /* SIPFAX: MEASURE (and optionally remove) A DC OFFSET on the
+                               acquisition window. A coherent component added to the data -
+                               carrier leakage through the mixer, or any residual at the
+                               carrier - shows up in baseband as a constant vector, and it
+                               explains both symptoms at once: E[z^4] picks up a large DC^4
+                               term (our rho is 0.81 where the caller's raw signal measures
+                               0.061), and every point is displaced toward the same corner,
+                               so the slicer lands them on far fewer lattice cells than exist
+                               (8-16 of 56 used). SIPFAX_ACQ_DC=0 measures without removing. */
+                            static int dcrm = -1;
+                            double mi = 0, mq = 0; int jd;
+                            if (dcrm < 0) { char *e = getenv("SIPFAX_ACQ_DC");
+                                            dcrm = e ? atoi(e) : 1; }
+                            for (jd = 0; jd < s->data_acq_n; jd++) {
+                                mi += s->data_acq_i[jd]; mq += s->data_acq_q[jd];
+                            }
+                            if (s->data_acq_n > 0) { mi /= s->data_acq_n; mq /= s->data_acq_n; }
+                            {   double p = 0;
+                                for (jd = 0; jd < s->data_acq_n; jd++)
+                                    p += s->data_acq_i[jd]*s->data_acq_i[jd]
+                                       + s->data_acq_q[jd]*s->data_acq_q[jd];
+                                if (s->data_acq_n > 0) p /= s->data_acq_n;
+                                { extern int v34_dbg; if (v34_dbg)
+                                    fprintf(stderr, "[data] acq DC = (%+.4f,%+.4f)  |DC|^2/P = "
+                                            "%.4f  %s\n", mi, mq,
+                                            p > 0 ? (mi*mi+mq*mq)/p : 0.0,
+                                            dcrm ? "(removing)" : "(measuring only)"); }
+                            }
+                            if (dcrm) {
+                                for (jd = 0; jd < s->data_acq_n; jd++) {
+                                    s->data_acq_i[jd] -= mi; s->data_acq_q[jd] -= mq;
+                                }
+                            }
+                        }
                         for (qi = 0; qi < s->data_acq_n; qi++)
                             pw0 += s->data_acq_i[qi]*s->data_acq_i[qi]
                                  + s->data_acq_q[qi]*s->data_acq_q[qi];

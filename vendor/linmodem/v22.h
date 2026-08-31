@@ -27,6 +27,8 @@ typedef struct {
     int Z;              /* last value transmitted */
 } V22ModState;
 
+#define V22_RX_BUF_SIZE 32   /* SIPFAX: complex baseband history, power of two */
+
 typedef struct {
     /* parameters */
     int calling;
@@ -36,6 +38,18 @@ typedef struct {
 
     int baud_phase, baud_num, baud_denom;
     int carrier_phase, carrier_incr;
+
+    /* SIPFAX: receive state. V22_demod was an empty function - the whole V.22
+       receiver is new. */
+    int rx_buf[V22_RX_BUF_SIZE][2];  /* downconverted baseband history */
+    int rx_ptr;
+    int Z;                           /* previous quadrant, for differential decode */
+    int started;                     /* seen enough signal to start slicing */
+    long sym_count;
+    double agc;                      /* running amplitude estimate */
+    double ted_i, ted_q;             /* previous symbol, for Gardner */
+    double mid_i, mid_q;             /* mid-symbol sample */
+    double tphase;                   /* fractional timing offset in samples */
 } V22DemodState;
 
 extern s16 v22_tx_filter[V22_TX_FILTER_SIZE];

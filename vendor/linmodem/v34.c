@@ -978,6 +978,32 @@ static int trellis_next_state(int conv_nb_states, int conv_reg, int trans)
 
 /* (§ 9.6.3) trellis encoder, return U0 */
 
+/* SIPFAX: FIGURE 9/V.34 - the middle subset bit is x0, NOT y0.
+   Checked point by point against Figure 9 of the published Recommendation (10/96):
+   s2 = x1^y1^y0^x0 and s0 = y0^x0 are right at all 16 points, but s1 = y0 is wrong at 8
+   of them. The spec's middle bit depends only on Re - 0 for Re in {-3,1}, 1 for Re in
+   {-1,3} - which is x0. Bellard's own comment at the use site ("is it right to suppose
+   that we use figure 9 as a periodic mapping?") flags exactly this uncertainty.
+
+   It matters because the same expression is written in BOTH the encoder and the decoder,
+   so a wrong labelling agrees with itself: the loopback scores 99.7-99.9% while a real
+   V.34 transmitter yields nothing. Measured on a live capture, the symbols land on their
+   correct constellation points (8 of 8, lattice-rms 0.053, trellis healthy) and the
+   sync-bit estimate is still 24.9% ones where 2.5% is correct.
+
+   SIPFAX_FIG9=0 restores the old labelling for comparison. */
+static int fig9_s1(int x0, int y0)
+{
+    static int fix = -1;
+    /* DEFAULT 0 until trellis_trans_16 is rederived: flipping the labelling alone drops the
+       loopback from 99.9% to 70.3%, because v34table.c's static branch table was generated
+       under the OLD labelling and the relabelling does NOT induce a permutation of `trans`
+       (checked exhaustively over all 64 subset-label pairs), so the table cannot be permuted
+       into place - it has to be regenerated from the corrected labelling. */
+    if (fix < 0) { char *e = getenv("SIPFAX_FIG9"); fix = e ? atoi(e) : 0; }
+    return fix ? x0 : y0;
+}
+
 static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
 {
   int v0, ss[2][3], Y[5], i, trans;
@@ -999,7 +1025,7 @@ static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
     y1 = ((y & 2) >> 1);
     
     ss[i][2] = x1 ^ y1 ^ y0 ^ x0;
-    ss[i][1] = y0;
+    ss[i][1] = fig9_s1(x0, y0);
     ss[i][0] = y0 ^ x0;
   }
 
@@ -2697,7 +2723,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                           int x0 = x & 1, x1 = (x & 2) >> 1;
                           int y0 = y & 1, y1 = (y & 2) >> 1;
                           ss[i9][2] = x1 ^ y1 ^ y0 ^ x0;
-                          ss[i9][1] = y0;
+                          ss[i9][1] = fig9_s1(x0, y0);
                           ss[i9][0] = y0 ^ x0;
                       }
                       YY[4] = ss[0][2] ^ ss[1][2];

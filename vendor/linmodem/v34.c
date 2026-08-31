@@ -1679,9 +1679,10 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
             if (mc) { int v = atoi(mc); if (v > 0 && v < r_ca) r_ca = v; }
             if (ma) { int v = atoi(ma); if (v > 0 && v < r_ac) r_ac = v; }
             { char *ms = getenv("SIPFAX_MP_SHAPE"); shape = ms ? atoi(ms) : 1; }
+            { char *mt = getenv("SIPFAX_MP_TREL"); if (mt) trel = atoi(mt) & 3; }   /* slmodem advertises 0 (16-state) */
         }
         mp_params_done:
-        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac;
+        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac; s->p4_adv_trel = trel;
         put_bits(&p, 17, 0x1ffff); /* frame sync */
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
@@ -2209,6 +2210,12 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                 } else {
                     s->b1_mf = 0;
                 }
+            }
+            {   /* SIPFAX: ablation - silence instead of B1/data, separating content
+                   judgement from a protocol timeout in the caller. */
+                char *mz = getenv("SIPFAX_TX_MUTE_DATA");
+                if (mz && atoi(mz)) { s->tx_amp = 0; s->tx_postgain = 0;
+                    fprintf(stderr, "[p4] TX: DATA MUTED (ablation)\n"); }
             }
             { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] TX: E sent -> DATA (B1)\n"); }
             s->state = V34_DATA;
@@ -5121,7 +5128,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 R = ((our_ca > 0 && our_ca < their_ca) ? our_ca : their_ca) * 2400;
                 fprintf(stderr, "[data] rx rate: caller ca=%d, our cap=%s -> R=%d\n",
                         their_ca*2400, our_ca ? "set" : "none", R);
-                s->conv_nb_states = (s->p4_trellis == 0) ? 16 : (s->p4_trellis == 1) ? 32 : 64;
+                {   /* SIPFAX: the RX trellis must be what OUR MP required of the
+                       CALLER's transmitter (bits 29:30 are a command to the remote end),
+                       not the caller's own field - which commands OUR transmitter. They
+                       coincided while we mirrored; they will not once SIPFAX_MP_TREL
+                       diverges. Bridged from the TX instance's advertisement. */
+                    int rt = s->p4_adv_trel;
+                    if (rt <= 0 && s->p4_trellis >= 0) rt = s->p4_trellis;   /* mirror fallback */
+                    s->conv_nb_states = (rt == 0) ? 16 : (rt == 1) ? 32 : 64;
+                }
                 {   /* SIPFAX: does the caller precode even though our MP advertises
                        h = 0,0,0? Two comments in this file disagree about that, and it is
                        the one mechanism that fits the measured symptom exactly - correct
@@ -7923,6 +7938,8 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_tx.p4_mp_rate_ca = s->v34_rx.p4_mp_rate_ca;
     s->v34_tx.p4_mp_rate_ac = s->v34_rx.p4_mp_rate_ac;
     s->v34_tx.p4_trellis = s->v34_rx.p4_trellis;   /* SIPFAX: MP 29:30 - trellis REQUIRED of our TX */
+    s->v34_rx.p4_adv_trel = s->v34_tx.p4_adv_trel;
+    s->v34_rx.p4_adv_ca = s->v34_tx.p4_adv_ca;
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed
@@ -7934,7 +7951,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     V34_mod(&s->v34_tx, output, nb_samples);
     {   /* Phase-3 output stage: /5 level-match then optional pre-emphasis, both TUNABLE
            at runtime for level/pre-emphasis sweeps (SIPFAX_P3_GAIN, SIPFAX_P3_PREEMPH). */
-        static int p3_init = 0; static double p3_gain = 1.0; static int p3_preemph = 1;
+        static int p3_init = 0; static double p3_gain = 1.0; static int p3_preemph = 2;
         int _i;
         if (!p3_init) {
             char *g = getenv("SIPFAX_P3_GAIN"); char *pe = getenv("SIPFAX_P3_PREEMPH");
@@ -7943,6 +7960,24 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
             fprintf(stderr, "[v34p3] output stage: gain=%.2f preemph=%d\n", p3_gain, p3_preemph);
             fflush(stderr); p3_init = 1;
         }
+        /* SIPFAX: THE COMMANDED PRE-EMPHASIS. The caller's INFO1c (decoded off the
+           wire, 2026-08-31) commands filter INDEX 2 for our transmitter at S=3429:
+           Figure 1/V.34 template, a linear-in-dB tilt reaching alpha = 4 dB at f = S
+           (Table 3: alpha = 2*index dB), tolerance +-1 dB, applied to phases 3, 4 and
+           data alike. We never parsed the command: we transmitted flat (or an
+           unrelated fixed FIR), while the caller's receiver de-emphasises by the
+           commanded curve. p3_preemph: 0 = off, 1 = the legacy FIR, 2 = index-2
+           template (DEFAULT). Power-normalised over 400-3400 Hz. */
+        static const double p3fir_idx2[63] = {
+            0.000857,-0.000662,0.000320,-0.000241,0.000045,-0.000202,0.000267,-0.000782,
+            0.001215,-0.002194,0.003076,-0.004595,0.005959,-0.008049,0.009873,-0.012510,
+            0.014700,-0.017808,0.020192,-0.023654,0.025975,-0.029654,0.031539,-0.035331,
+            0.036179,-0.040115,0.038604,-0.043113,0.033946,-0.040177,-0.061418,0.963589,
+            -0.061418,-0.040177,0.033946,-0.043113,0.038604,-0.040115,0.036179,-0.035331,
+            0.031539,-0.029654,0.025975,-0.023654,0.020192,-0.017808,0.014700,-0.012510,
+            0.009873,-0.008049,0.005959,-0.004595,0.003076,-0.002194,0.001215,-0.000782,
+            0.000267,-0.000202,0.000045,-0.000241,0.000320,-0.000662,0.000857
+        };
         static const double p3fir[31] = {
             0.000262,0.000420,0.000231,0.001537,-0.000164,0.001513,-0.000989,-0.001946,
             -0.002864,-0.023000,-0.006023,-0.046162,0.001433,-0.026118,-0.114908,0.971567,
@@ -7951,7 +7986,12 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
         for (_i = 0; _i < nb_samples; _i++) {
             double xx = (double)output[_i] / 5.0;
             double yy;
-            if (p3_preemph) {
+            if (p3_preemph == 2) {
+                int _k;
+                for (_k = 62; _k > 0; _k--) s->p3h[_k] = s->p3h[_k-1];
+                s->p3h[0] = xx;
+                yy = 0.0; for (_k = 0; _k < 63; _k++) yy += p3fir_idx2[_k] * s->p3h[_k];
+            } else if (p3_preemph) {
                 int _k;
                 for (_k = 30; _k > 0; _k--) s->p3h[_k] = s->p3h[_k-1];
                 s->p3h[0] = xx;

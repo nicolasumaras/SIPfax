@@ -93,7 +93,15 @@ void v34_phase2_init(V34Phase2 *p){
        (infodec.py on sl-down.s16 @7.41s: pre=6 rate=9 sr=5/5, CRC OK — identical
        layout to ours, only these two values differed; the modem rejected pre=0/rate=14
        by silently never training). */
-    info0a_build(p->info0a); info1a_build(p->info1a,5,5,6,9);
+    info0a_build(p->info0a);
+    /* SIPFAX: truthful INFO1a. pre (26:29) commands the CALLER's pre-emphasis toward
+       us - we decode flat, so 0 (the old 6 told it to shape its TX for a de-emphasis
+       we never apply). rate (30:33) = projected max for its direction: 12 = 28800.
+       b[25] = its carrier at the selected rate: it transmits high - declare it. */
+    info1a_build(p->info1a,5,5,0,12);
+    p->info1a[25] = 1;
+    { int i2, c2 = info_crc(p->info1a+12, 38);
+      for (i2 = 0; i2 < 16; i2++) p->info1a[50+i2] = (c2>>i2)&1; }
     p->info_n=49; p->info_bit=-1; p->info_lastsym=-1; p->tx_rev_at=-1; p->seg=-1;
 }
 

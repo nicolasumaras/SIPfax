@@ -217,7 +217,7 @@ typedef struct V34DSPState {
     int b1_mf;                                       /* SIPFAX: mapping frames of B1 left to send (10.1.3.1) */
     int fx[3][2]; int fc_c0, fc_c0_use;             /* SIPFAX: zero-delay 9.6.2 front chain -> C0 for the ACS half */
     int tx_postgain;                                 /* SIPFAX: Q7 carrier-stage gain; 0 means 1.0 (128) */
-    int p4_adv_ca, p4_adv_ac;                        /* SIPFAX: the rates OUR MP actually advertised */
+    int p4_adv_ca, p4_adv_ac, p4_adv_trel;          /* SIPFAX: what OUR MP actually advertised */
     int mpp_sent;                                    /* SIPFAX: MP-prime frames sent (slmodem sends 4 before E) */
     short peer_h[6];   /* SIPFAX: precoder coefficients the PEER asked OUR tx to use */
     double data_agc;   /* SIPFAX: decision-directed data-mode gain */
@@ -371,7 +371,7 @@ typedef struct V34State {
     V34DSPState v34_rx;
     void *phase2;
     long p3n; s16 *p3rep; long p3rep_len; long p3rep_ptr;
-    double p3x1; double p3h[31];
+    double p3x1; double p3h[63];   /* SIPFAX: sized for the 63-tap index-2 pre-emphasis */
     int p3go;              /* caller joined Phase 3 (resume TX) */           /* pre-emphasis filter memory */              /* samples since Phase-3 handoff (turn-taking window) */        /* V.34 Phase-2 answer SM (opaque) */
     double tb_p12, tb_ptot; int tb_blocks, tb_hits, tb_restarts;  /* SIPFAX: Tone-B watchdog */
     int phase2_active;

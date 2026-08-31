@@ -6863,6 +6863,31 @@ static void p4_est_channel(const double *rawi, const double *rawq,
             for (k=cur;k<cur+5 && k<P4_HLAG;k++) fprintf(stderr,"%.3f ", sqrt(hr[k]*hr[k]+hi[k]*hi[k]));
             fprintf(stderr,"\n");
         }
+        {   /* SIPFAX: is the reference (TRN decisions) WHITE? If R_dd at nonzero lag is
+               not ~0, the correlation estimate is coloured by TRN autocorrelation and needs
+               an LS deconvolution rather than a bare cross-correlation. */
+            double Ar[6]={0}, Ai[6]={0}, A0=0, di2[6]={0}, dq2[6]={0}; int m, nn2=0, ii;
+            for (ii=200; ii<ns; ii++){ int q3,z3; double ex,ey;
+                p4_slice(si[ii]*scale, sq[ii]*scale, sixteen, &q3,&z3,&ex,&ey); ex/=scale; ey/=scale;
+                for(m=5;m>=1;m--){di2[m]=di2[m-1];dq2[m]=dq2[m-1];} di2[0]=ex;dq2[0]=ey;
+                if(nn2>=5){ A0+=ex*ex+ey*ey;
+                    for(m=0;m<6;m++){Ar[m]+=ex*di2[m]+ey*dq2[m]; Ai[m]+=ey*di2[m]-ex*dq2[m];} }
+                nn2++; }
+            if (v34_dbg && A0>0){ fprintf(stderr,"[p4] TRN ref autocorr (norm): ");
+                for(m=0;m<6;m++) fprintf(stderr,"%.3f ", sqrt(Ar[m]*Ar[m]+Ai[m]*Ai[m])/A0);
+                fprintf(stderr,"\n"); }
+            {   /* SIPFAX: proper correlation COEFFICIENT at the cursor: rho = |E[r d*]| /
+                   sqrt(E|r|^2 E|d|^2). If rho is ~1 the estimate is real and only its SHAPE
+                   is wrong; if rho ~0 raw and decisions are decorrelated (frame/timing bug)
+                   and the whole estimate is noise. */
+                double Praw=0; int ii2;
+                for (ii2=200; ii2<ns; ii2++) Praw += rawi[ii2]*rawi[ii2]+rawq[ii2]*rawq[ii2];
+                if (v34_dbg && Praw>0 && A0>0)
+                    fprintf(stderr,"[p4] cursor rho = %.3f  (E|raw|^2=%.3f E|d|^2=%.3f)\n",
+                            sqrt(best)/sqrt((Praw/(ns-200))*(A0/(ns-205))),
+                            Praw/(ns-200), A0/(ns-205));
+            }
+        }
         {   double cr=hr[cur], ci=hi[cur], cm=cr*cr+ci*ci;
             for (k=1;k<=3;k++){
                 int src=cur+k; double nr=0, ni=0;
@@ -6961,7 +6986,7 @@ static int p4_block_step(const short *x, int n, int *ca, int *ac, int *trel, int
         int nmp;
         if (!p4_have_h) {
             static int rh = -1;
-            if (rh < 0) { char *e = getenv("SIPFAX_REAL_H"); rh = e ? atoi(e) : 1; }
+            if (rh < 0) { char *e = getenv("SIPFAX_REAL_H"); rh = e ? atoi(e) : 0; }   /* SIPFAX: DEFAULT OFF - the raw-vs-decision correlation is rho~0.047 (noise): raw is the FSE input in the carrier frame, decisions are derotated, so they do not correlate. Advertising it = advertising noise. Needs a joint training channel estimator, not this. */
             if (rh) p4_est_channel(p4_rawi, p4_rawq, p4_si, p4_sq, p4_ns, p4_six);
             else    p4_est_precoder(p4_si, p4_sq, p4_ns, p4_six);
         }

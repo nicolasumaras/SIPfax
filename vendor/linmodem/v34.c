@@ -5503,6 +5503,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     s->jh_bitpos[jw] += 2;
                     if (--s->jvar_wait == 0) {
                         s->rx_j16 = (s->jvar_c16 > s->jvar_c4);
+                        if (s->jvar_defer) {        /* SIPFAX: now do the Phase-4 switch */
+                            int rr4;
+                            s->jvar_defer = 0; s->p4_mode = 1; s->srx_locked = 0;
+                            for (rr4 = 0; rr4 < 4; rr4++) { s->srx_reg4[rr4] = 0; s->srx_hist4[rr4] = 0; }
+                        }
                         { extern int v34_dbg; if (v34_dbg)
                             fprintf(stderr, "[srx] J variant vote: J4=%d J16=%d /192 -> %s\n",
                                     s->jvar_c4, s->jvar_c16,
@@ -5545,9 +5550,29 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                     break;   /* stay locked; the J' scorer runs below */
                                 }
                             }
-                            /* Phase 4: re-hunt the caller's post-J' TRN */
-                            s->p4_mode = 1; s->srx_locked = 0;
-                            for (rr2 = 0; rr2 < 4; rr2++) { s->srx_reg4[rr2] = 0; s->srx_hist4[rr2] = 0; }
+                            /* SIPFAX: DO NOT switch to Phase 4 while the J-variant vote is
+                               still running. This block arms the vote (jvar_wait = 96) and then
+                               immediately set p4_mode = 1 and srx_locked = 0 - and the gate that
+                               runs the vote requires srx_locked && p4_mode == 0. So the vote was
+                               dead on the very next symbol: jvar_wait stayed at 96, the
+                               "J variant vote:" line never printed on a single live call, and
+                               rx_j16 kept its initialised 0. We therefore decided 4-POINT on
+                               100% of calls no matter what the caller commanded - while the
+                               comment on the vote itself records that THIS caller sends 0x0D91,
+                               J16POINTS. That is the documented root cause of the original 13
+                               failed handshakes, recurring because the fix for it could never
+                               complete. Defer the switch until the vote lands; 96 symbols is
+                               about 28 ms at 3429 baud. SIPFAX_JVOTE=0 restores the old
+                               behaviour. */
+                            {   static int jv = -1;
+                                if (jv < 0) { char *e = getenv("SIPFAX_JVOTE"); jv = e ? atoi(e) : 1; }
+                                if (jv && s->jvar_wait > 0) {
+                                    s->jvar_defer = 1;      /* switch when the vote completes */
+                                } else {
+                                    s->p4_mode = 1; s->srx_locked = 0;
+                                    for (rr2 = 0; rr2 < 4; rr2++) { s->srx_reg4[rr2] = 0; s->srx_hist4[rr2] = 0; }
+                                }
+                            }
                         }
                     }
                 }

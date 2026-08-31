@@ -92,6 +92,14 @@ typedef struct {
 #define V8_MODN0_V90 0x04   /* FIXME */
 #define V8_MODN0_V34 0x02
 #define V8_MODN2_V21 0x01
+/* SIPFAX: V.22/V.22bis lives in the FIRST extension octet, code bit 0x40.
+   Established from spandsp's encoder (src/v8.c), whose wire values are the bit-reverse
+   of linmodem's code constants - validated three independent ways against constants
+   already in this tree: base 0x10 -> 0x08 (V8_EXT), V.23 0x04 -> 0x20 (V8_MODN2_V23),
+   V.21 0x80 -> 0x01 (V8_MODN2_V21). In the same octet 0x80 is V.32/V.32bis, which we
+   already advertise. Our caller sends this octet as 0xc8 = V.32 | V.22 | EXT, identical
+   in 4/4 captures; we were sending 0x88, i.e. V.32 without V.22. */
+#define V8_MODN1_V22 0x40
 #define V8_MODN2_V23 0x20
 
 #define V8_DATA_NOCELULAR 0xB0
@@ -99,6 +107,7 @@ typedef struct {
 
 #define V8_MOD_V90 (1 << 0)  /* FIXME */
 #define V8_MOD_V34 (1 << 1)  /* V34 duplex */
+#define V8_MOD_V22 (1 << 11) /* V22/V22bis duplex */
 #define V8_MOD_V23 (1 << 10) /* V23 duplex */
 #define V8_MOD_V21 (1 << 12) /* V21 duplex */
 

@@ -35,7 +35,7 @@ static LinModemConfig default_lm_config =
     dtmf_level: -9, 
     dtmf_digit_length: 150,
     dtmf_pause_length: 100,
-    available_modulations: V8_MOD_V21 | V8_MOD_V23 | V8_MOD_V34 | V8_MOD_V90,
+    available_modulations: V8_MOD_V21 | V8_MOD_V23 | V8_MOD_V22 | V8_MOD_V34 | V8_MOD_V90,
 };
 
 /* fifo handling */

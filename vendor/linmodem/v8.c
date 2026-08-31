@@ -117,6 +117,22 @@ static void cm_decode(V8State *s)
             /* XXX: this decoding is sufficient for modulations, but
                not exhaustive */
             s->decoded_modulations = 0;
+            /* SIPFAX: dump the caller's raw CM octets. Which bit carries V.22bis is the
+               whole question, and reading it off the peer beats deriving it. Code bit 0x80
+               is wire b1 - anchored on V8_DATA_LAPM=0x54 -> wire 0x2A, which is a bit
+               REVERSAL, not a shift. */
+            if (getenv("SIPFAX_CMDUMP")) {
+                int q;
+                fprintf(stderr, "[cm] %d octets:", s->cm_count);
+                for (q = 0; q < s->cm_count; q++) fprintf(stderr, " %02x", s->cm_data[q]);
+                fprintf(stderr, "\n");
+                for (q = 0; q < s->cm_count; q++) {
+                    int bb, c2 = s->cm_data[q];
+                    fprintf(stderr, "[cm]   octet%d code=%02x  wire b1..b8 =", q, c2);
+                    for (bb = 7; bb >= 0; bb--) fprintf(stderr, " %d", (c2 >> bb) & 1);
+                    fprintf(stderr, "\n");
+                }
+            }
             p = s->cm_data;
             /* zero is used to indicate the end */
             s->cm_data[s->cm_count] = 0;
@@ -140,7 +156,13 @@ static void cm_decode(V8State *s)
 
             c = *p++;
             if ((c & 0x1c) == V8_EXT) {
-                /* ignored */
+                /* SIPFAX: this octet was discarded outright - it is the one carrying
+                   V.22/V.22bis, so we could never see that the caller offers it (it
+                   does, in every capture). V.32/V.32bis (0x80) is deliberately NOT
+                   decoded: there is no v32.c in this tree, and claiming to understand a
+                   modulation we cannot speak is how you select one and then fail. */
+                if (c & V8_MODN1_V22)
+                    s->decoded_modulations |= V8_MOD_V22;
                 c = *p++;
                 if ((c & 0x1c) == V8_EXT) {
                     if (c & V8_MODN2_V23)
@@ -341,7 +363,19 @@ static void cm_send(V8State *s, int mod_mask)
        survives every signal-level comparison. v8_put_byte transmits LSB-first, so code
        constants are the bit-reverse of the wire octets (V8_DATA_LAPM=0x54 -> wire 2A,
        V8_DATA_NOCELULAR=0xB0 -> wire 0D, checked against slmodem's decoded JM). */
-    v8_put_byte(s, V8_EXT | 0x80);      /* wire 0x11: V.32/V.32bis, as slmodem */
+    {   /* SIPFAX: advertise V.22/V.22bis. Without this the V.22 answer handshake can
+           never run: the caller offers V.22bis in every CM and we answered with this
+           octet set to V.32/V.32bis only, so V.22bis was never a common mode. Gated by
+           SIPFAX_ADV_V22 (default on) so one live call can A/B it - this changes V.8 on
+           a line that currently completes V.34 handshakes. */
+        int ext1 = V8_EXT | 0x80;       /* V.32/V.32bis, as slmodem */
+        char *e = getenv("SIPFAX_ADV_V22");
+        if ((!e || atoi(e)) && (mod_mask & V8_MOD_V22))
+            ext1 |= V8_MODN1_V22;       /* -> 0xc8, the caller's own octet */
+        if (getenv("SIPFAX_CMDUMP"))
+            fprintf(stderr, "[jm] modulation ext octet = %02x\n", ext1);
+        v8_put_byte(s, ext1);
+    }
     v8_put_byte(s, V8_EXT);             /* wire 0x10: no second-ext claims, as slmodem */
     v8_put_byte(s, V8_DATA_LAPM);       /* wire 0x2A: LAPM (V.42) */
     v8_put_byte(s, V8_DATA_NOCELULAR);  /* wire 0x0D: GSTN standard analogue */
@@ -358,6 +392,10 @@ static int select_modulation(int mask)
         val = V8_MOD_V21;
     if (mask & V8_MOD_V23)
         val = V8_MOD_V23;
+    /* SIPFAX: below V.34 deliberately - this is a last-assignment-wins ladder, so
+       putting V.22 after V.34 would silently demote every call to 1200 bit/s. */
+    if (mask & V8_MOD_V22)
+        val = V8_MOD_V22;
     if (mask & V8_MOD_V34)
         val = V8_MOD_V34;
     if (mask & V8_MOD_V90)

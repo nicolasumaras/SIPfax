@@ -4534,8 +4534,27 @@ void V34_datagen_test(const char *path)
                     tx.tx_amp = CALC_AMP(mp);
                 }
             }
-            tx.state = V34_DATA;
-            fprintf(stderr, "[gen] switching to DATA at t=%.2f s\n", b*512/8000.0);
+            {   /* SIPFAX: SIPFAX_GEN_SEAM=1 runs the REAL Phase-4 E path - drive the
+                   p4 receive flags so the modulator advances MP -> MP' -> E -> DATA,
+                   emitting a genuine E sequence and B1 (scrambled ones, zeroed state) via
+                   the STARTUP4_E case. Without it (default, back-compat) the generator
+                   jumps straight to V34_DATA and NEVER exercises the seam - which is why
+                   the GT test could not see the E->B1 bug. */
+                static int seam = -1;
+                if (seam < 0) { char *e = getenv("SIPFAX_GEN_SEAM"); seam = e ? atoi(e) : 0; }
+                if (seam) {
+                    /* advance through MP/MP'/E naturally: pretend the peer's MP/MP'/E arrived */
+                    tx.p4_mp_rx = 1; tx.p4_mpp_rx = 1; tx.p4_e_rx = 1;
+                    tx.p4_mp_rate_ca = 7; tx.p4_mp_rate_ac = R/2400;
+                    tx.p4_trellis = (trel==64)?2:(trel==32)?1:0;
+                    tx.p4_adv_ac = R/2400; tx.p4_adv_trel = tx.p4_trellis;
+                    tx.mp_hold = 1;
+                    fprintf(stderr, "[gen] SEAM: advancing through real E->B1 at t=%.2f s\n", b*512/8000.0);
+                } else {
+                    tx.state = V34_DATA;
+                    fprintf(stderr, "[gen] switching to DATA at t=%.2f s (no seam)\n", b*512/8000.0);
+                }
+            }
         }
         int k;
         V34_mod(&tx, out, 512);
@@ -5233,6 +5252,25 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                 sgn2*ppm9, ppm9);
                     }
                 }
+                {   /* SIPFAX: CARRY THE EQUALISER ACROSS E (reproduce the caller).
+                       The real call modem does NOT re-acquire at data entry - it carries
+                       its Phase-4-tracked carrier (srx_th) and its CMA taps straight into
+                       B1. Our data-mode acquisition (the ~400-symbol gain+phase sweep)
+                       masks any E->B1 discontinuity by re-solving from scratch, which is
+                       why the GT test decodes at 92% while the live caller cannot lock our
+                       B1. SIPFAX_NO_REACQ=1 skips the sweep: mark acquisition done with
+                       the carried Phase-4 gain (data_agc from rx16_rms) and carrier
+                       (srx_th via data_carrier), exactly as a real receiver would. */
+                    static int nra = -1;
+                    if (nra < 0) { char *e = getenv("SIPFAX_NO_REACQ"); nra = e ? atoi(e) : 0; }
+                    if (nra) {
+                        s->data_acq_done = 1;
+                        s->data_nra = 1;   /* measure gain from the first data symbols, carry phase */
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[data] NO_REACQ: carrying carrier across E, "
+                                    "gain from first data symbols - no phase sweep\n"); }
+                    }
+                }
                 s->data_on = 1; s->data_n = 0;
                 { extern int v34_dbg; if (v34_dbg)
                     fprintf(stderr, "[data] entering data mode: target mean power %.0f (rx16_rms %.0f)\n",
@@ -5849,6 +5887,18 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     }
                 }
                 if (s->data_acq_done) {
+                if (s->data_nra && s->nra_n < 300) {
+                    /* SIPFAX: bootstrap the carried gain from the received data power over
+                       the first ~300 symbols (what a real modem's AGC holds across the
+                       seam), WITHOUT a phase sweep - the carrier is carried from Phase 4.
+                       Isolates whether the carrier PHASE survives E->B1. */
+                    s->nra_pw += oi*oi + oq*oq; s->nra_n++;
+                    if (s->nra_n == 300 && s->nra_pw > 0) {
+                        s->data_agc = sqrt(s->data_meanc2 / (s->nra_pw / s->nra_n));
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[data] NO_REACQ gain bootstrapped to %.3f\n", s->data_agc); }
+                    }
+                }
                 { double dth2 = data_carrier(s); ct2 = cos(-dth2); st2 = sin(-dth2); }
                 xi = (oi*ct2 - oq*st2) * gc;
                 xq = (oi*st2 + oq*ct2) * gc;

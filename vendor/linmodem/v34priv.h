@@ -218,6 +218,7 @@ typedef struct V34DSPState {
     int fx[3][2]; int fc_c0, fc_c0_use;             /* SIPFAX: zero-delay 9.6.2 front chain -> C0 for the ACS half */
     int tx_postgain;                                 /* SIPFAX: Q7 carrier-stage gain; 0 means 1.0 (128) */
     int p4_adv_ca, p4_adv_ac, p4_adv_trel;          /* SIPFAX: what OUR MP actually advertised */
+    int data_nra; double nra_pw; long nra_n;          /* SIPFAX: carry-equaliser gain bootstrap */
     int mpp_sent;                                    /* SIPFAX: MP-prime frames sent (slmodem sends 4 before E) */
     short peer_h[6];   /* SIPFAX: precoder coefficients the PEER asked OUR tx to use */
     double data_agc;   /* SIPFAX: decision-directed data-mode gain */

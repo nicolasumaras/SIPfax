@@ -5148,6 +5148,26 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                         fprintf(stderr, "[data] equaliser taps -> %s (%d taps, centre %d)\n",
                                                 ed, CMANT, CMANT/2); } }
                 }
+                {   /* SIPFAX: SEED THE DATA FFE FROM THE BLOCK FFE. The data-mode CMA
+                       (cma_wi/wq, T/2, 32 taps) and the block receiver's FFE (g_p4ffe, T/2,
+                       31 taps, same 24kHz/7-per-symbol grid) equalise the SAME channel, but
+                       the block FFE does multi-pass CMA+DD on buffered TRN and reaches
+                       3-5% EVM while the streaming data CMA sits at ~47%. A symbol-rate FFE
+                       cannot invert this channel (deep null, 29% residual at 31 taps) but
+                       the T/2 block FFE can - so use its taps for data. Cursor-aligned:
+                       block cursor P4_NT/2=15 -> data cursor CMANT/2=16. SIPFAX_SEED_FFE=1. */
+                    extern double g_p4ffe_i[], g_p4ffe_q[]; extern int g_p4ffe_valid;
+                    static int sf = -1;
+                    if (sf < 0) { char *e = getenv("SIPFAX_SEED_FFE"); sf = e ? atoi(e) : 0; }
+                    if (sf && g_p4ffe_valid) {
+                        int q; for (q = 0; q < CMANT; q++) { s->cma_wi[q] = 0; s->cma_wq[q] = 0; }
+                        for (q = 0; q < 31 && q+1 < CMANT; q++) {
+                            s->cma_wi[q+1] = g_p4ffe_i[q]; s->cma_wq[q+1] = g_p4ffe_q[q];
+                        }
+                        { extern int v34_dbg; if (v34_dbg)
+                            fprintf(stderr, "[data] data FFE SEEDED from block FFE (31 taps)\n"); }
+                    }
+                }
                 {   /* SIPFAX: our own generated signal passes through NO channel, so the
                        correct equaliser for it is a DELTA. The taps carried into data mode
                        are whatever CMA converged to on 4-point Phase-4 TRN, and their
@@ -6687,6 +6707,9 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
             pos += P4_SPS/2.0 + tfr;
         }
     }
+    { extern double g_p4ffe_i[], g_p4ffe_q[]; extern int g_p4ffe_valid; int q;
+      for (q = 0; q < P4_NT; q++) { g_p4ffe_i[q] = wi[q]; g_p4ffe_q[q] = wq[q]; }
+      g_p4ffe_valid = 1; }
     return ns;
 }
 
@@ -6846,6 +6869,7 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
 #define P4_NCMA 6
 #define P4_NDD  10
 
+double g_p4ffe_i[P4_NT], g_p4ffe_q[P4_NT]; int g_p4ffe_valid = 0;   /* SIPFAX: block FFE taps, seeded into data mode */
 static double p4_zi[P4_MAXZ], p4_zq[P4_MAXZ], p4_si[P4_MAXSY], p4_sq[P4_MAXSY];
 static int    p4_nz, p4_ns, p4_stage, p4_pass, p4_six;
 static double p4_off;

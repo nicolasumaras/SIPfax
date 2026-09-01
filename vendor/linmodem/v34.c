@@ -1012,6 +1012,7 @@ static int fig9_s1(int x0, int y0)
 static int trellis_encoder(V34DSPState *s, int c0, int yy[2][2])
 {
   int v0, ss[2][3], Y[5], i, trans;
+  { static FILE*ef=0; static int en=0; if(!ef){char*e=getenv("SIPFAX_C0ENC"); if(e)ef=fopen(e,"w");} if(ef&&en<3000){en++; fprintf(ef,"%d\n", c0);} }
 
   /* convolutional coder */
 
@@ -2892,6 +2893,10 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
             if (ff && fn < 400) { fn++; fprintf(ff, "%d %d\n", c0_new, s->fc_c0); } }
         s->fc_c0_use = s->fc_c0;
         s->fc_c0 = c0_new;
+        /* SIPFAX: when the pre-trellis DFE (rx_precode2) is running, IT computes c from the
+           received Y (correct), so use its C0 for the ACS half instead of the front-chain's
+           c-from-u (which is wrong once the DFE has removed c). */
+        if (s->rx_precode2) s->fc_c0_use = s->pre_c0_use;
     }
 
     /* compute the number of bits used in the transitions from each state */
@@ -3856,6 +3861,31 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             s->fx2[2][0]=s->fx2[1][0]; s->fx2[2][1]=s->fx2[1][1];
             s->fx2[1][0]=s->fx2[0][0]; s->fx2[1][1]=s->fx2[0][1];
             s->fx2[0][0]=(Yt_re<<7)-p_re; s->fx2[0][1]=(Yt_im<<7)-p_im;
+            /* SIPFAX: C0 (9.6.3.3) from the DFE's own c, matching the encoder's
+               (sum(c_re+c_im over the 4D symbol) >> 1) & 1. The encoder folds U0 = Y0^C0^v0
+               into the NEXT 4D symbol, so the ACS half for symbol m uses C0(m-1): keep a
+               one-symbol delay (pre_c0_use = previous, pre_c0 = current). */
+            if (s->phase_4d == 0) s->pre_c0sum = c_re + c_im;
+            else { s->pre_c0sum += c_re + c_im;
+                   s->pre_c0_use = s->pre_c0; s->pre_c0 = (s->pre_c0sum >> 1) & 1; }
+            if (s->phase_4d==1){ static FILE*df=0; static int dn=0; if(!df){char*e=getenv("SIPFAX_C0DFE"); if(e)df=fopen(e,"w");} if(df&&dn<3000){dn++; fprintf(df,"%d\n", s->pre_c0);} }
+            /* SIPFAX: undo the precoder's C0 rotation of u(2m+1). The mapper rotated the
+               SECOND 2D symbol by U0=Y0^C0^v0 (times 90 CW); the trellis handles Y0^v0, so
+               remove only the C0 part here. C0 that rotated THIS symbol was folded a 4D
+               symbol earlier (s->U0), so use the delayed C0. Delay/sign are knobs so the
+               exact convention is swept, not assumed. */
+            if (s->phase_4d == 1) {
+                static int cd = -2, cs = -2;
+                int c0r;
+                if (cd == -2) { char *e = getenv("SIPFAX_C0ROT_DELAY"); cd = e ? atoi(e) : 1;
+                                char *e2 = getenv("SIPFAX_C0ROT_SIGN"); cs = e2 ? atoi(e2) : 1; }
+                c0r = cd ? s->pre_c0_use : s->pre_c0;
+                if (c0r) {
+                    int t;
+                    if (cs > 0) { t = si;  si = sq;  sq = -t; }   /* CW 90 */
+                    else        { t = si;  si = -sq; sq = t;  }   /* CCW 90 */
+                }
+            }
             { static FILE *pf=0; static int pn=0; if(!pf){char*e=getenv("SIPFAX_PRE_DBG"); if(e)pf=fopen(e,"w");}
               if(pf&&pn<400){pn++; fprintf(pf,"%d %d %d %d %d %d\n", Yt_re,Yt_im,c_re,c_im, (int)lrint(si/128.0),(int)lrint(sq/128.0));} }
         }

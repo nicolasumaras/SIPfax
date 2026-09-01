@@ -217,6 +217,7 @@ typedef struct V34DSPState {
     int b1_mf;                                       /* SIPFAX: mapping frames of B1 left to send (10.1.3.1) */
     int fx[3][2]; int fc_c0, fc_c0_use;             /* SIPFAX: zero-delay 9.6.2 front chain -> C0 for the ACS half */
     int fx2[3][2]; int rx_precode2;                  /* SIPFAX: pre-trellis THP DFE history (Q7) */
+    int pre_c0sum, pre_c0, pre_c0_use;                /* SIPFAX: C0 from the pre-trellis DFE, for the ACS half */
     int tx_postgain;                                 /* SIPFAX: Q7 carrier-stage gain; 0 means 1.0 (128) */
     int p4_adv_ca, p4_adv_ac, p4_adv_trel;          /* SIPFAX: what OUR MP actually advertised */
     int data_nra; double nra_pw; long nra_n;          /* SIPFAX: carry-equaliser gain bootstrap */

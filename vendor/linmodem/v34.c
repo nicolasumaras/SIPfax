@@ -3614,7 +3614,7 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
          does not precode is unaffected; the caller demonstrably does - the loopback with
          its MP coefficients reproduces the trellis metric measured on the wire (178.7 vs
          172) where an unprecoded loopback sits at 8.6. */
-      if (s->rx_precode) {
+      if (s->rx_precode && !s->rx_precode2) {
           int px = 0, py = 0, k2, p_re, p_im, c_re, c_im, xr, xi;
           int w2 = (s->b < 56) ? 1 : 2;
           for (k2 = 0; k2 < 3; k2++) {
@@ -3825,6 +3825,41 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
         }
     }
     lm_dump_qam(si / (10.0 * 128.0), sq / (10.0 * 128.0));
+
+    {   /* SIPFAX: PRE-TRELLIS THP DFE (the modulo inverse, done BEFORE the Viterbi so the
+           trellis decodes u on the base cosets, not u+c). The post-trellis inverse was
+           mathematically correct (verified: recovers u exactly from a correct Y) but the
+           Viterbi FIGHTS the precoder's coset shifts - the transmitted Y=u+c is in a
+           different coset than u, so the code-constrained Viterbi mis-corrects it (measured:
+           8.5% Y-decision errors in a clean single-tap loopback). Removing c from the SOFT
+           symbol first, with a tentative per-symbol decision feeding the DFE history, lets
+           the trellis see u. si,sq are Q7 (coordinate*128); h is Q14; c is in coordinate
+           units. SIPFAX_RX_PRECODE2=1. */
+        static int p2 = -1;
+        if (p2 < 0) { char *e = getenv("SIPFAX_RX_PRECODE2"); p2 = e ? atoi(e) : 0; }
+        if (p2 && s->rx_precode) {
+            int w = (s->b < 56) ? 1 : 2, k, px = 0, py = 0, p_re, p_im, c_re, c_im;
+            s->rx_precode2 = 1;
+            int Yt_re, Yt_im;
+            for (k = 0; k < 3; k++) {
+                px += s->fx2[k][0]*s->h[k][0] - s->fx2[k][1]*s->h[k][1];
+                py += s->fx2[k][1]*s->h[k][0] + s->fx2[k][0]*s->h[k][1];
+            }
+            p_re = shr_round0(px, 14); p_im = shr_round0(py, 14);
+            c_re = shr_round0(p_re, 7 + w) << w; c_im = shr_round0(p_im, 7 + w) << w;
+            /* tentative Y (odd-integer coordinate) from the soft symbol (Q7) */
+            { double c0 = si/128.0, c1 = sq/128.0;
+              Yt_re = 2*(int)lrint((c0-1.0)/2.0)+1; Yt_im = 2*(int)lrint((c1-1.0)/2.0)+1; }
+            /* remove c from the soft symbol -> u, feed that to the trellis */
+            si -= c_re*128; sq -= c_im*128;
+            /* update DFE history from the tentative Y: x = (Y<<7) - p (Q7) */
+            s->fx2[2][0]=s->fx2[1][0]; s->fx2[2][1]=s->fx2[1][1];
+            s->fx2[1][0]=s->fx2[0][0]; s->fx2[1][1]=s->fx2[0][1];
+            s->fx2[0][0]=(Yt_re<<7)-p_re; s->fx2[0][1]=(Yt_im<<7)-p_im;
+            { static FILE *pf=0; static int pn=0; if(!pf){char*e=getenv("SIPFAX_PRE_DBG"); if(e)pf=fopen(e,"w");}
+              if(pf&&pn<400){pn++; fprintf(pf,"%d %d %d %d %d %d\n", Yt_re,Yt_im,c_re,c_im, (int)lrint(si/128.0),(int)lrint(sq/128.0));} }
+        }
+    }
 
     s->yy[s->phase_4d][0] = si;
     s->yy[s->phase_4d][1] = sq;

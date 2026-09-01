@@ -1742,6 +1742,19 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
                        where 0.50 is no information at all, while Phase 4 through the same
                        front end runs at 3-5% EVM. */
                     s16 hv = p4_have_h ? p4_hest[i][j] : 0;
+                    {   /* SIPFAX: A/B PROBE. SIPFAX_FORCE_H="h1r,h1i,h2r,h2i,h3r,h3i" in
+                           Q14 forces the advertised h to a fixed value, so a DELIBERATELY
+                           strong wrong h tells us whether the caller precodes with what we
+                           send: if it does, its transmission arrives heavily distorted at
+                           our RX; if it ignores us, nothing changes. */
+                        static int fh=-1; static s16 fhv[6];
+                        if (fh<0){ char *e=getenv("SIPFAX_FORCE_H"); fh=0;
+                            if(e){ char bb[128],*t; int k=0; int v[6]={0,0,0,0,0,0};
+                                strncpy(bb,e,127); bb[127]=0; t=strtok(bb,",");
+                                while(t&&k<6){v[k++]=atoi(t);t=strtok(NULL,",");}
+                                for(k=0;k<6;k++) fhv[k]=(s16)v[k]; fh=1; } }
+                        if (fh) hv = fhv[i*2+j];
+                    }
                     for (hb = 0; hb < 16; hb++)
                         put_bits(&p, 1, (hv >> hb) & 1);
                 }

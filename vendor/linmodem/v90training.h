@@ -4,6 +4,7 @@
 #include "v90dil.h"
 #include "v90cp.h"
 #define V90_RX_TAPS 81
+#define V90_RX_PHASES 10
 typedef struct {
     double previous_re,previous_im;
     int have_previous,ones,count;
@@ -11,13 +12,12 @@ typedef struct {
     uint8_t bits[V90_JA_MAX_BITS];
 } V90JaLane;
 typedef struct {
-    double taps[V90_RX_TAPS],re[V90_RX_TAPS],im[V90_RX_TAPS];
-    double last_re,last_im;
+    double taps[4][V90_RX_TAPS],re[V90_RX_TAPS],im[V90_RX_TAPS];
     unsigned position;
     long samples;
     int found,cp_mode,e_seen;
     V90Cp cp;
-    V90JaLane lanes[5];
+    V90JaLane lanes[V90_RX_PHASES];
     V90Dil dil;
 } V90Training;
 void v90_training_init(V90Training *s);

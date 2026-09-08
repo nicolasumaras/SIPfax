@@ -31,6 +31,17 @@ int phase2_complete(V90Startup *s) { return s->info1_received && s->upstream_rat
 long tx_reversal(V90Startup *s) { return s->first_tx_reversal; }
 long rx_reversal(V90Startup *s) { return s->second_rx_reversal; }
 void phase3(V90Startup *s){s->samples=20000;s->info0_received=1;s->info0_at=0;s->ranging_state=9;}
+static unsigned dte_bits;
+static int dte_bit(void *opaque){++dte_bits;return 1;}
+unsigned consumed(void){return dte_bits;}
+int data_active(V90Startup *s){return s->phase4_active && s->phase4.stage==4;}
+void data_mode(V90Startup *s){
+ phase3(s);v90_phase4_init(&s->phase4,0,78);s->phase4_active=1;s->phase4.stage=4;
+ V90Cp cp={0};cp.drn=9;cp.sr=1;cp.lookahead=1;cp.count=1;cp.filter[0]=63;
+ unsigned u[4]={53,78,88,96};for(unsigned i=0;i<4;++i)cp.mask[0][0][u[i]]=1;
+ if(v90_pcm_init(&s->phase4.encoder,&cp,dte_bit,0))abort();
+ dte_bits=0;
+}
 unsigned retrains(V90Startup *s){return s->retrains;}
 long mute_until(V90Startup *s){return s->retrain_mute_until;}
 void destroy(void *s) { free(s); }
@@ -43,6 +54,7 @@ void destroy(void *s) { free(s); }
     for name in ['tx_reversal','rx_reversal']:
         getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long
     lib.phase2_complete.argtypes=[C.c_void_p]
+    lib.data_mode.argtypes=[C.c_void_p];lib.data_active.argtypes=[C.c_void_p]
     lib.phase3.argtypes=[C.c_void_p];lib.retrains.argtypes=[C.c_void_p]
     lib.mute_until.argtypes=[C.c_void_p];lib.mute_until.restype=C.c_long
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
@@ -83,30 +95,52 @@ void destroy(void *s) { free(s); }
 
     # A caller retrain must be sustained, then receive silence70ms and Tone B,
     # without another INFO0 message. Keep the exact existing40ms reversal reply.
-    for frequency in [1800,1920,2400]:
-        state=lib.create(0);lib.phase3(state)
-        t=np.arange(2400);pcm=(2500*np.cos(2*np.pi*frequency*t/8000+.4)+
-            2200*np.cos(2*np.pi*1800*t/8000+.7)).astype(np.int16)
-        out=np.zeros_like(pcm)
-        for start in range(0,len(pcm),37):
-            lib.v90_startup_process(state,out[start:start+37],pcm[start:start+37],len(pcm[start:start+37]))
-        assert lib.retrains(state)==(frequency==2400)
-        if frequency==2400:
-            end=lib.mute_until(state)-20000;begin=end-560
-            assert begin>=400 and np.all(out[begin:end]==0)
-            z=out[end:end+400]*np.exp(-2j*np.pi*1200*np.arange(end,end+400)/8000)
-            assert abs(z.sum())>500000,'no coherent Tone B after silence'
-            # Reverse the continuing Tone A and verify320-sample response.
-            extra=np.arange(2400,3400)
-            reverse=2700
-            sign=np.where(extra>=reverse,-1,1)
-            pcm2=(2500*sign*np.cos(2*np.pi*2400*extra/8000+.4)+
-                2200*np.cos(2*np.pi*1800*extra/8000+.7)).astype(np.int16)
-            out2=np.zeros_like(pcm2)
-            lib.v90_startup_process(state,out2,pcm2,len(pcm2))
-            assert abs(lib.tx_reversal(state)-(20000+reverse+320))<=8
-        lib.destroy(state)
+    for data_mode in [False,True]:
+        for frequency in [1800,1920,2400]:
+            state=lib.create(0);(lib.data_mode if data_mode else lib.phase3)(state)
+            t=np.arange(2400);pcm=(2500*np.cos(2*np.pi*frequency*t/8000+.4)+
+                2200*np.cos(2*np.pi*1800*t/8000+.7)).astype(np.int16)
+            out=np.zeros_like(pcm)
+            for start in range(0,len(pcm),37):
+                lib.v90_startup_process(state,out[start:start+37],pcm[start:start+37],len(pcm[start:start+37]))
+            assert lib.retrains(state)==(frequency==2400)
+            if frequency==2400:
+                end=lib.mute_until(state)-20000;begin=end-560
+                assert begin>=400 and np.all(out[begin:end]==0)
+                z=out[end:end+400]*np.exp(-2j*np.pi*1200*np.arange(end,end+400)/8000)
+                assert abs(z.sum())>500000,'no coherent Tone B after silence'
+                # Reverse the continuing Tone A and verify320-sample response.
+                extra=np.arange(2400,3400)
+                reverse=2700
+                sign=np.where(extra>=reverse,-1,1)
+                pcm2=(2500*sign*np.cos(2*np.pi*2400*extra/8000+.4)+
+                    2200*np.cos(2*np.pi*1800*extra/8000+.7)).astype(np.int16)
+                out2=np.zeros_like(pcm2)
+                lib.v90_startup_process(state,out2,pcm2,len(pcm2))
+                assert abs(lib.tx_reversal(state)-(20000+reverse+320))<=8
+            if data_mode:
+                assert lib.consumed()>0,'DTE was never active before the request'
+                assert bool(lib.data_active(state)) == (frequency!=2400)
+                if frequency==2400:
+                    before=lib.consumed();silence=np.zeros(8000,dtype=np.int16);extra_out=np.zeros_like(silence)
+                    lib.v90_startup_process(state,extra_out,silence,len(silence))
+                    assert lib.consumed()==before,'DTE consumed during retraining'
+            lib.destroy(state)
     print('PASS: caller retrain recognition,70ms silence,Tone B and40ms reversal reply; off-band rejection')
+
+    # Optional private hardware recording: normal data must not false-trigger,
+    # but the caller's late real Tone A must clamp the data transmitter.
+    if '--data-retrain' in sys.argv:
+        recording=np.fromfile(sys.argv[1],dtype='<i2')
+        state=lib.create(0);lib.data_mode(state)
+        normal=recording[24*8000:69*8000];out=np.zeros_like(normal)
+        lib.v90_startup_process(state,out,normal,len(normal))
+        assert lib.retrains(state)==0,'false retrain on real upstream data'
+        late=recording[69*8000:88*8000];out=np.zeros_like(late)
+        lib.v90_startup_process(state,out,late,len(late))
+        assert lib.retrains(state)==1 and not lib.data_active(state)
+        lib.destroy(state)
+        print('PASS: real upstream data does not trigger retrain; recorded late Tone A clamps transmitter')
 
     for boundary in range(2000,2040):
         t=np.arange(4000); b=info0a(); signs=np.r_[1,(-1.)**np.cumsum(b)]

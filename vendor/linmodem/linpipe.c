@@ -51,6 +51,7 @@ void pipe_modem(void)
     s16 in_buf[2048], out_buf[2048];
     u8 pay[4096], g711out[2048], data[1024];
     int pty, len, i, n, last_state = -1, last_sm = -1, frames = 0;
+    int pty_reported = 0;
     long long rx_acc = 0; int rx_cnt = 0;
     FILE *cap = NULL, *txcap = NULL;
     /* Legacy DSP diagnostics use printf. Reserve the original stdout for
@@ -104,6 +105,11 @@ void pipe_modem(void)
            sm_put_bit drops silently once its bounded FIFO is full. */
         int room = dce->tx_fifo.max_size - sm_size(&dce->tx_fifo);
         if (room > (int)sizeof(data)) room = sizeof(data);
+        /* CTS equivalent for the virtual DTE: leave bytes in the PTY while
+           V.90 retrains, preserving bounded backpressure and the PPP process. */
+        if (pty_reported && dce->state == SM_V90 &&
+            (!dce->u.v90_state.startup.phase4_active ||
+             dce->u.v90_state.startup.phase4.stage != 4)) room = 0;
         n = room > 0 ? read(pty, data, room) : 0;
         for (i = 0; i < n; i++) sm_put_bit(&dce->tx_fifo, data[i]);
 
@@ -144,7 +150,8 @@ void pipe_modem(void)
             int st = lm_get_state(dce);
             if (st != last_state) {
                 last_state = st;
-                if (st == LM_STATE_CONNECTED) {
+                if (st == LM_STATE_CONNECTED && !pty_reported) {
+                    pty_reported = 1;
                     fprintf(stderr, "[linmodem] CONNECTED -> pty %s\n", ptsname(pty)); fflush(stderr);
                     dprintf(3, "{\"event\":\"pty-opened\",\"slavePath\":\"%s\",\"engine\":\"linmodem\"}\n", ptsname(pty));
                 }

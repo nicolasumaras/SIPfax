@@ -149,10 +149,10 @@ static void receive_tone(V90Startup *s, int16_t input)
     double coherent=2*power/(s->tone_energy/40+1);
     double refpower=s->ref_re*s->ref_re+s->ref_im*s->ref_im;
     double dot=(re*s->ref_re+im*s->ref_im)/sqrt(power*refpower+1);
-    /* V.90 9.5.1.2: a caller's sustained Tone A during startup requests
-       retraining. Preserve the capability exchange; silence70ms then Tone B.
-       Data-mode retraining additionally needs DTE clamping and is separate. */
-    if(s->ranging_state==9 && (!s->phase4_active || s->phase4.stage<4)) {
+    /* V.90 9.5.1.2: sustained Tone A requests retraining, including data
+       mode. Reset the data pump so no DTE bits are consumed or delivered
+       during retraining; the outer PTY/FIFOs and PPP session remain intact. */
+    if(s->ranging_state==9) {
         if(power>40000 && coherent>.35 && refpower>40000 && dot>.95)
             ++s->retrain_tone_windows;
         else s->retrain_tone_windows=0;

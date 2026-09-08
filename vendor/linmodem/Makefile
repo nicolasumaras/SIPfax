@@ -6,10 +6,10 @@ LDFLAGS= -g
 OBJS= lm.o lmsim.o lmreal.o lmsoundcard.o serial.o atparser.o linpipe.o v34_phase2.o \
       dsp.o fsk.o v8.o v21.o v23.o dtmf.o \
       v34.o v34table.o v22.o v34eq.o \
-      v90.o v90startup.o v90table.o
+      v90.o v90startup.o v90dil.o v90table.o
 INCLUDES= display.h   fsk.h       v21.h       v34priv.h   v90priv.h \
           dsp.h       lm.h        v23.h       v8.h \
-          dtmf.h      lmstates.h  v34.h       v90.h v90startup.h
+          dtmf.h      lmstates.h  v34.h       v90.h v90startup.h v90dil.h
 PROG= lm
 
 ifdef USE_X11

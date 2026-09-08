@@ -294,7 +294,7 @@ With `ufw`:
 sudo ufw default deny incoming
 sudo ufw allow from <admin-cidr> to any port 22 proto tcp
 sudo ufw allow from <freepbx-ip> to any port 5060 proto udp
-sudo ufw allow from <freepbx-ip> to any port 40000 proto udp
+sudo ufw allow from <freepbx-ip> to any port 40000:40100 proto udp
 sudo ufw enable
 sudo ufw status verbose
 ```
@@ -313,6 +313,31 @@ helper enables `net.ipv4.ip_forward=1` and
 `net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`, then applies the
 per-call ruleset. On `ip-down`, it removes the per-call ruleset and disables
 forwarding after the last active SIPfax PPP lease is gone.
+
+## Multiple lines, admin UI, and the FreePBX trunk
+
+SIPfax answers up to `SIPFAX_MAX_SESSIONS` concurrent calls. Each call gets its
+own RTP port (from `SIPFAX_RTP_PORT_RANGE`), modem process, and pppd with a
+distinct address from `SIPFAX_PPP_POOL`. Size the cap to your CPU (each modem
+datapump is ~1% of a core) and keep the RTP range and pool large enough.
+
+**Config file.** On first start SIPfax seeds a JSON config from the `SIPFAX_*`
+vars and writes it to `SIPFAX_CONFIG_FILE` (default `/etc/sipfax/config.json`).
+After that, the file is the source of truth and the admin UI edits it.
+
+**Admin UI.** `http://<sipfax-vm-ip>:8080/admin` — manage PPP users, the cap, the
+live list of active lines, and the generated FreePBX trunk snippet. It is gated
+by HTTP Basic auth and stays disabled until an admin password is set
+(`SIPFAX_ADMIN_PASSWORD` seed, or set one in the config file). User and cap
+changes apply live (no dropped calls); port/CIDR changes need a restart. To reach
+it on the LAN set `SIPFAX_OPERATOR_HOST=0.0.0.0` and put HTTPS in front (reverse
+proxy) — Basic auth sends credentials on every request.
+
+**FreePBX trunk.** Configure SIPfax as a **chan_pjsip trunk** (Connectivity →
+Trunks → Add SIP trunk), no registration, codecs `ulaw,alaw`, with **Maximum
+Channels = `SIPFAX_MAX_SESSIONS`**. Route inbound DIDs to the trunk; each
+simultaneous dial-in becomes a separate channel → a separate SIPfax line. Copy
+the ready-made config from the admin UI or `GET /freepbx/pjsip.conf`.
 
 ## Verification
 

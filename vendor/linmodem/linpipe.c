@@ -1,0 +1,130 @@
+/*
+ * SIPfax engine driver for linmodem: audio over stdio as G.711 (8 kHz, native,
+ * no resampling), data over a pty for pppd, control on fd 3 — the same contract
+ * as the slmodem bridge. Answers the call (V.8 -> highest negotiated modulation,
+ * incl. the V.90 server path being developed).
+ */
+#define _XOPEN_SOURCE 600
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <strings.h>
+#include "lm.h"
+
+extern struct sm_hw_info sm_hw_null;
+extern char *sm_states_str[];
+
+static const char *st_name(int s){ return (s>=0 && s<256 && sm_states_str[s]) ? sm_states_str[s] : "?"; }
+
+/* ---- G.711 (CCITT reference) ---- */
+#define G711_BIAS 0x84
+#define G711_CLIP 8159
+static int g_alaw = 0;
+static s16 ulaw2lin(u8 u){ u=~u; int t=((u&0x0f)<<3)+G711_BIAS; t<<=((unsigned)u&0x70)>>4; return (s16)((u&0x80)?(G711_BIAS-t):(t-G711_BIAS)); }
+static u8 lin2ulaw(s16 pcm){ int s=(pcm>>8)&0x80; if(s)pcm=(s16)-pcm; if(pcm>G711_CLIP)pcm=G711_CLIP; int m=pcm+G711_BIAS,e=7; for(int k=0x4000;e>0&&!(m&k);k>>=1)e--; int man=(m>>(e+3))&0x0f; return (u8)(~(s|(e<<4)|man)); }
+static s16 alaw2lin(u8 a){ a^=0x55; int t=(a&0x0f)<<4,seg=((unsigned)a&0x70)>>4; if(seg==0)t+=8; else if(seg==1)t+=0x108; else {t+=0x108;t<<=seg-1;} return (s16)((a&0x80)?t:-t); }
+static u8 lin2alaw(s16 pcm){ int s=((~pcm)>>8)&0x80; if(!s)pcm=(s16)-pcm; if(pcm>0x7fff)pcm=0x7fff; u8 a; if(pcm<256)a=(u8)(pcm>>4); else {int e=7;for(int k=0x4000;e>1&&!(pcm&k);k>>=1)e--; int man=(pcm>>(e+3))&0x0f; a=(u8)((e<<4)|man);} return (u8)((a^0x55)|s); }
+static s16 g711_dec(u8 v){ return g_alaw?alaw2lin(v):ulaw2lin(v); }
+static u8  g711_enc(s16 v){ return g_alaw?lin2alaw(v):lin2ulaw(v); }
+
+/* ---- exact framed I/O (2-byte BE length + payload), matching SIPfax ---- */
+static int read_full(int fd,void*b,int n){ unsigned char*p=b; int g=0; while(g<n){ int r=read(fd,p+g,n-g); if(r==0)return 0; if(r<0){if(errno==EINTR)continue;return -1;} g+=r; } return 1; }
+static int write_full(int fd,const void*b,int n){ const unsigned char*p=b; int w=0; while(w<n){ int r=write(fd,p+w,n-w); if(r<0){if(errno==EINTR)continue;return -1;} w+=r; } return 1; }
+static int read_frame(int fd,u8*pay,int cap,int*len){ u8 h[2]; int r=read_full(fd,h,2); if(r<=0)return r; int n=(h[0]<<8)|h[1]; if(n>cap)return -1; r=read_full(fd,pay,n); if(r<=0)return -1; *len=n; return 1; }
+static int write_frame(int fd,const u8*pay,int n){ u8 h[2]={(u8)(n>>8),(u8)(n&0xff)}; if(write_full(fd,h,2)<0)return -1; return write_full(fd,pay,n); }
+
+void pipe_modem(void)
+{
+    struct sm_state sm1, *dce = &sm1;
+    s16 in_buf[2048], out_buf[2048];
+    u8 pay[4096], g711out[2048], data[1024];
+    int pty, len, i, n, last_state = -1, last_sm = -1, frames = 0;
+    long long rx_acc = 0; int rx_cnt = 0;
+    FILE *cap = NULL, *txcap = NULL;
+
+    const char *codec = getenv("SIPFAX_MODEM_CODEC");
+    if (codec && (!strcasecmp(codec,"PCMA")||!strcasecmp(codec,"alaw"))) g_alaw = 1;
+
+    /* optional: dump decoded upstream (modem -> us) S16LE @8k for offline analysis */
+    char capbuf[256], txbuf[256];
+    const char *cappath = getenv("SIPFAX_LINMODEM_CAPTURE");
+    if (cappath) { snprintf(capbuf,sizeof(capbuf),"%s.%d",cappath,(int)getpid()); cap = fopen(capbuf, "wb"); }
+    /* optional: dump OUR transmitted S16LE (us -> modem) to verify Phase 3 S/PP/TRN */
+    const char *txpath = getenv("SIPFAX_LINMODEM_TXCAP");
+    if (txpath) { snprintf(txbuf,sizeof(txbuf),"%s.%d",txpath,(int)getpid()); txcap = fopen(txbuf, "wb"); }
+
+    pty = open("/dev/ptmx", O_RDWR);
+    if (pty < 0) { perror("/dev/ptmx"); return; }
+    grantpt(pty); unlockpt(pty);
+    fcntl(pty, F_SETFL, O_NONBLOCK);
+    dprintf(3, "{\"event\":\"started\",\"engine\":\"linmodem\"}\n");
+    fprintf(stderr, "[linmodem] pipe engine up (codec=%s cap=%s)\n", g_alaw?"alaw":"ulaw", cappath?cappath:"-"); fflush(stderr);
+
+    lm_init(dce, &sm_hw_null, "v90");
+    lm_start_receive(dce);         /* sets SM_RECEIVE -> immediate V.8 answer + ANSam */
+    /* NOTE: do NOT force SM_TEST_RING here — that is the simulation-only ring path
+       (5s ring_timer) and delays ANSam by 5s, desyncing the real modem's V.8. */
+
+    for (;;) {
+        if (read_frame(0, pay, sizeof(pay), &len) <= 0) break;   /* RTP closed */
+        if (len > (int)(sizeof(in_buf)/2)) len = sizeof(in_buf)/2;
+        for (i = 0; i < len; i++) in_buf[i] = g711_dec(pay[i]);
+        if (cap) fwrite(in_buf, 2, len, cap);
+        for (i = 0; i < len; i++) { int a = in_buf[i]<0?-in_buf[i]:in_buf[i]; rx_acc += a; rx_cnt++; }
+
+        /* pty -> modem tx data */
+        n = read(pty, data, sizeof(data));
+        for (i = 0; i < n; i++) sm_put_bit(&dce->tx_fifo, data[i]);
+
+        sm_process(dce, out_buf, in_buf, len);
+
+        /* modem rx data -> pty */
+        {
+            struct sm_fifo *f = &dce->rx_fifo;
+            int size = f->eptr - f->rptr;
+            if (size > f->size) size = f->size;
+            if (size > 0) {
+                int w = write(pty, f->rptr, size);
+                if (w > 0) { f->rptr += w; f->size -= w; if (f->rptr == f->eptr) f->rptr = f->sptr; }
+            }
+        }
+
+        if (txcap) fwrite(out_buf, 2, len, txcap);
+        for (i = 0; i < len; i++) g711out[i] = g711_enc(out_buf[i]);
+        if (write_frame(1, g711out, len) < 0) break;
+
+        /* log every internal state transition (V.8 -> datapump) to stderr */
+        if (dce->state != last_sm) {
+            fprintf(stderr, "[linmodem] state %s -> %s\n", st_name(last_sm), st_name(dce->state));
+            fflush(stderr);
+            last_sm = dce->state;
+        }
+
+        /* periodic RX level (confirms we hear the modem's upstream) ~1/s */
+        if (++frames % 50 == 0) {
+            int rms = rx_cnt ? (int)(rx_acc / rx_cnt) : 0;
+            fprintf(stderr, "[linmodem] t=%ds rx_avg=%d state=%s\n", frames/50, rms, st_name(dce->state));
+            fflush(stderr);
+            rx_acc = 0; rx_cnt = 0;
+        }
+
+        /* report connection state changes on fd 3 */
+        {
+            int st = lm_get_state(dce);
+            if (st != last_state) {
+                last_state = st;
+                if (st == LM_STATE_CONNECTED) {
+                    fprintf(stderr, "[linmodem] CONNECTED -> pty %s\n", ptsname(pty)); fflush(stderr);
+                    dprintf(3, "{\"event\":\"pty-opened\",\"slavePath\":\"%s\",\"engine\":\"linmodem\"}\n", ptsname(pty));
+                }
+            }
+        }
+    }
+    if (cap) fclose(cap);
+    if (txcap) fclose(txcap);
+    fprintf(stderr, "[linmodem] call ended after %d frames, final state %s\n", frames, st_name(last_sm)); fflush(stderr);
+    close(pty);
+}

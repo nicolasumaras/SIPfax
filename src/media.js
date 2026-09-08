@@ -146,6 +146,41 @@ export class RtpEndpoint extends EventEmitter {
   }
 }
 
+/**
+ * Allocates even RTP ports from a configured range, one per concurrent call.
+ * (Even ports for RTP; the odd port above each is conventionally RTCP.)
+ */
+export class RtpPortPool {
+  constructor({ range = [40000, 40100] } = {}) {
+    const [lo, hi] = range;
+    this.lo = lo % 2 === 0 ? lo : lo + 1;
+    this.hi = hi;
+    this.used = new Set();
+  }
+
+  allocate() {
+    for (let port = this.lo; port <= this.hi; port += 2) {
+      if (!this.used.has(port)) {
+        this.used.add(port);
+        return port;
+      }
+    }
+    return null; // exhausted
+  }
+
+  release(port) {
+    this.used.delete(port);
+  }
+
+  get capacity() {
+    return Math.floor((this.hi - this.lo) / 2) + 1;
+  }
+
+  get available() {
+    return this.capacity - this.used.size;
+  }
+}
+
 export class ModemBridge extends EventEmitter {
   constructor({ modem = null } = {}) {
     super();

@@ -149,6 +149,22 @@ static void receive_tone(V90Startup *s, int16_t input)
     double coherent=2*power/(s->tone_energy/40+1);
     double refpower=s->ref_re*s->ref_re+s->ref_im*s->ref_im;
     double dot=(re*s->ref_re+im*s->ref_im)/sqrt(power*refpower+1);
+    /* V.90 9.5.1.2: a caller's sustained Tone A during startup requests
+       retraining. Preserve the capability exchange; silence70ms then Tone B.
+       Data-mode retraining additionally needs DTE clamping and is separate. */
+    if(s->ranging_state==9 && (!s->phase4_active || s->phase4.stage<4)) {
+        if(power>40000 && coherent>.35 && refpower>40000 && dot>.95)
+            ++s->retrain_tone_windows;
+        else s->retrain_tone_windows=0;
+        if(s->retrain_tone_windows>=11) {
+            long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
+            v90_startup_init(s,law);
+            s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
+            s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
+            fprintf(stderr,"[v90p2] respond to caller retrain %u at %.6fs; silence70ms then Tone B\n",retrains,now/8000.0);
+            return;
+        }
+    }
     if (power > 40000 && coherent > 0.30) {
         if (s->tone_locked >= 3 && dot < -0.8) {
             long when=reversal_boundary(s);
@@ -198,7 +214,7 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
         receive(s, in[i]);
         receive_tone(s, in[i]);
         int symbol = (s->samples * 3) / 40;
-        if (symbol < 63 && symbol != s->tx_symbol) {
+        if (!s->retrains && symbol < 63 && symbol != s->tx_symbol) {
             s->tx_symbol = symbol;
             if (symbol && s->info0d[symbol-1]) s->tx_sign = -s->tx_sign;
         }
@@ -278,5 +294,6 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 }
             }
         }
+        if(s->samples<s->retrain_mute_until)out[i]=0;
     }
 }

@@ -453,6 +453,11 @@ int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
         }
     }
     int ret = 0;
+    if(!s->calling && s->state==V8_JM_SEND && !s->got_cj &&
+       v8_cj_receive(&s->cj,input,nb_samples)) {
+        s->got_cj=1;
+        fprintf(stderr,"[v8] coherent three-octet CJ acquired after %.6fs of JM\n",s->cj.found_at/8000.0);
+    }
 
     /* modulation part */
     switch (s->state) {
@@ -648,6 +653,7 @@ int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
                        require >=400ms of JM before we accept one */
                     s->got_cj = 0;
                     s->data_zero_count = 0;
+                    v8_cj_init(&s->cj);
                     sm_set_timer(&s->v8_start_timer, 400);
                     s->state = V8_JM_SEND;
                     s->selected_mod_mask = s->modulation_mask & s->decoded_modulations;

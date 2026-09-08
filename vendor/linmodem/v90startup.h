@@ -32,6 +32,8 @@ typedef struct {
     int info1_received, upstream_rate, uinfo, downstream_rate;
     double probe_energy;
     int probe_samples;
+    unsigned retrains,retrain_tone_windows;
+    long retrain_mute_until;
 
 
 } V90Startup;

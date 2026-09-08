@@ -30,6 +30,9 @@ int received(V90Startup *s) { return s->info0_received; }
 int phase2_complete(V90Startup *s) { return s->info1_received && s->upstream_rate==4 && s->downstream_rate==6 && s->uinfo==90; }
 long tx_reversal(V90Startup *s) { return s->first_tx_reversal; }
 long rx_reversal(V90Startup *s) { return s->second_rx_reversal; }
+void phase3(V90Startup *s){s->samples=20000;s->info0_received=1;s->info0_at=0;s->ranging_state=9;}
+unsigned retrains(V90Startup *s){return s->retrains;}
+long mute_until(V90Startup *s){return s->retrain_mute_until;}
 void destroy(void *s) { free(s); }
 ''')
     libpath = Path(tmp)/'test.so'
@@ -40,6 +43,8 @@ void destroy(void *s) { free(s); }
     for name in ['tx_reversal','rx_reversal']:
         getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long
     lib.phase2_complete.argtypes=[C.c_void_p]
+    lib.phase3.argtypes=[C.c_void_p];lib.retrains.argtypes=[C.c_void_p]
+    lib.mute_until.argtypes=[C.c_void_p];lib.mute_until.restype=C.c_long
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.v90_startup_process.argtypes=[C.c_void_p,ptr,ptr,C.c_int]
@@ -76,6 +81,33 @@ void destroy(void *s) { free(s); }
             lib.destroy(s)
     print('PASS: both PCM laws, wire DPSK/CRC, 14 receive phases with guard/noise, invalid CRC rejected')
 
+    # A caller retrain must be sustained, then receive silence70ms and Tone B,
+    # without another INFO0 message. Keep the exact existing40ms reversal reply.
+    for frequency in [1800,1920,2400]:
+        state=lib.create(0);lib.phase3(state)
+        t=np.arange(2400);pcm=(2500*np.cos(2*np.pi*frequency*t/8000+.4)+
+            2200*np.cos(2*np.pi*1800*t/8000+.7)).astype(np.int16)
+        out=np.zeros_like(pcm)
+        for start in range(0,len(pcm),37):
+            lib.v90_startup_process(state,out[start:start+37],pcm[start:start+37],len(pcm[start:start+37]))
+        assert lib.retrains(state)==(frequency==2400)
+        if frequency==2400:
+            end=lib.mute_until(state)-20000;begin=end-560
+            assert begin>=400 and np.all(out[begin:end]==0)
+            z=out[end:end+400]*np.exp(-2j*np.pi*1200*np.arange(end,end+400)/8000)
+            assert abs(z.sum())>500000,'no coherent Tone B after silence'
+            # Reverse the continuing Tone A and verify320-sample response.
+            extra=np.arange(2400,3400)
+            reverse=2700
+            sign=np.where(extra>=reverse,-1,1)
+            pcm2=(2500*sign*np.cos(2*np.pi*2400*extra/8000+.4)+
+                2200*np.cos(2*np.pi*1800*extra/8000+.7)).astype(np.int16)
+            out2=np.zeros_like(pcm2)
+            lib.v90_startup_process(state,out2,pcm2,len(pcm2))
+            assert abs(lib.tx_reversal(state)-(20000+reverse+320))<=8
+        lib.destroy(state)
+    print('PASS: caller retrain recognition,70ms silence,Tone B and40ms reversal reply; off-band rejection')
+
     for boundary in range(2000,2040):
         t=np.arange(4000); b=info0a(); signs=np.r_[1,(-1.)**np.cumsum(b)]
         idx=np.minimum(t*3//40,len(signs)-1)
@@ -107,6 +139,9 @@ void destroy(void *s) { free(s); }
     for i in range(13000,14000):
         sym=min((i-13000)*3//40,len(signs)-1)
         pcm[i]=2500*signs[sym]*np.cos(2*np.pi*2400*i/8000+0.73)
+    # End this Phase2-only stimulus in silence. Continuing Tone A here would
+    # now correctly request retraining rather than leave Phase2 completed.
+    pcm[14000:]=0
     pcm=pcm.astype(np.int16);out=np.zeros_like(pcm);state=lib.create(0)
     for start in range(0,len(pcm),160):
         lib.v90_startup_process(state,out[start:start+160],pcm[start:start+160],len(pcm[start:start+160]))

@@ -1,4 +1,5 @@
 
+#include "v8cj.h"
 #define V8_SAMPLE_RATE 8000
 
 /* V8 tone ANSam tone synthesis */
@@ -72,6 +73,7 @@ typedef struct {
     int got_cj;
     int bits_since_octet;  /* V.21 bits since last parsed octet (CM-absent detect) */
     int data_zero_count;
+    V8Cj cj;
 
     int selected_mod_mask;   /* selected modulation mask */
     int selected_modulation; /* see V8_MOD_xxx */

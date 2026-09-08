@@ -67,13 +67,13 @@ test('deployment assets document controlled V.22bis start-mode fallback', async 
   assert.match(runbook, /restore `SIPFAX_MODEM_START_MODE=v8`/);
 });
 
-test('deploy runbook documents pppd hooks, nftables checks, and per-call ppp secrets', async () => {
+test('deploy runbook documents pppd hooks, nftables checks, and shared PPP secrets', async () => {
   const [envExample, runbook] = await Promise.all([
     readFile(new URL('../deploy/sipfax.env.example', import.meta.url), 'utf8'),
     readFile(new URL('../deploy/README.md', import.meta.url), 'utf8')
   ]);
 
-  assert.match(envExample, /per-call[\s\S]*chap-secrets\/pap-secrets/);
+  assert.match(envExample, /ALL configured users[\s\S]*0600[\s\S]*secrets file so concurrent calls/);
   assert.match(runbook, /\/etc\/ppp\/ip-up\.d\/sipfax/);
   assert.match(runbook, /\/etc\/ppp\/ip-down\.d\/sipfax/);
   assert.match(runbook, /Operator review is required/);

@@ -31,3 +31,18 @@ Tests: tools/tests/v90-startup.py covers both PCM laws, emitted DPSK bits, indep
 Live verification: attempt e0ef6d20-d87b-4a2f-9f8a-1ba4d9a9ff88, PID5564, log `[v90p2] CRC-valid INFO0a at 0.061s: ack=0 3429=1`. This proves the first capability-exchange stage only. Ended via API and restored V.22bis service, verified active. **After any config restore explicitly chown sipfax:sipfax and chmod600**: shutil.copy2 backup was root-owned and cp-p initially caused EACCES; corrected.
 
 Next: implement V.90 §9.2.1 timed ToneA reversal detection -> ToneB reversal after40±1ms ->10ms ToneB then silence -> second reversal/ranging -> receive L1/L2 -> second probing exchange -> INFO1d/INFO1a. V90Startup currently holds ToneB forever after INFO0d; no complete Phase2, DIL, Phase4 or upstream decoder yet. Do not use ordinary V.34 answer roles; V.90 digital side sends1200Hz and receives2400Hz regardless of answering the call. Spec remains available at the ITU reference above.
+
+## First ranging exchange verified (8b5b5c4)
+
+Implemented raw-sample phase-reversal boundary estimation, scheduled ToneB response40ms later, 10ms tail then silence, and second ToneA reversal/RTD measurement. Synthetic tests sweep40 reversal offsets with equal-amplitude1800Hz guard and noise, assert40±1ms reply, second reversal timestamp, and silence after80samples. Existing INFO and recording tests pass. Hardware guard power is substantial: RMS2424, Fourier amplitudes~1268 at1800 and1153 at2400; pure-tone coherence threshold0.8 rejected it. Threshold0.30 plus phase lock fixes that. One mixed window must not erase the prior phase reference.
+
+Variable legacy V.8 CJ detection delay exceeded200ms: PID5717 contained valid INFO0a at4.889s while CJ was detected5.4s. Expanded V.8 history to1s. This retains the message but does not fix CJ timing itself. Local recordings work/v90-rx-{5717,5812}.s16 expose this. Beware interpreting second reversal from a NONinteractive recorded stream as a response: its2.04s repeats are recovery, not actual measured RTT; a timeout check remains necessary.
+
+Successful live attempt66e594f0-12da-4ee8-b2bc-499f23cf0ab6, PID5829:
+- INFO0a CRC valid at -0.011s relative to startup, captured via history.
+- A reversal0.250625s -> B scheduled and transmitted0.290625s.
+- Second A reversal0.413125s -> RTD82.500ms.
+- Capture CT105 /var/log/sipfax/linmodem-{rx,tx}.s16.5829.
+Ended with DialUpLab disconnect; restored baseline with correct config ownership and verified service active.
+
+Next implement probe receive after second reversal (L1 starts10ms later,160ms L1, up to500ms L2), then ToneB to request analogue turnaround, next reversal response40ms plus10ms tail, server L1/L2, and INFO1d/INFO1a. Current ranging_state3 holds silence; this is not Phase2 completion. Upstream decoder and phases3/4 still pending.

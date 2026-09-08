@@ -2,6 +2,7 @@
 #define V90UPSTREAM_H
 #include <stdint.h>
 #define V90_UP_TAPS 81
+#define V90_UP_PHASES 10
 #define V90_UP_FRAME 4096
 typedef struct {
     double a_re,a_im,previous_re,previous_im;
@@ -10,12 +11,12 @@ typedef struct {
     uint8_t frame[V90_UP_FRAME];
 } V90UpLane;
 typedef struct {
-    double taps[V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS],last_re,last_im;
+    double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];
     unsigned position,frames;
     long samples,last_frame_sample;
     unsigned last_length;
     uint8_t last_frame[V90_UP_FRAME];
-    V90UpLane lanes[5][2];
+    V90UpLane lanes[V90_UP_PHASES][2];
     void *opaque;
     void (*receive_frame)(void *,const uint8_t *,unsigned);
 } V90Upstream;

@@ -174,3 +174,21 @@ CT /tmp/v90-transfer.pcap copiedtowork/v90-transfer.pcap:16IPpacketsstarting05:4
 Diagnosticnovjtemporarilyaddedto/etc/ppp/options (backup/var/backups/sipfax/pre-v90-novj-options). Trialb942907d-45c7-462c-9124-c3ab953c2935 PID8110: failed678beforePPP, soheadercompressionhypothesisunresolved. **Hardwareverifiednewretrainresponse:**11callerretrainrequestsprocessed; eachre-enteredranging, measured~57msRTD,exchangedCRC-validINFO1a. Afterfallbackrequestsupstream4/downstream4/UINFO69,currentV90-onlytraininggate requiresdownstream6,sonotrainingemittedandcallerretries. Futureworkmusthandle/refuseunsupportedfallbackcoherently; cannotclaimthisisV90datarecovery. CapturesRX/TX7925and8110copiedtowork/.
 
 Finalstate: all3newcalls terminal, captureterminal, noactivehandles. RestoredPPPoptionsfrompre-v90-novjbackup, baselineconfigwithcorrectowner/mode, serviceactive. ATApass-throughremains. Noextrartppacingdropin. NativeCJ/retraincodeisdeployedbutbaselineselected. NexttargetssustainedIPtraffic/downstreamACKdelivery, novjtrialthatactuallyreachesPPP, adaptiveupstreamtiming/FEC, androbusttraining/fallback. Goalactiveandunachieved.
+
+
+## Additional bounded transfer diagnostic (2026-09-08 05:58 UTC)
+
+Trial 0c573bda-a3eb-4879-b9ef-50f110ab3776 enabled novj and prepared a small current-attempt HTTP response instead of the full attempt history. It ended Failed678 before PPP, so it provides no evidence for or against TCP header compression as the transfer-stall cause. The startup retrain responder again completed repeated ranging/INFO1 exchanges, but the caller selected unsupported downstream4. No new successful transfer. Original PPP options and baseline modem configuration restored with sipfax ownership/mode600; service active.
+
+A comparison of saved TX8042 RMS with advertised maximum power is inconclusive until ITU Table1 linear-value scaling and the actual measurement point are checked. No amplitude or negotiated constellation changes were made on that hypothesis.
+
+
+## Fractional matched filtering recovers lost upstream packets (2026-09-08)
+
+Resolved the power suspicion against ITU-T V.90 Table1/Table15: Table1 linear values match signed16 PCM (e.g. mu-law U78=3772); the -6dBm0 maximum corresponds to RMS8028, not RMS4024. TX8042 data RMS~5800 is below that maximum (approximately -8.8dBm0). The previous -2.8dBm0 estimate used an incorrect reference. No transmitter amplitude change is justified by that measurement.
+
+Independent offline replay of RX8042 raw24..85s estimates only~0.48ppm clock drift and recovers40 CRC-valid PPP frames, including9 frames of1503bytes. Native receiver before this change recovers36 total, only7 full-size. Its half-sample outputs were averages of adjacent RRC outputs, causing baseband interpolation distortion. Evaluating actual half-sample RRC taps recovers38 total; evaluating quarter-sample taps across10 symbol timing phases recoversall40, includingall9 full-size. No adaptive clock or trellis FEC is claimed: this improves the existing fixed-phase receiver. Native CPU replay remains substantially faster than real time.
+
+Changed v90upstream.c/h to four fractional RRC filters and ten timing phases, preserving CRC-gated delivery and duplicate suppression. Extended tools/tests/v90-upstream.py with configurable interval/minimum total/minimum full-size frame counts. Regression command: python3 tools/tests/v90-upstream.py ../v90-rx-8042.s16 --start 24 --end 85 --min-frames 40 --min-long-frames 9. Captures contain private authentication/traffic, remain outside the repository. Existing RX6711 three-LCP test and complete Phase4 replay pass. Local and CT native builds pass. Hardware transfer verification remains necessary.
+
+Hardware trial230c3361-3e0f-4f00-9238-d71d050f44ea (quarter-small) endedFailed678 beforePPP. It cannot establish live throughput improvement. Caller retrains eventuallyselectedunsupporteddownstream4. OriginalPPPoptions remainedselected (no novj for this trial), baseline modem configurationrestored withcorrectowner/mode, serviceactive. Newnativefilterbinary remainsdeployed butnotselected. Noactivecall/toolhandles. Nextpriority remainsintermittentPhase3startup, thenliveverificationofrecoveredlongpacketsandpublicinternet.

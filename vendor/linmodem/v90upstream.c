@@ -1,6 +1,6 @@
 /* 4800-bit/s upstream V.34 in V.90: b=12,K=0, four-point constellation.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
- * Five timing phases and both pair alignments allow CRC-based acquisition.
+ * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * This initial receiver hard-slices; trellis error correction and adaptive
  * timing recovery remain needed for difficult channels/long packets. GPL-2.0. */
 #include <math.h>
@@ -11,14 +11,15 @@ void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
     double beta=.1,sps=2.5;
-    for(int k=0;k<V90_UP_TAPS;++k) {
-        double t=(k-(V90_UP_TAPS-1)/2)/sps;
-        if(fabs(t)<1e-9)s->taps[k]=1-beta+4*beta/M_PI;
+    for(int fraction=0;fraction<4;++fraction)for(int k=0;k<V90_UP_TAPS;++k) {
+        double *taps=s->taps[fraction];
+        double t=(k-(V90_UP_TAPS-1)/2-fraction*.25)/sps;
+        if(fabs(t)<1e-9)taps[k]=1-beta+4*beta/M_PI;
         else if(fabs(fabs(t)-1/(4*beta))<1e-9)
-            s->taps[k]=beta/sqrt(2)*((1+2/M_PI)*sin(M_PI/(4*beta))+(1-2/M_PI)*cos(M_PI/(4*beta)));
-        else s->taps[k]=(sin(M_PI*t*(1-beta))+4*beta*t*cos(M_PI*t*(1+beta)))/(M_PI*t*(1-16*beta*beta*t*t));
+            taps[k]=beta/sqrt(2)*((1+2/M_PI)*sin(M_PI/(4*beta))+(1-2/M_PI)*cos(M_PI/(4*beta)));
+        else taps[k]=(sin(M_PI*t*(1-beta))+4*beta*t*cos(M_PI*t*(1+beta)))/(M_PI*t*(1-16*beta*beta*t*t));
     }
-    for(int i=0;i<5;++i)for(int j=0;j<2;++j)s->lanes[i][j].crc=0xffff;
+    for(int i=0;i<V90_UP_PHASES;++i)for(int j=0;j<2;++j)s->lanes[i][j].crc=0xffff;
 }
 static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 {
@@ -55,8 +56,8 @@ static unsigned delta(double ar,double ai,double br,double bi)
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
     for(unsigned pair=0;pair<2;++pair) {
-        V90UpLane *l=&s->lanes[time%5][pair];
-        if(((time/5)&1)==pair){l->a_re=re;l->a_im=im;l->have_a=1;}
+        V90UpLane *l=&s->lanes[time%V90_UP_PHASES][pair];
+        if(((time/V90_UP_PHASES)&1)==pair){l->a_re=re;l->a_im=im;l->have_a=1;}
         else if(l->have_a) {
             if(l->have_previous) {
                 unsigned d=delta(re,im,l->a_re,l->a_im);
@@ -71,12 +72,18 @@ void v90_upstream_receive(V90Upstream *s,int16_t input)
 {
     double phase=2*M_PI*1920*s->samples/8000.0;
     s->re[s->position]=input*cos(phase);s->im[s->position]=-input*sin(phase);
-    double re=0,im=0;
-    for(int k=0;k<V90_UP_TAPS;++k) {
-        unsigned j=(s->position+V90_UP_TAPS-k)%V90_UP_TAPS;
-        re+=s->taps[k]*s->re[j];im+=s->taps[k]*s->im[j];
+    /* Evaluate the matched filter at quarter-sample instants. Averaging
+       adjacent outputs attenuates/distorts the wideband baseband signal. */
+    for(int fraction=3;fraction>=0;--fraction) {
+        double re=0,im=0;
+        for(int k=0;k<V90_UP_TAPS;++k) {
+            unsigned j=(s->position+V90_UP_TAPS-k)%V90_UP_TAPS;
+            re+=s->taps[fraction][k]*s->re[j];
+            im+=s->taps[fraction][k]*s->im[j];
+        }
+        if(4*s->samples>=fraction)
+            symbol(s,4*s->samples-fraction,re,im);
     }
     s->position=(s->position+1)%V90_UP_TAPS;
-    if(s->samples)symbol(s,2*s->samples-1,(s->last_re+re)/2,(s->last_im+im)/2);
-    symbol(s,2*s->samples,re,im);s->last_re=re;s->last_im=im;++s->samples;
+    ++s->samples;
 }

@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <strings.h>
+#include <termios.h>
 #include "lm.h"
 
 extern struct sm_hw_info sm_hw_null;
@@ -77,6 +78,12 @@ void pipe_modem(void)
     if (pty < 0) { perror("/dev/ptmx"); close(audio_fd); return; }
     grantpt(pty); unlockpt(pty);
     fcntl(pty, F_SETFL, O_NONBLOCK);
+    /* A verified PPP frame may arrive before pppd opens the slave. Disable
+       terminal echo/translations now so it cannot loop back as modem data. */
+    struct termios tty;
+    if(tcgetattr(pty,&tty)<0){perror("pty attributes");close(pty);close(audio_fd);return;}
+    cfmakeraw(&tty);
+    if(tcsetattr(pty,TCSANOW,&tty)<0){perror("pty raw mode");close(pty);close(audio_fd);return;}
     dprintf(3, "{\"event\":\"started\",\"engine\":\"linmodem\"}\n");
     fprintf(stderr, "[linmodem] pipe engine up (codec=%s cap=%s)\n", g_alaw?"alaw":"ulaw", cappath?cappath:"-"); fflush(stderr);
 

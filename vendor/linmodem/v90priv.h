@@ -71,6 +71,7 @@ typedef struct V90State {
     int n;                  /* data bits per mapping frame (S + K) */
     s16 framebuf[6];        /* 6-sample mapping frame */
     int fpos;
+    unsigned serial_word,serial_remaining;
     void *opaque;
     int  (*get_bit)(void *opaque);
     void (*put_bit)(void *opaque, int bit);

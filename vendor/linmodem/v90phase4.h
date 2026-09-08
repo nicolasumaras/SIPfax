@@ -2,6 +2,7 @@
 #define V90PHASE4_H
 #include "v90training.h"
 #include "v90pcm.h"
+#include "v90upstream.h"
 typedef struct {
     unsigned samples,stage,rbar_end,trn_start,generated,mp_length,mp_ack,mp_announced;
     unsigned ed_frame,data_start;
@@ -9,6 +10,10 @@ typedef struct {
     V90Training rx;
     V90Cp cpt,cp;
     V90Pcm encoder;
+    V90Upstream upstream;
+    unsigned data_bits;
+    void *data_opaque;
+    int (*get_data_bit)(void *);
     uint8_t mp[132];
     int16_t frame[6];
 } V90Phase4;

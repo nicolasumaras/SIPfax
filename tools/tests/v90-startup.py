@@ -35,7 +35,7 @@ void destroy(void *s) { free(s); }
     libpath = Path(tmp)/'test.so'
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror',
                     '-I'+str(root/'vendor/linmodem'), str(wrapper),
-                    str(root/'vendor/linmodem/v90startup.c'),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),str(root/'vendor/linmodem/v90phase4.c'),str(root/'vendor/linmodem/v90pcm.c'),str(root/'vendor/linmodem/v90train_tx.c'),'-lm','-o',str(libpath)],check=True)
+                    str(root/'vendor/linmodem/v90startup.c'),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),str(root/'vendor/linmodem/v90phase4.c'),str(root/'vendor/linmodem/v90pcm.c'),str(root/'vendor/linmodem/v90upstream.c'),str(root/'vendor/linmodem/v90train_tx.c'),'-lm','-o',str(libpath)],check=True)
     lib=C.CDLL(str(libpath)); lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
     for name in ['tx_reversal','rx_reversal']:
         getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long

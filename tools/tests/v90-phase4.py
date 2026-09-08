@@ -18,7 +18,7 @@ unsigned level(V90Phase4 *s,unsigned frame,unsigned index){return v90_pcm_level(
 unsigned size(V90Phase4 *s,unsigned frame){return s->encoder.m[frame];}
 unsigned k(V90Phase4 *s){return s->encoder.k;}
 ''')
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/n) for n in ['v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/n) for n in ['v90upstream.c','v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     for name in ['start','length','data_start','ed','k']:getattr(lib,name).argtypes=[C.c_void_p]
     lib.v90_phase4_next.argtypes=[C.c_void_p,C.c_int16];lib.v90_phase4_next.restype=C.c_int16

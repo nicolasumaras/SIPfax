@@ -751,7 +751,7 @@ static void v90_receive_CP(V90EncodeState *s)
 void V90_init(struct V90State *s, int calling)
 {
     s->calling = calling;
-    s->fpos = 0;
+    s->fpos = 0;s->serial_word=0;s->serial_remaining=0;
     if (calling) {
         /* analog client: downstream decoder */
         memset(&s->dec, 0, sizeof(s->dec));
@@ -762,6 +762,34 @@ void V90_init(struct V90State *s, int calling)
         int alaw = codec && (!strcasecmp(codec, "PCMA") || !strcasecmp(codec, "alaw"));
         v90_startup_init(&s->startup, alaw);
     }
+}
+
+/* V.90 PPP serial path uses on-wire LSB-first 8N1. Legacy serial.c uses
+ * MSB-first framing, so leave other modulation modes unchanged. */
+static int v90_serial_bit(void *opaque)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    if(!s->serial_remaining) {
+        int value=sm_get_bit(&sm->tx_fifo);if(value<0)return 1;
+        s->serial_word=((unsigned)value<<1)|(1u<<9);s->serial_remaining=10;
+    }
+    unsigned bit=s->serial_word&1;s->serial_word>>=1;--s->serial_remaining;return bit;
+}
+static void v90_ppp_frame(void *opaque,const uint8_t *frame,unsigned length)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    unsigned needed=2;
+    for(unsigned j=0;j<length;++j)needed+=(frame[j]<0x20 || frame[j]==0x7d || frame[j]==0x7e)?2:1;
+    if(needed>SM_FIFO_SIZE-(unsigned)sm_size(&sm->rx_fifo)) {
+        fprintf(stderr,"[v90data] receive FIFO full; discard complete PPP frame\n");return;
+    }
+    sm_put_bit(&sm->rx_fifo,0x7e);
+    for(unsigned j=0;j<length;++j) {
+        unsigned b=frame[j];
+        if(b<0x20 || b==0x7d || b==0x7e){sm_put_bit(&sm->rx_fifo,0x7d);b^=0x20;}
+        sm_put_bit(&sm->rx_fifo,b);
+    }
+    sm_put_bit(&sm->rx_fifo,0x7e);
 }
 
 int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
@@ -781,6 +809,11 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
             output[i] = 0;
         }
     } else {
+        if(s->startup.phase4_active) {
+            V90Phase4 *p=&s->startup.phase4;
+            p->get_data_bit=v90_serial_bit;p->data_opaque=s;
+            p->upstream.receive_frame=v90_ppp_frame;p->upstream.opaque=s;
+        }
         v90_startup_process(&s->startup, output, input, nb_samples);
     }
     return 0;

@@ -468,6 +468,10 @@ enum lm_get_state_val lm_get_state(struct sm_state *s)
     switch(s->state) {
     case SM_IDLE:
         return LM_STATE_IDLE;
+    case SM_V90:
+        return s->u.v90_state.startup.phase4_active &&
+               s->u.v90_state.startup.phase4.stage==4 &&
+               s->u.v90_state.startup.phase4.upstream.frames>0 ? LM_STATE_CONNECTED:LM_STATE_CONNECTING;
     case SM_V21:
     case SM_V23: 
         return LM_STATE_CONNECTED;

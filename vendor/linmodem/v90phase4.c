@@ -26,10 +26,16 @@ static int training_bit(void *opaque)
     if(!index && s->have_cp && !s->mp_ack){s->mp_ack=1;mp_build(s);}
     return s->mp[index];
 }
+static int data_bit(void *opaque)
+{
+    V90Phase4 *s=opaque;
+    if(s->data_bits++<48*(s->encoder.k+s->encoder.s))return 1;
+    return s->get_data_bit?s->get_data_bit(s->data_opaque):1;
+}
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 {
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
-    v90_training_init(&s->rx);s->rx.cp_mode=1;
+    v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init(&s->upstream);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
 }
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
@@ -47,10 +53,10 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         }
     }
     if(s->rx.e_seen && !s->rx_e_logged) {
-        s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; B1/data receiver pending\n",s->samples/8000.0);
+        s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; starting upstream B1/data receiver\n",s->samples/8000.0);
     }
     if(s->stage==2 && s->ed_frame && s->samples-s->trn_start==(s->ed_frame+2)*6) {
-        if(v90_pcm_init(&s->encoder,&s->cp,0,0)==0) {
+        if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
             s->stage=4;s->data_start=s->samples;
             fprintf(stderr,"[v90p4] Ed complete; transmit B1d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable data constellation\n");}
@@ -75,9 +81,10 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
     }
     if(s->stage==4) {
         unsigned n=s->samples-s->data_start;
+        if(s->rx_e_logged)v90_upstream_receive(&s->upstream,input);
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
-        if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; sending scrambled idle ones, upstream data decode pending\n");
+        if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; bidirectional PPP data path enabled\n");
     }
     ++s->samples;return out;
 }

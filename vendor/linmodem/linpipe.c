@@ -100,7 +100,11 @@ void pipe_modem(void)
         for (i = 0; i < len; i++) { int a = in_buf[i]<0?-in_buf[i]:in_buf[i]; rx_acc += a; rx_cnt++; }
 
         /* pty -> modem tx data */
-        n = read(pty, data, sizeof(data));
+        /* Leave excess bytes in the PTY so the kernel applies backpressure.
+           sm_put_bit drops silently once its bounded FIFO is full. */
+        int room = dce->tx_fifo.max_size - sm_size(&dce->tx_fifo);
+        if (room > (int)sizeof(data)) room = sizeof(data);
+        n = room > 0 ? read(pty, data, room) : 0;
         for (i = 0; i < n; i++) sm_put_bit(&dce->tx_fifo, data[i]);
 
         sm_process(dce, out_buf, in_buf, len);

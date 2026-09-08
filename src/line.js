@@ -13,7 +13,12 @@ export class Line extends EventEmitter {
     this.codec = codec;
     this.rtpPort = rtpPort;
     this.modem = modem;
-    this.rtpEndpoint = new RtpEndpoint({ host: rtpHost, port: rtpPort });
+    // Development opt-in until hardware trials establish a suitable buffer.
+    const playoutDelayMs = Number(process.env.SIPFAX_RTP_PLAYOUT_MS ?? 0);
+    if (!Number.isFinite(playoutDelayMs) || playoutDelayMs < 0 || playoutDelayMs > 500) {
+      throw new Error('SIPFAX_RTP_PLAYOUT_MS must be between 0 and 500');
+    }
+    this.rtpEndpoint = new RtpEndpoint({ host: rtpHost, port: rtpPort, playoutDelayMs });
     this.modemBridge = new ModemBridge({ modem });
     this.lastControl = {};
     this.metrics = { rtpFramesAccepted: 0, rtpFramesDropped: 0 };
@@ -24,6 +29,9 @@ export class Line extends EventEmitter {
     });
     this.rtpEndpoint.on('dropped', () => {
       this.metrics.rtpFramesDropped += 1;
+    });
+    this.rtpEndpoint.on('timing', ({ reason }) => {
+      this.emit('backend-log', { callId, line: `[rtp] ${reason}` });
     });
     this.modemBridge.on('outbound-audio', (audio) => {
       this.rtpEndpoint.sendPayload(audio.payload, {

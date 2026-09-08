@@ -1,6 +1,7 @@
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
+import { RtpPacer } from './rtp-pacer.js';
 
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
@@ -68,7 +69,7 @@ export function buildRtpPacket({ payloadType, sequenceNumber, timestamp, ssrc, p
 }
 
 export class RtpEndpoint extends EventEmitter {
-  constructor({ host, port, ssrc = randomUInt32() }) {
+  constructor({ host, port, ssrc = randomUInt32(), playoutDelayMs = 0 }) {
     super();
     this.host = host;
     this.port = port;
@@ -78,6 +79,11 @@ export class RtpEndpoint extends EventEmitter {
     this.ssrc = ssrc;
     this.outboundSequenceNumber = 0;
     this.outboundTimestamp = 0;
+    this.pacer = playoutDelayMs > 0 ? new RtpPacer({
+      delayMs: playoutDelayMs,
+      send: ({ packet, remote }) => this.socket.send(packet, remote.port, remote.address),
+      issue: (reason) => this.emit('timing', { reason })
+    }) : null;
 
     this.socket.on('message', (message, remote) => {
       const packet = parseRtpPacket(message);
@@ -102,6 +108,7 @@ export class RtpEndpoint extends EventEmitter {
   }
 
   setSessionCodec(codec) {
+    this.pacer?.reset();
     this.expectedPayloadType = codec?.payloadType ?? null;
     this.outboundSequenceNumber = 0;
     this.outboundTimestamp = 0;
@@ -123,6 +130,7 @@ export class RtpEndpoint extends EventEmitter {
 
     this.outboundSequenceNumber = (this.outboundSequenceNumber + 1) & 0xffff;
     this.outboundTimestamp = (this.outboundTimestamp + timestampIncrement) >>> 0;
+    if (this.pacer) return this.pacer.push({ packet, remote: { ...this.remote } }, timestampIncrement / 8);
     this.socket.send(packet, this.remote.port, this.remote.address);
     return true;
   }
@@ -134,6 +142,7 @@ export class RtpEndpoint extends EventEmitter {
   }
 
   stop() {
+    this.pacer?.reset();
     return new Promise((resolve, reject) => {
       this.socket.close((error) => {
         if (error) {

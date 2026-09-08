@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory() as tmp:
 #include "v90startup.h"
 void *create(int law) { V90Startup *s=malloc(sizeof(*s)); v90_startup_init(s,law); return s; }
 int received(V90Startup *s) { return s->info0_received; }
+int phase2_complete(V90Startup *s) { return s->info1_received && s->upstream_rate==4 && s->downstream_rate==6 && s->uinfo==90; }
 long tx_reversal(V90Startup *s) { return s->first_tx_reversal; }
 long rx_reversal(V90Startup *s) { return s->second_rx_reversal; }
 void destroy(void *s) { free(s); }
@@ -38,6 +39,7 @@ void destroy(void *s) { free(s); }
     lib=C.CDLL(str(libpath)); lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
     for name in ['tx_reversal','rx_reversal']:
         getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long
+    lib.phase2_complete.argtypes=[C.c_void_p]
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.v90_startup_process.argtypes=[C.c_void_p,ptr,ptr,C.c_int]
@@ -89,6 +91,31 @@ void destroy(void *s) { free(s); }
         assert np.any(out[reply:reply+80]), 'missing reversed Tone B'
         lib.destroy(state)
     print('PASS: 40 reversal offsets, 40ms reply within 1ms, second reversal, 10ms tone tail')
+
+    b=(C.c_ubyte*109)();lib.v90_info1d(b);b=list(b)
+    assert b[89:105]==crc(b[12:89]) and b[61]==1 and b[66:70]==[0,1,0,0]
+    t=np.arange(18000); signs=np.r_[1,(-1.)**np.cumsum(info0a())]
+    sign=signs[np.minimum(t*3//40,len(signs)-1)].copy()
+    for boundary in [2000,3200,6800]:sign[t>=boundary]*=-1
+    pcm=2500*sign*np.cos(2*np.pi*2400*t/8000+0.73)
+    pcm[6880:11400]=0
+    b=[1]*4+[0,1,1,1,0,0,1,0]+[0]*38
+    for start,width,value in [(25,7,90),(34,3,4),(37,3,6)]:
+        b[start:start+width]=[(value>>k)&1 for k in range(width)]
+    b+=crc(b[12:50])+[1]*4
+    signs=np.r_[1,(-1.)**np.cumsum(b)]
+    for i in range(13000,14000):
+        sym=min((i-13000)*3//40,len(signs)-1)
+        pcm[i]=2500*signs[sym]*np.cos(2*np.pi*2400*i/8000+0.73)
+    pcm=pcm.astype(np.int16);out=np.zeros_like(pcm);state=lib.create(0)
+    for start in range(0,len(pcm),160):
+        lib.v90_startup_process(state,out[start:start+160],pcm[start:start+160],len(pcm[start:start+160]))
+    assert lib.phase2_complete(state), 'INFO1a parameters not received'
+    # L1 and L2 have the same comb, with L1 power6dB higher.
+    ratio=np.mean(out[7200:8480].astype(float)**2)/np.mean(out[8800:10080].astype(float)**2)
+    assert 3.8<ratio<4.2,ratio
+    lib.destroy(state)
+    print('PASS: probe turnaround, L1/L2 power, INFO1d CRC and INFO1a parameters')
 
     if len(sys.argv) > 1:
         pcm=np.fromfile(sys.argv[1],dtype='<i2')

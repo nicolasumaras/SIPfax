@@ -37,6 +37,16 @@ void v90_info0d(unsigned char b[62], int alaw)
     field(b, 42, 16, crc_bits(b+12, 30));
     memset(b+58, 1, 4);
 }
+void v90_info1d(unsigned char b[109])
+{
+    static const unsigned char sync[8]={0,1,1,1,0,0,1,0};
+    memset(b,0,109); memset(b,1,4); memcpy(b+4,sync,8);
+    /* Flat pre-emphasis, high carrier. Limit the initial trial to mandatory
+       3200 baud and 4800 bit/s upstream while implementing the receiver. */
+    b[61]=1; field(b,66,4,2);
+    field(b,79,10,512); /* frequency estimate unavailable, as specified */
+    field(b,89,16,crc_bits(b+12,77)); memset(b+105,1,4);
+}
 void v90_startup_init(V90Startup *s, int alaw)
 {
     memset(s, 0, sizeof(*s));
@@ -47,6 +57,7 @@ void v90_startup_init(V90Startup *s, int alaw)
     s->tx_symbol = -1;
     s->tx_sign = 1;
     v90_info0d(s->info0d, alaw);
+    v90_info1d(s->info1d);
     /* Parallel symbol phases avoid assuming RTP and INFO boundaries coincide. */
     for (int j = 0; j < 14; ++j) s->rx[j].clock = j * 570;
     fprintf(stderr, "[v90p2] transmitting INFO0d (%s), then Tone B\n",
@@ -72,14 +83,28 @@ static void receive(V90Startup *s, int16_t input)
         r->clock -= 8000;
         if (r->have_previous) {
             int bit = r->re * r->previous_re + r->im * r->previous_im < 0;
-            memmove(r->bits, r->bits+1, 48);
-            r->bits[48] = bit;
-            if (r->count < 49) ++r->count;
-            if (!s->info0_received && r->count == 49 && valid_info0a(r->bits)) {
+            memmove(r->bits, r->bits+1, 69);
+            r->bits[69] = bit;
+            if (r->count < 70) ++r->count;
+            if (!s->info0_received && r->count >= 49 && valid_info0a(r->bits+21)) {
                 s->info0_received = 1;
                 s->info0_at = s->samples;
                 fprintf(stderr, "[v90p2] CRC-valid INFO0a at %.3fs: ack=%d 3429=%d\n",
-                        s->samples / 8000.0, r->bits[28], r->bits[14]);
+                        s->samples / 8000.0, r->bits[49], r->bits[35]);
+            }
+            if (!s->info1_received && s->ranging_state >= 8 && r->count == 70) {
+                unsigned char *b=r->bits;
+                static const unsigned char prefix[12]={1,1,1,1,0,1,1,1,0,0,1,0};
+                unsigned received=0;
+                for(int k=0;k<16;++k) received|=b[50+k]<<k;
+                if (!memcmp(b,prefix,12) && received==crc_bits(b+12,38)) {
+                    s->info1_received=1; s->upstream_rate=0; s->downstream_rate=0; s->uinfo=0;
+                    for(int k=0;k<3;++k) { s->upstream_rate|=b[34+k]<<k; s->downstream_rate|=b[37+k]<<k; }
+                    for(int k=0;k<7;++k) s->uinfo|=b[25+k]<<k;
+                    s->ranging_state=9;
+                    fprintf(stderr,"[v90p2] CRC-valid INFO1a: upstream=%d downstream=%d UINFO=%d; training pending\n",
+                            s->upstream_rate,s->downstream_rate,s->uinfo);
+                }
             }
         }
         r->previous_re = r->re; r->previous_im = r->im;
@@ -132,8 +157,13 @@ static void receive_tone(V90Startup *s, int16_t input)
             } else if (s->ranging_state == 2 && when > s->first_tx_reversal) {
                 s->second_rx_reversal=when;
                 s->ranging_state=3;
+                s->round_trip=when-s->first_tx_reversal-320;
                 fprintf(stderr,"[v90p2] second A reversal at %.6fs; RTD %.3fms; receive probe\n",
                         when/8000.0,(when-s->first_tx_reversal-320)/8.0);
+            }
+            if (s->ranging_state == 4) {
+                s->reverse_due=when+320; s->ranging_state=5;
+                fprintf(stderr,"[v90p2] probe turnaround A reversal at %.6fs\n",when/8000.0);
             }
             s->ref_re=re; s->ref_im=im; s->tone_locked=0;
         } else if (!s->tone_locked || dot > 0.9) {
@@ -144,6 +174,14 @@ static void receive_tone(V90Startup *s, int16_t input)
     } else if (++s->tone_bad > 2) s->tone_locked=0;
     s->tone_re=s->tone_im=s->tone_energy=0;
     s->tone_count=0;
+}
+static double probe_sample(long sample)
+{
+    static const int frequencies[21]={150,300,450,600,750,1050,1350,1500,1650,1950,2100,2250,2550,2700,2850,3000,3150,3300,3450,3600,3750};
+    static const int inverted[21]={0,1,0,0,0,0,0,0,1,0,0,1,0,1,0,1,1,1,1,0,0};
+    double value=0;
+    for(int j=0;j<21;++j) value+=(inverted[j]?-1:1)*cos(2*M_PI*frequencies[j]*sample/8000.0);
+    return value*(2853.0/sqrt(21.0))*(sample<1280?2:1);
 }
 void v90_startup_history(V90Startup *s, const int16_t *in, int n)
 {
@@ -167,10 +205,42 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
             s->ranging_state = 2;
             fprintf(stderr,"[v90p2] B reversal transmitted at %.6fs\n",s->samples/8000.0);
         }
+        if (s->ranging_state == 3) {
+            long elapsed=s->samples-s->second_rx_reversal;
+            if (elapsed>=80 && elapsed<2960) { s->probe_energy+=(double)in[i]*in[i]; ++s->probe_samples; }
+            if (elapsed>=2960) { /*10ms tail +160ms L1 +200ms L2 */
+                s->ranging_state=4; s->tone_locked=0;
+                fprintf(stderr,"[v90p2] received probe RMS %.1f; Tone B requests turnaround\n",
+                        sqrt(s->probe_energy/(s->probe_samples?s->probe_samples:1)));
+            }
+        }
+        if (s->ranging_state == 5 && s->samples >= s->reverse_due) {
+            s->tx_sign=-s->tx_sign; s->probe_reply=s->samples; s->ranging_state=6;
+            fprintf(stderr,"[v90p2] probe reply B reversal at %.6fs\n",s->samples/8000.0);
+        }
+        if (s->ranging_state == 6 && s->samples >= s->probe_reply+80) {
+            s->probe_start=s->samples; s->ranging_state=7; s->tone_locked=0;
+            fprintf(stderr,"[v90p2] transmit L1/L2 at %.6fs\n",s->samples/8000.0);
+        }
+        if (s->ranging_state == 7 && s->samples-s->probe_start>=2880 && s->tone_locked>=3) {
+            s->info1_start=s->samples; s->ranging_state=8; s->tx_symbol=-1;
+            fprintf(stderr,"[v90p2] Tone A received; transmit INFO1d at %.6fs\n",s->samples/8000.0);
+        }
         /* 0 dBm0 sine is about 8031 RMS on the 16-bit PCM scale. */
         out[i] = (int16_t)lrint(2853.0 * s->tx_sign *
                               cos(2 * M_PI * 1200.0 * s->samples / 8000.0));
-        if (s->first_tx_reversal >= 0 && s->samples >= s->first_tx_reversal+80)
-            out[i] = 0;
+        if (s->first_tx_reversal >= 0 && s->samples >= s->first_tx_reversal+80 && s->ranging_state<4) out[i]=0;
+        if (s->ranging_state == 7) out[i]=(int16_t)lrint(probe_sample(s->samples-s->probe_start));
+        if (s->ranging_state == 8) {
+            int sym=((s->samples-s->info1_start)*3)/40;
+            if (sym<110) {
+                if (sym!=s->tx_symbol) {
+                    s->tx_symbol=sym;
+                    if(sym && s->info1d[sym-1]) s->tx_sign=-s->tx_sign;
+                }
+                out[i]=(int16_t)lrint(2853*s->tx_sign*cos(2*M_PI*1200*s->samples/8000.0));
+            } else out[i]=0;
+        }
+        if (s->ranging_state == 9) out[i]=0;
     }
 }

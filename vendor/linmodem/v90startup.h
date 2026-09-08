@@ -5,7 +5,7 @@
 typedef struct {
     int clock, count, have_previous;
     double re, im, previous_re, previous_im;
-    unsigned char bits[49];
+    unsigned char bits[70];
 } V90InfoRx;
 typedef struct {
     long samples;
@@ -17,9 +17,16 @@ typedef struct {
     double tone_re, tone_im, tone_energy, ref_re, ref_im;
     int16_t tone_history[80];
     long tone_history_count;
+    long probe_start, info1_start, probe_reply, round_trip;
+    unsigned char info1d[109];
+    int info1_received, upstream_rate, uinfo, downstream_rate;
+    double probe_energy;
+    int probe_samples;
+
 
 } V90Startup;
 void v90_info0d(unsigned char bits[62], int alaw);
+void v90_info1d(unsigned char bits[109]);
 void v90_startup_init(V90Startup *s, int alaw);
 void v90_startup_history(V90Startup *s, const int16_t *in, int n);
 void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n);

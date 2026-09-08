@@ -2,6 +2,7 @@
 #define V90TRAINING_H
 #include <stdint.h>
 #include "v90dil.h"
+#include "v90cp.h"
 #define V90_RX_TAPS 81
 typedef struct {
     double previous_re,previous_im;
@@ -14,7 +15,8 @@ typedef struct {
     double last_re,last_im;
     unsigned position;
     long samples;
-    int found;
+    int found,cp_mode,e_seen;
+    V90Cp cp;
     V90JaLane lanes[5];
     V90Dil dil;
 } V90Training;

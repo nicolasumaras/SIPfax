@@ -254,7 +254,9 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 s->training_tx_active=1;
                 fprintf(stderr,"[v90p3] transmit Sd/Sbar, TRN1d then Jd at %.6fs UINFO=%d\n",s->samples/8000.0,s->uinfo);
             }
-            if(s->training_tx_active) {
+            if(s->phase4_active) {
+                out[i]=v90_phase4_next(&s->phase4,in[i]);
+            } else if(s->training_tx_active) {
                 if(s->training_tx.sample>=2544) {
                     int event=v90_s_detect(&s->s_detector,in[i]);
                     if(event==1 && !s->training_tx.jd_end) {
@@ -271,6 +273,9 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 out[i]=v90_train_tx_next(&s->training_tx);
                 if(stage!=s->training_tx.stage)
                     fprintf(stderr,"[v90p3] DIL stage %u at %.6fs (2=Phase4 pending)\n",s->training_tx.stage,s->samples/8000.0);
+                if(s->training_tx.stage==2) {
+                    v90_phase4_init(&s->phase4,s->alaw,s->uinfo);s->phase4_active=1;
+                }
             }
         }
     }

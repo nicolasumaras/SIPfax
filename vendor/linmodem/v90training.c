@@ -28,9 +28,10 @@ static void bit(V90Training *s,V90JaLane *lane,unsigned b)
         else {
             lane->bits[lane->count++]=plain;
             unsigned consumed;
-            int valid=v90_dil_parse(&s->dil,lane->bits,lane->count,&consumed);
+            int valid=s->cp_mode?v90_cp_parse(&s->cp,lane->bits,lane->count,&consumed):v90_dil_parse(&s->dil,lane->bits,lane->count,&consumed);
             if(valid==1) {
-                s->found=1;
+                s->found++;
+                if(!s->cp_mode)
                 fprintf(stderr,"[v90p3] CRC-valid live Ja at %.6fs: N=%u LSP=%u LTP=%u\n",
                         s->samples/8000.0,s->dil.n,s->dil.lsp,s->dil.ltp);
             }
@@ -41,7 +42,8 @@ static void bit(V90Training *s,V90JaLane *lane,unsigned b)
         memset(lane->bits,1,17);lane->bits[17]=0;lane->count=18;
     }
     lane->ones=plain ? lane->ones+1 : 0;
-    if(lane->ones>17)lane->ones=17;
+    if(s->cp_mode && s->cp.type && s->cp.ack && lane->ones==20)s->e_seen=1;
+    if(lane->ones>20)lane->ones=20;
 }
 static void symbol(V90Training *s,long time,double re,double im)
 {
@@ -51,13 +53,13 @@ static void symbol(V90Training *s,long time,double re,double im)
         double cross=im*lane->previous_re-re*lane->previous_im;
         int delta=(-(int)lrint(atan2(cross,dot)/(M_PI/2)))&3;
         bit(s,lane,delta&1);
-        if(!s->found)bit(s,lane,delta>>1);
+        if(!s->found || s->cp_mode)bit(s,lane,delta>>1);
     }
     lane->previous_re=re;lane->previous_im=im;lane->have_previous=1;
 }
 int v90_training_receive(V90Training *s,const int16_t *pcm,int count)
 {
-    for(int n=0;n<count && !s->found;++n,++s->samples) {
+    for(int n=0;n<count && (!s->found || s->cp_mode);++n,++s->samples) {
         double phase=2*M_PI*1920*s->samples/8000.0;
         s->re[s->position]=pcm[n]*cos(phase);s->im[s->position]=-pcm[n]*sin(phase);
         double re=0,im=0;
@@ -67,7 +69,7 @@ int v90_training_receive(V90Training *s,const int16_t *pcm,int count)
         }
         s->position=(s->position+1)%V90_RX_TAPS;
         if(s->samples)symbol(s,2*s->samples-1,(s->last_re+re)/2,(s->last_im+im)/2);
-        if(!s->found)symbol(s,2*s->samples,re,im);
+        if(!s->found || s->cp_mode)symbol(s,2*s->samples,re,im);
         s->last_re=re;s->last_im=im;
     }
     return s->found;

@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "v90training.h"
 #include "v90train_tx.h"
+#include "v90phase4.h"
 /* Digital-side V.90 Phase 2. All clocks are counted in 8 kHz samples. */
 typedef struct {
     int clock, count, have_previous;
@@ -26,6 +27,8 @@ typedef struct {
     V90TrainTx training_tx;
     V90SDetect s_detector;
     unsigned s_transitions;
+    int phase4_active;
+    V90Phase4 phase4;
     int info1_received, upstream_rate, uinfo, downstream_rate;
     double probe_energy;
     int probe_samples;

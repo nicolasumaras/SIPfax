@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as tmp:
 void *create(void) { V90Training *s=malloc(sizeof(*s));v90_training_init(s);return s; }
 unsigned segments(V90Training *s) { return s->dil.n; }
 ''')
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.segments.argtypes=[C.c_void_p]
     lib.v90_training_receive.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_int]
     pcm=np.fromfile(sys.argv[1],dtype='<i2');state=lib.create();found=0

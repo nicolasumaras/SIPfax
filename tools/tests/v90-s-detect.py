@@ -9,7 +9,7 @@ class State(C.Structure):
     _fields_=[(n,C.c_uint) for n in ['samples','good','bad','latched','reversed']]+[('re',C.c_double*3),('im',C.c_double*3)]+[(n,C.c_double) for n in ['energy','short_re','short_im','ref_re','ref_im']]
 with tempfile.TemporaryDirectory() as tmp:
     so=Path(tmp)/'s.so'
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror',str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror',str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.v90_s_detect.argtypes=[C.POINTER(State),C.c_int16]
     def events(x):
         state=State();out=[]

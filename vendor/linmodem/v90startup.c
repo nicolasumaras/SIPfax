@@ -102,6 +102,9 @@ static void receive(V90Startup *s, int16_t input)
                     for(int k=0;k<3;++k) { s->upstream_rate|=b[34+k]<<k; s->downstream_rate|=b[37+k]<<k; }
                     for(int k=0;k<7;++k) s->uinfo|=b[25+k]<<k;
                     s->ranging_state=9;
+                    if(s->upstream_rate==4 && s->downstream_rate==6) {
+                        v90_training_init(&s->training);s->training_active=1;
+                    }
                     fprintf(stderr,"[v90p2] CRC-valid INFO1a: upstream=%d downstream=%d UINFO=%d; training pending\n",
                             s->upstream_rate,s->downstream_rate,s->uinfo);
                 }
@@ -241,6 +244,16 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 out[i]=(int16_t)lrint(2853*s->tx_sign*cos(2*M_PI*1200*s->samples/8000.0));
             } else out[i]=0;
         }
-        if (s->ranging_state == 9) out[i]=0;
+        if (s->ranging_state == 9) {
+            out[i]=0;
+            if(s->training_active && !s->training.found)
+                v90_training_receive(&s->training,in+i,1);
+            if(s->training.found && !s->training_tx_active && s->uinfo>=67 && s->uinfo<=111) {
+                v90_train_tx_init(&s->training_tx,s->alaw,s->uinfo);
+                s->training_tx_active=1;
+                fprintf(stderr,"[v90p3] transmit Sd/Sbar, TRN1d then Jd at %.6fs UINFO=%d\n",s->samples/8000.0,s->uinfo);
+            }
+            if(s->training_tx_active)out[i]=v90_train_tx_next(&s->training_tx);
+        }
     }
 }

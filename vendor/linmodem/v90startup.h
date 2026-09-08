@@ -1,6 +1,8 @@
 #ifndef V90STARTUP_H
 #define V90STARTUP_H
 #include <stdint.h>
+#include "v90training.h"
+#include "v90train_tx.h"
 /* Digital-side V.90 Phase 2. All clocks are counted in 8 kHz samples. */
 typedef struct {
     int clock, count, have_previous;
@@ -19,6 +21,9 @@ typedef struct {
     long tone_history_count;
     long probe_start, info1_start, probe_reply, round_trip;
     unsigned char info1d[109];
+    V90Training training;
+    int training_active,training_tx_active;
+    V90TrainTx training_tx;
     int info1_received, upstream_rate, uinfo, downstream_rate;
     double probe_energy;
     int probe_samples;

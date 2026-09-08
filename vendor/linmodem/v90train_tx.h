@@ -1,0 +1,11 @@
+#ifndef V90TRAIN_TX_H
+#define V90TRAIN_TX_H
+#include <stdint.h>
+typedef struct {
+    unsigned sample,scrambler,sign;
+    int alaw,uinfo;
+    uint8_t jd[72];
+} V90TrainTx;
+void v90_train_tx_init(V90TrainTx *s,int alaw,int uinfo);
+int16_t v90_train_tx_next(V90TrainTx *s);
+#endif

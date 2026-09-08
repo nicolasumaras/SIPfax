@@ -21,10 +21,18 @@ static const char *st_name(int s){ return (s>=0 && s<256 && sm_states_str[s]) ? 
 
 /* ---- G.711 (CCITT reference) ---- */
 #define G711_BIAS 0x84
-#define G711_CLIP 8159
 static int g_alaw = 0;
 static s16 ulaw2lin(u8 u){ u=~u; int t=((u&0x0f)<<3)+G711_BIAS; t<<=((unsigned)u&0x70)>>4; return (s16)((u&0x80)?(G711_BIAS-t):(t-G711_BIAS)); }
-static u8 lin2ulaw(s16 pcm){ int s=(pcm>>8)&0x80; if(s)pcm=(s16)-pcm; if(pcm>G711_CLIP)pcm=G711_CLIP; int m=pcm+G711_BIAS,e=7; for(int k=0x4000;e>0&&!(m&k);k>>=1)e--; int man=(m>>(e+3))&0x0f; return (u8)(~(s|(e<<4)|man)); }
+static u8 lin2ulaw(s16 pcm) {
+    /* Keep magnitude in int: negating INT16_MIN must not wrap. */
+    int sign = pcm < 0 ? 0x80 : 0;
+    int mag = pcm < 0 ? -(int)pcm : (int)pcm;
+    if (mag > 32635) mag = 32635;
+    mag += G711_BIAS;
+    int exp = 7;
+    for (int mask = 0x4000; exp > 0 && !(mag & mask); mask >>= 1) exp--;
+    return (u8)~(sign | (exp << 4) | ((mag >> (exp + 3)) & 0x0f));
+}
 static s16 alaw2lin(u8 a){ a^=0x55; int t=(a&0x0f)<<4,seg=((unsigned)a&0x70)>>4; if(seg==0)t+=8; else if(seg==1)t+=0x108; else {t+=0x108;t<<=seg-1;} return (s16)((a&0x80)?t:-t); }
 static u8 lin2alaw(s16 pcm){ int s=((~pcm)>>8)&0x80; if(!s)pcm=(s16)-pcm; if(pcm>0x7fff)pcm=0x7fff; u8 a; if(pcm<256)a=(u8)(pcm>>4); else {int e=7;for(int k=0x4000;e>1&&!(pcm&k);k>>=1)e--; int man=(pcm>>(e+3))&0x0f; a=(u8)((e<<4)|man);} return (u8)((a^0x55)|s); }
 static s16 g711_dec(u8 v){ return g_alaw?alaw2lin(v):ulaw2lin(v); }
@@ -44,6 +52,15 @@ void pipe_modem(void)
     int pty, len, i, n, last_state = -1, last_sm = -1, frames = 0;
     long long rx_acc = 0; int rx_cnt = 0;
     FILE *cap = NULL, *txcap = NULL;
+    /* Legacy DSP diagnostics use printf. Reserve the original stdout for
+       framed audio, then send diagnostics to stderr before any DSP init. */
+    int audio_fd = fcntl(STDOUT_FILENO, F_DUPFD, 4);
+    if (audio_fd < 0 || dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
+        perror("linmodem audio fd");
+        if (audio_fd >= 0) close(audio_fd);
+        return;
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     const char *codec = getenv("SIPFAX_MODEM_CODEC");
     if (codec && (!strcasecmp(codec,"PCMA")||!strcasecmp(codec,"alaw"))) g_alaw = 1;
@@ -57,7 +74,7 @@ void pipe_modem(void)
     if (txpath) { snprintf(txbuf,sizeof(txbuf),"%s.%d",txpath,(int)getpid()); txcap = fopen(txbuf, "wb"); }
 
     pty = open("/dev/ptmx", O_RDWR);
-    if (pty < 0) { perror("/dev/ptmx"); return; }
+    if (pty < 0) { perror("/dev/ptmx"); close(audio_fd); return; }
     grantpt(pty); unlockpt(pty);
     fcntl(pty, F_SETFL, O_NONBLOCK);
     dprintf(3, "{\"event\":\"started\",\"engine\":\"linmodem\"}\n");
@@ -94,7 +111,7 @@ void pipe_modem(void)
 
         if (txcap) fwrite(out_buf, 2, len, txcap);
         for (i = 0; i < len; i++) g711out[i] = g711_enc(out_buf[i]);
-        if (write_frame(1, g711out, len) < 0) break;
+        if (write_frame(audio_fd, g711out, len) < 0) break;
 
         /* log every internal state transition (V.8 -> datapump) to stderr */
         if (dce->state != last_sm) {
@@ -127,4 +144,5 @@ void pipe_modem(void)
     if (txcap) fclose(txcap);
     fprintf(stderr, "[linmodem] call ended after %d frames, final state %s\n", frames, st_name(last_sm)); fflush(stderr);
     close(pty);
+    close(audio_fd);
 }

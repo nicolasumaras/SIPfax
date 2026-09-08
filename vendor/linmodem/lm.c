@@ -173,9 +173,10 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
 {
     /* Preserve the V.8 receive tail for the V.90 receiver's 75ms handoff. */
     if (sm->state == SM_V8 && nb_samples > 0) {
-        int add = nb_samples > 1600 ? 1600 : nb_samples;
+        int capacity = sizeof(sm->v8_history)/sizeof(sm->v8_history[0]);
+        int add = nb_samples > capacity ? capacity : nb_samples;
         int keep = sm->v8_history_count;
-        if (keep > 1600-add) keep = 1600-add;
+        if (keep > capacity-add) keep = capacity-add;
         memmove(sm->v8_history, sm->v8_history + sm->v8_history_count-keep,
                 keep * sizeof(s16));
         memcpy(sm->v8_history+keep, input+nb_samples-add, add*sizeof(s16));

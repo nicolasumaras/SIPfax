@@ -27,6 +27,8 @@ with tempfile.TemporaryDirectory() as tmp:
 #include "v90startup.h"
 void *create(int law) { V90Startup *s=malloc(sizeof(*s)); v90_startup_init(s,law); return s; }
 int received(V90Startup *s) { return s->info0_received; }
+long tx_reversal(V90Startup *s) { return s->first_tx_reversal; }
+long rx_reversal(V90Startup *s) { return s->second_rx_reversal; }
 void destroy(void *s) { free(s); }
 ''')
     libpath = Path(tmp)/'test.so'
@@ -34,6 +36,8 @@ void destroy(void *s) { free(s); }
                     '-I'+str(root/'vendor/linmodem'), str(wrapper),
                     str(root/'vendor/linmodem/v90startup.c'),'-lm','-o',str(libpath)],check=True)
     lib=C.CDLL(str(libpath)); lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
+    for name in ['tx_reversal','rx_reversal']:
+        getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.v90_startup_process.argtypes=[C.c_void_p,ptr,ptr,C.c_int]
@@ -69,6 +73,22 @@ void destroy(void *s) { free(s); }
             assert bool(lib.received(s)) != damaged, (offset,damaged)
             lib.destroy(s)
     print('PASS: both PCM laws, wire DPSK/CRC, 14 receive phases with guard/noise, invalid CRC rejected')
+
+    for boundary in range(2000,2040):
+        t=np.arange(4000); b=info0a(); signs=np.r_[1,(-1.)**np.cumsum(b)]
+        idx=np.minimum(t*3//40,len(signs)-1)
+        sign=signs[idx].copy();sign[t>=boundary]*=-1;sign[t>=3200]*=-1
+        pcm=(2500*sign*np.cos(2*np.pi*2400*t/8000+0.73)+2500*np.cos(2*np.pi*1800*t/8000)+rng.normal(0,10,len(t))).astype(np.int16)
+        out=np.zeros_like(pcm);state=lib.create(0)
+        for start in range(0,len(pcm),160):
+            lib.v90_startup_process(state,out[start:start+160],pcm[start:start+160],len(pcm[start:start+160]))
+        reply=lib.tx_reversal(state)
+        assert abs(reply-boundary-320)<=8,(boundary,reply)
+        assert abs(lib.rx_reversal(state)-3200)<=8,(boundary,lib.rx_reversal(state))
+        assert np.all(out[reply+80:]==0), 'Tone B not silenced after 10ms'
+        assert np.any(out[reply:reply+80]), 'missing reversed Tone B'
+        lib.destroy(state)
+    print('PASS: 40 reversal offsets, 40ms reply within 1ms, second reversal, 10ms tone tail')
 
     if len(sys.argv) > 1:
         pcm=np.fromfile(sys.argv[1],dtype='<i2')

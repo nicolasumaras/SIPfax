@@ -758,17 +758,9 @@ void V90_init(struct V90State *s, int calling)
         v90_decode_init(&s->dec);
         s->n = s->dec.S + s->dec.K;
     } else {
-        /* digital server: downstream encoder. The constellation normally comes
-           from the client CP (DIL); without a live DIL exchange, derive it via a
-           local CP round-trip (placeholder for real DIL). */
-        V90DecodeState tmp;
-        memset(&tmp, 0, sizeof(tmp));
-        v90_decode_init(&tmp);
-        v90_send_CP(&tmp, 1, 0);
-        memset(&s->enc, 0, sizeof(s->enc));
-        v90_encode_init(&s->enc);
-        v90_receive_CP(&s->enc);
-        s->n = s->enc.S + s->enc.K;
+        const char *codec = getenv("SIPFAX_MODEM_CODEC");
+        int alaw = codec && (!strcasecmp(codec, "PCMA") || !strcasecmp(codec, "alaw"));
+        v90_startup_init(&s->startup, alaw);
     }
 }
 
@@ -789,16 +781,7 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
             output[i] = 0;
         }
     } else {
-        /* server: stream the downstream PCM; upstream receive TODO */
-        for (i = 0; i < nb_samples; i++) {
-            if (s->fpos == 0) {
-                for (j = 0; j < s->n; j++)
-                    data[j] = s->get_bit ? (s->get_bit(s->opaque) & 1) : 0;
-                v90_encode_mapping_frame(&s->enc, s->framebuf, data);
-            }
-            output[i] = s->framebuf[s->fpos++];
-            if (s->fpos == 6) s->fpos = 0;
-        }
+        v90_startup_process(&s->startup, output, input, nb_samples);
     }
     return 0;
 }

@@ -1,5 +1,6 @@
 #ifndef V90PRIV_H
 #define V90PRIV_H
+#include "v90startup.h"
 
 #define V90_SAMPLE_RATE 8000
 #define TREILLIS_MAX_DEPTH   4  
@@ -63,6 +64,7 @@ typedef struct V90DecodeState {
 } V90DecodeState;
 
 typedef struct V90State {
+    V90Startup startup;
     int calling;            /* 1 = analog client (decode), 0 = digital server (encode) */
     V90EncodeState enc;
     V90DecodeState dec;

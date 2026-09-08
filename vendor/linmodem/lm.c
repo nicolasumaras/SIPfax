@@ -171,6 +171,17 @@ static void dtmf_put_digit(void *opaque, int digit)
 
 void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
 {
+    /* Preserve the V.8 receive tail for the V.90 receiver's 75ms handoff. */
+    if (sm->state == SM_V8 && nb_samples > 0) {
+        int add = nb_samples > 1600 ? 1600 : nb_samples;
+        int keep = sm->v8_history_count;
+        if (keep > 1600-add) keep = 1600-add;
+        memmove(sm->v8_history, sm->v8_history + sm->v8_history_count-keep,
+                keep * sizeof(s16));
+        memcpy(sm->v8_history+keep, input+nb_samples-add, add*sizeof(s16));
+        sm->v8_history_count = keep+add;
+    }
+
     /* XXX: time hack */
     sim_time = sm->time;
 
@@ -345,6 +356,9 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     break;
                 case V8_MOD_V90:
                     V90_init(&sm->u.v90_state, sm->calling);
+                    if (!sm->calling)
+                        v90_startup_history(&sm->u.v90_state.startup,
+                                            sm->v8_history, sm->v8_history_count);
                     sm->u.v90_state.opaque = sm;
                     sm->u.v90_state.get_bit = serial_get_bit;
                     sm->u.v90_state.put_bit = serial_put_bit;
@@ -479,6 +493,7 @@ void lm_init(struct sm_state *sm, struct sm_hw_info *hw, const char *name)
     sm->hw_state->sm = sm;
     sm->hw->open(sm->hw_state);
     
+    sm->v8_history_count = 0;
     sm->debug_laststate = -1;
     sm->state = SM_IDLE;
 

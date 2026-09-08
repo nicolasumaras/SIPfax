@@ -378,7 +378,15 @@ static void cm_send(V8State *s, int mod_mask)
     }
     v8_put_byte(s, V8_EXT);             /* wire 0x10: no second-ext claims, as slmodem */
     v8_put_byte(s, V8_DATA_LAPM);       /* wire 0x2A: LAPM (V.42) */
-    v8_put_byte(s, V8_DATA_NOCELULAR);  /* wire 0x0D: GSTN standard analogue */
+    if (mod_mask & V8_MOD_V90) {
+        /* V.90 section 9.1.1 requires both access and PCM availability.
+           Constants use linmodem's bit-reversed octet representation:
+           wire 8d = digital PSTN; wire 47 = digital PCM, 27 = analogue PCM. */
+        v8_put_byte(s, s->calling ? V8_DATA_NOCELULAR : 0xb1);
+        v8_put_byte(s, s->calling ? 0xe4 : 0xe2);
+    } else {
+        v8_put_byte(s, V8_DATA_NOCELULAR);
+    }
 }
 
 /* selection the modulation according to V8 priority from the bits in 'mask' */

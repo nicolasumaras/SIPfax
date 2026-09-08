@@ -55,6 +55,8 @@ extern char *sm_states_str[];
 #define SM_FIFO_SIZE 4096
 
 struct sm_state {
+    s16 v8_history[1600];
+    int v8_history_count;
     /* pretty name of the modem (to debug) */
     char name[16];
 

@@ -31,10 +31,28 @@ static unsigned scramble(V90TrainTx *s,unsigned bit)
     if(out)s->scrambler^=1|(1<<5); /* GPC */
     return out;
 }
+void v90_train_tx_end_jd(V90TrainTx *s)
+{
+    if(s->sample>=2544 && !s->jd_end)
+        s->jd_end=2472+((s->sample-2472+71)/72)*72;
+}
 int16_t v90_train_tx_next(V90TrainTx *s)
 {
     unsigned n=s->sample++;
     if(s->uinfo<67 || s->uinfo>111)return 0;
+    if(s->jd_end && n>=s->jd_end+12) {
+        if(!s->dil.n || s->stage==2) {s->stage=2;return 0;}
+        s->stage=1;
+        unsigned u=s->dil.ucodes[s->dil_segment],chord=u/16;
+        unsigned pos=s->dil_position++;
+        int level=magnitude(s->alaw,s->dil.tp[pos%s->dil.ltp]?u:s->dil.reference[chord]);
+        int positive=s->dil.sp[pos%s->dil.lsp];
+        if(s->dil_position==(s->dil.h[chord]+1)*6u) {
+            s->dil_position=0;s->dil_segment=(s->dil_segment+1)%s->dil.n;
+            if(s->stop_dil)s->stage=2;
+        }
+        return positive?level:-level;
+    }
     if(n<432) {
         unsigned frame=n%6;
         int level=magnitude(s->alaw,(frame==1 || frame==4)?0:s->uinfo+16);
@@ -43,7 +61,7 @@ int16_t v90_train_tx_next(V90TrainTx *s)
         return positive?level:-level;
     }
     if(n<2472)s->sign=scramble(s,1);
-    else s->sign^=scramble(s,s->jd[(n-2472)%72]);
+    else s->sign^=scramble(s,(s->jd_end && n>=s->jd_end)?0:s->jd[(n-2472)%72]);
     int level=magnitude(s->alaw,s->uinfo);
     return s->sign?level:-level;
 }

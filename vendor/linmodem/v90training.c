@@ -72,3 +72,46 @@ int v90_training_receive(V90Training *s,const int16_t *pcm,int count)
     }
     return s->found;
 }
+
+int v90_s_detect(V90SDetect *s,int16_t sample)
+{
+    static const double freq[3]={320,1920,3520};
+    double angle=2*M_PI*1920*s->samples/8000.0;
+    s->short_re+=sample*cos(angle);s->short_im+=sample*sin(angle);
+    for(int k=0;k<3;++k) {
+        angle=2*M_PI*freq[k]*s->samples/8000.0;
+        s->re[k]+=sample*cos(angle);s->im[k]+=sample*sin(angle);
+    }
+    s->energy+=(double)sample*sample;
+    ++s->samples;
+    int event=0;
+    if(s->samples%20==0) {
+        double dot=s->short_re*s->ref_re+s->short_im*s->ref_im;
+        double p=s->short_re*s->short_re+s->short_im*s->short_im;
+        double r=s->ref_re*s->ref_re+s->ref_im*s->ref_im;
+        if(s->latched && !s->reversed && dot<0 && dot*dot>0.64*p*r && p>1000000) {
+            s->reversed=1;event=2;
+        }
+        s->short_re=s->short_im=0;
+    }
+    if(s->samples%100==0) {
+        double power[3],total=0;
+        for(int k=0;k<3;++k) {
+            power[k]=2*(s->re[k]*s->re[k]+s->im[k]*s->im[k])/(100*s->energy+1);
+            total+=power[k];
+        }
+        int good=s->energy>100*10000 && total>0.85 && power[0]>0.10 && power[1]>0.20 && power[2]>0.10;
+        if(good) {
+            s->bad=0;
+            if(++s->good>=2 && !s->latched) {
+                s->latched=1;s->reversed=0;event=1;
+                s->ref_re=s->re[1];s->ref_im=s->im[1];
+            }
+        } else {
+            s->good=0;
+            if(++s->bad>=3)s->latched=0;
+        }
+        memset(s->re,0,sizeof(s->re));memset(s->im,0,sizeof(s->im));s->energy=0;
+    }
+    return event;
+}

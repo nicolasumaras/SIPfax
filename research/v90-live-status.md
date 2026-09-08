@@ -73,3 +73,19 @@ The C receiver now validates live Ja using a streaming 3200-baud/1920-Hz fronten
 Tests cover streaming replay of the hardware Ja, both-law Sd/Sbar levels and durations, independent descrambling of TRN1d and Jd, and Jd CRC. These are training tests, not evidence of a V.90 data connection. Next inspect the actual transmitted capture and Jd timing/encoding, then implement S detection, Jd-prime, requested DIL and Phase4 before upstream data and PPP can work in V.90.
 
 User-reported2.4kbps matches the established V.22bis baseline. Journal independently confirms CHAP authentication and notebook address10.64.0.2 on2026-09-08 at03:31UTC. Repeated IPCP link transitions and no demonstrated internet transfer mean stability and routed traffic still require acceptance testing.
+
+## Phase3 DIL accepted and Phase4 CPt decoded (2026-09-08 04:28 UTC)
+
+Correction to the preceding trial interpretation: full RX6245 analysis found S at14.58s (coherent320/1920/3520Hz) and Sbar at14.71s. The minimum TRN1d and Jd were accepted; the missing server S detector was the immediate obstacle. Do not lengthen TRN1d on the assumption Jd failed.
+
+Added 3200/high-carrier S/Sbar detector using three coherent spectral lines, noise/single-tone rejection, and phase reversal detection. It drives completion of the current72-bitJd,12-bitJd-prime, then actual requested DIL. DIL uses each Ucode's Uchord H/reference, restarts sign/training patterns per segment, repeats the whole sequence, and terminates on a segment boundary after the second Sbar. Tests cover offset/noise S/Sbar, pure-tone rejection, actual6245 S detection, Jd-prime descrambling, DIL pattern/segment repetition and boundary termination. Existing startup and framing tests pass; native builds local and CT105 pass.
+
+Live attempt a11e4ff7-03c6-4f74-8822-bc35bad73a58, PID6417:
+- INFO0a via retained history; RTD97.25ms; INFO1a upstream4/downstream6/UINFO78.
+- Live Ja N147/LSP126/LTP126; Sd begins startup-relative4.732500s.
+- S detected8.875375s; DIL begins8.877000s.
+- S/Sbar1 at8.987875s; second at11.220375s; DIL ends on segment boundary11.232625s.
+- Subsequent upstream is actual Phase4 CPt. Offline research/v90/analyze_cp.py validates75 frames across timing phases in raw17..20s, CRC0x38c5,428bits. Training drn9,Sr1,lookahead1,mu-law,gainQ13=8180,filter=[63,0,0,0],all six frames use constellation0 with4 positive levels, corresponding codec constellation present. This training rate is not an established data connection. Fixture test/fixtures/v90-cpt-6417.bits saved.
+- Call explicitly disconnected through API, later verified Failed; restored V22bis baseline with correct config owner/mode, service active. Raw RX/TX /var/log/sipfax/linmodem-{rx,tx}.s16.6417 copied to local work/v90-{rx,tx}-6417.s16.
+
+Next implement bounded CP parser and live CRC-validated CPt reception, digital Phase4 R/TRN2d/MP/Ed using those real constellation and shaping parameters, and then upstream data decoding. Current stage2 intentionally emits silence; notebook eventually retrains because no Phase4 answer exists yet. Phase3 detector is explicitly specific to offered3200/high-carrier mode. Full V90 data + authenticated PPP internet remains unachieved.

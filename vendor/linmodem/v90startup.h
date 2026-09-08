@@ -24,6 +24,8 @@ typedef struct {
     V90Training training;
     int training_active,training_tx_active;
     V90TrainTx training_tx;
+    V90SDetect s_detector;
+    unsigned s_transitions;
     int info1_received, upstream_rate, uinfo, downstream_rate;
     double probe_energy;
     int probe_samples;

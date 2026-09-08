@@ -250,10 +250,28 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 v90_training_receive(&s->training,in+i,1);
             if(s->training.found && !s->training_tx_active && s->uinfo>=67 && s->uinfo<=111) {
                 v90_train_tx_init(&s->training_tx,s->alaw,s->uinfo);
+                s->training_tx.dil=s->training.dil;
                 s->training_tx_active=1;
                 fprintf(stderr,"[v90p3] transmit Sd/Sbar, TRN1d then Jd at %.6fs UINFO=%d\n",s->samples/8000.0,s->uinfo);
             }
-            if(s->training_tx_active)out[i]=v90_train_tx_next(&s->training_tx);
+            if(s->training_tx_active) {
+                if(s->training_tx.sample>=2544) {
+                    int event=v90_s_detect(&s->s_detector,in[i]);
+                    if(event==1 && !s->training_tx.jd_end) {
+                        v90_train_tx_end_jd(&s->training_tx);
+                        fprintf(stderr,"[v90p3] S detected at %.6fs; finish Jd then Jd-prime and DIL\n",s->samples/8000.0);
+                    }
+                    if(event==2) {
+                        ++s->s_transitions;
+                        fprintf(stderr,"[v90p3] S/Sbar transition %u at %.6fs\n",s->s_transitions,s->samples/8000.0);
+                        if(s->s_transitions==2)s->training_tx.stop_dil=1;
+                    }
+                }
+                unsigned stage=s->training_tx.stage;
+                out[i]=v90_train_tx_next(&s->training_tx);
+                if(stage!=s->training_tx.stage)
+                    fprintf(stderr,"[v90p3] DIL stage %u at %.6fs (2=Phase4 pending)\n",s->training_tx.stage,s->samples/8000.0);
+            }
         }
     }
 }

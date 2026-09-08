@@ -20,4 +20,11 @@ typedef struct {
 } V90Training;
 void v90_training_init(V90Training *s);
 int v90_training_receive(V90Training *s,const int16_t *pcm,int count);
+/* S has coherent lines at fc and fc +/- baud/2. This detector is for
+ * the currently negotiated 3200/high-carrier mode. Events: 1=S, 2=Sbar. */
+typedef struct {
+    unsigned samples,good,bad,latched,reversed;
+    double re[3],im[3],energy,short_re,short_im,ref_re,ref_im;
+} V90SDetect;
+int v90_s_detect(V90SDetect *s,int16_t sample);
 #endif

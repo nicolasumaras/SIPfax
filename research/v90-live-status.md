@@ -46,3 +46,12 @@ Successful live attempt66e594f0-12da-4ee8-b2bc-499f23cf0ab6, PID5829:
 Ended with DialUpLab disconnect; restored baseline with correct config ownership and verified service active.
 
 Next implement probe receive after second reversal (L1 starts10ms later,160ms L1, up to500ms L2), then ToneB to request analogue turnaround, next reversal response40ms plus10ms tail, server L1/L2, and INFO1d/INFO1a. Current ranging_state3 holds silence; this is not Phase2 completion. Upstream decoder and phases3/4 still pending.
+
+## Probing and INFO1 exchange hardware verified (53a45ac)
+
+New stages receive160ms L1+200ms L2 after the10ms A tail; send ToneB, detect next A reversal, reply40ms later then10ms B; transmit21-tone L1 at+6dB for160ms, L2 until ToneA; transmit109-bit INFO1d and decode70-bit INFO1a with CRC. INFO1d offers only mandatory3200-baud high carrier, flat preemphasis, projected upstream4800bit/s for initial receiver development. This is a trial configuration, not a reduced final goal. Downstream remains V.90; INFO1a's downstream integer6 proves selection, not a completed data connection. Synthetic tests cover probe power ratio, INFO1d CRC and returned parameters, plus prior capability/ranging tests.
+
+Hardware attempt7c9f98e8-7f44-4f5d-aa1a-267bfe2991e5, PID5983:
+INFO0a at-0.585s (legacy V8 handoff still delayed). First A0.244375/B0.284375, second A0.406375, RTD82ms. Probe RMS2669.6. Turnaround A0.934375/B0.974375, server L1/L2 begins0.984375; INFO1d begins1.524875. CRC-valid INFO1a returns upstream4 (3200baud), downstream6(V.90), UINFO78. Hardware then sends Phase3 training but server remains silent, as expected with unimplemented Phase3. Call eventually failed. Baseline restored, correct ownership, service active. RX/TX in CT105 /var/log/sipfax/linmodem-{rx,tx}.s16.5983; RX copied to local work/v90-rx-5983.s16.
+
+Next reference V.90§9.3.1: parse MD duration from INFO1a bits18:24, detect upstream S/Sbar, train usingPP then512T TRN; decode Ja(DIL descriptor), send Sd384T+Sbar48T thenTRN1d>=2040T andJd. Decoder must use GPA and negotiated3200 high carrier, not old hardcoded3429. Ja needed to build DIL; cannot fabricate training constellation/CP. Pending timeouts/recovery and probe-result rate selection are also required before production. Current ranging_state9 is silence awaiting implementation, not connected.

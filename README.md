@@ -60,6 +60,14 @@ its 255 ms training interval. Service environment changes require a restart
 when no call is active. A stored `modem.command` takes precedence over its
 environment seed. The native code retains its GPL-2.0 licensing.
 
+For the experimental 4.8 kbit/s upstream, `SIPFAX_PPP_UPSTREAM_TCP_MSS=536`
+optionally limits TCP segment-size advertisements sent to IPv4 PPP clients.
+This reduced a 4 KB request from 16.7 to about 10.2 seconds in controlled tests.
+It does not change advertisements sent by the client or increase smaller MSS
+values. The setting accepts 256–1460 and is disabled when unset. It requires
+the installed PPP egress helper and takes effect on new calls after restart;
+per-lease cleanup removes the rules. It does not fix modem training failures.
+
 ## Run
 
 ```bash

@@ -138,8 +138,13 @@ export class EgressPolicy {
     allowInternet = true,
     allowDns = true,
     allowedDestinations = ['0.0.0.0/0'],
-    blockedDestinations = DEFAULT_BLOCKED_DESTINATIONS
+    blockedDestinations = DEFAULT_BLOCKED_DESTINATIONS,
+    upstreamTcpMss = null
   } = {}) {
+    if (upstreamTcpMss !== null && (!Number.isInteger(upstreamTcpMss) || upstreamTcpMss < 256 || upstreamTcpMss > 1460)) {
+      throw new Error('upstreamTcpMss must be null or an integer between 256 and 1460');
+    }
+    this.upstreamTcpMss = upstreamTcpMss;
     this.clientCidr = clientCidr;
     this.outboundInterface = outboundInterface;
     this.operatorUrl = operatorUrl;
@@ -173,6 +178,10 @@ export class EgressPolicy {
       `iptables ${iptablesAction} FORWARD -s ${this.clientCidr} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`,
       `iptables ${iptablesAction} FORWARD -d ${this.clientCidr} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`
     ];
+
+    if (this.upstreamTcpMss !== null) {
+      rules.push(`iptables -t mangle ${iptablesAction} POSTROUTING -d ${this.clientCidr} -p tcp --tcp-flags SYN,RST SYN -m tcpmss --mss ${this.upstreamTcpMss + 1}:65535 -j TCPMSS --set-mss ${this.upstreamTcpMss}`);
+    }
 
     for (const destination of this.blockedDestinations) {
       rules.push(`iptables ${iptablesAction} FORWARD -s ${this.clientCidr} -d ${formatCidr(destination)} -j REJECT`);
@@ -216,6 +225,11 @@ export class EgressPolicy {
       `add rule inet ${filterTable} forward ip daddr ${this.clientCidr} ct state established,related accept`
     ];
 
+    if (this.upstreamTcpMss !== null) {
+      rules.push(`add chain inet ${filterTable} upstream_mss { type filter hook postrouting priority mangle; policy accept; }`);
+      rules.push(`add rule inet ${filterTable} upstream_mss ip daddr ${this.clientCidr} tcp flags & (syn | rst) == syn tcp option maxseg size > ${this.upstreamTcpMss} tcp option maxseg size set ${this.upstreamTcpMss}`);
+    }
+
     for (const destination of this.blockedDestinations) {
       rules.push(`add rule inet ${filterTable} forward ip saddr ${this.clientCidr} ip daddr ${formatCidr(destination)} reject`);
     }
@@ -249,6 +263,7 @@ export class EgressPolicy {
       outboundInterface: this.outboundInterface,
       operatorUrl: this.operatorUrl,
       allowInternet: this.allowInternet,
+      upstreamTcpMss: this.upstreamTcpMss,
       nft: {
         up: this.firewallRulesNft({ tableSuffix: callId, action: 'up' }),
         down: this.firewallRulesNft({ tableSuffix: callId, action: 'down' })
@@ -266,6 +281,7 @@ export class EgressPolicy {
       outboundInterface: this.outboundInterface,
       operatorUrl: this.operatorUrl,
       allowInternet: this.allowInternet,
+      upstreamTcpMss: this.upstreamTcpMss,
       allowDns: this.allowDns,
       allowedDestinations: this.allowedDestinations.map(formatCidr),
       blockedDestinations: this.blockedDestinations.map(formatCidr)

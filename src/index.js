@@ -64,6 +64,7 @@ function buildPpp() {
       operatorUrl: process.env.SIPFAX_OPERATOR_URL ?? `http://${operatorHost}:${operatorPort}`,
       allowInternet: process.env.SIPFAX_EGRESS_ENABLED !== 'false',
       allowDns: process.env.SIPFAX_EGRESS_DNS !== 'false',
+      upstreamTcpMss: process.env.SIPFAX_PPP_UPSTREAM_TCP_MSS ? Number(process.env.SIPFAX_PPP_UPSTREAM_TCP_MSS) : null,
       allowedDestinations: parseList(process.env.SIPFAX_EGRESS_ALLOW, ['0.0.0.0/0'])
     })
   });

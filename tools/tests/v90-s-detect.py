@@ -5,18 +5,27 @@ from pathlib import Path
 import subprocess,tempfile,sys
 import numpy as np
 root=Path(__file__).resolve().parents[2]
-class State(C.Structure):
-    _fields_=[(n,C.c_uint) for n in ['samples','good','bad','latched','reversed']]+[('re',C.c_double*3),('im',C.c_double*3)]+[(n,C.c_double) for n in ['energy','short_re','short_im','ref_re','ref_im']]
 with tempfile.TemporaryDirectory() as tmp:
+    wrapper=Path(tmp)/'wrapper.c'
+    wrapper.write_text('''#include <stdlib.h>
+#include "v90training.h"
+void *create(void) { return calloc(1, sizeof(V90SDetect)); }
+void destroy(void *state) { free(state); }
+''')
     so=Path(tmp)/'s.so'
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror',str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),'-lm','-o',str(so)],check=True)
-    lib=C.CDLL(str(so));lib.v90_s_detect.argtypes=[C.POINTER(State),C.c_int16]
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),'-lm','-o',str(so)],check=True)
+    lib=C.CDLL(str(so));lib.v90_s_detect.argtypes=[C.c_void_p,C.c_int16]
+    lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
     def events(x):
-        state=State();out=[]
-        for i,v in enumerate(x):
-            event=lib.v90_s_detect(C.byref(state),int(v))
-            if event:out.append((i/8000,event))
-        return out
+        state=lib.create();out=[]
+        assert state, 'detector allocation failed'
+        try:
+            for i,v in enumerate(x):
+                event=lib.v90_s_detect(state,int(v))
+                if event:out.append((i/8000,event))
+            return out
+        finally:
+            lib.destroy(state)
     rng=np.random.default_rng(3)
     n=np.arange(5000);t=n/8000
     for start in range(400,500,7):

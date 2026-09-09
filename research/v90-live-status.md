@@ -680,3 +680,10 @@ Started100periodicprobeson0xF70000,handle35217LIVE,work/v90-probes-0xF70000.json
 Previous turn progressed throughcompleted36minsoak,newnative deploymentandretryhardwaredata. Revalidated35217live. DownloadedprivateRX/TX12601forfailedfirstcall; copies40322/46879terminal. ExtractedpreCPs0add7d3sourceinto privatework/sipfax-pre-cps-source. Privatehelperwork/compare_v90_cps_startup.py compiledold/currentPhase4 librariesandfedidenticalRXraw16.876125s through20.163625s (26300samples), coveringRi/CPt/TRN2d/MP untilcallerretrain. BothdecodeCPt gain8175 at0.130125s,TRNstart0.1335s andMP1.6335s. ALL26300TXsamples identicaloldvsnewandidenticaltocapturedactualTX. This rulesouta changedPhase4transmitwaveform inthatinterval; it doesnotprove allregressionsabsent orresolveexistingstartupfailure. Fullprivatecapturesoutsidegit.
 
 Live0xF70000/native12605/pppd12606 has8successfulperiodicrequests throughWindows169.373s, CRC9/alignment1. Preserveprobe35217 andcapture16738, no restart/runtimechange. Goalactive.
+
+
+## Independent captured-MP validation on failed startup (2026-09-09)
+
+Previous turn progressedbyold/newwaveformequality. Revalidated35217live. Existingv90-phase4.py withfailedRX12601 and--long-training passesindependentTRN/MP/CRCdecoding. Moreimportantly, privatehelperwork/audit_v90_failed_startup_tx.py appliesindependentdemapping/descrambling directlytocapturedTXraw16.876125..20.163625s: actualRi/Rbar,1500msTRN,firsttworepeatedMPmessagesandMPCRC allPASS. This supplementsold/newequalitywithwirecontentvalidation, withoutclaiminganalogdeliveryortimingconformance. No productionchange.
+
+Current0xF70000/native12605/pppd12606 has15successfulperiodicrequests throughWindows316.385s,CRC11/alignment1. Keep35217/capture16738; no restart. ReadonlylegacyV34inspectionconfirmsseparateV34_init/V34_process state API,notanexistingdrop-infallbackhook inV90_startup. Nounverifiedfallbackwiringadded. Goalactive.

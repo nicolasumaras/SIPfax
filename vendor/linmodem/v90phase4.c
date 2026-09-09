@@ -1,5 +1,6 @@
 /* Digital V.90 Phase4: live CPt/CP, Ri/Ri-bar, TRN2d and MP. GPL-2.0. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "v90phase4.h"
 static void mp_build(V90Phase4 *s)
@@ -19,8 +20,8 @@ static int training_bit(void *opaque)
 {
     V90Phase4 *s=opaque;
     unsigned n=s->generated++,d=s->encoder.k+s->encoder.s;
-    if(n<340*d)return 1;
-    unsigned index=(n-340*d)%s->mp_length;
+    if(n<s->trn_frames*d)return 1;
+    unsigned index=(n-s->trn_frames*d)%s->mp_length;
     if(!s->ed_frame && !index && s->have_cp &&
        (s->have_ack || s->rx.e_seen) && s->mp_ack)s->ed_frame=n/d;
     if(s->ed_frame && n>=s->ed_frame*d)return 0;
@@ -37,6 +38,15 @@ static int data_bit(void *opaque)
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 {
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
+    s->trn_frames=340;
+    /* Optional initial-training interoperability experiment. 9.4.1.2/3:
+       at least 2040 PCM samples, MP begins within 2000ms. Round down to
+       whole six-sample frames so the upper limit cannot be exceeded. */
+    const char *setting=getenv("SIPFAX_V90_INITIAL_TRN2D_MS");
+    if(setting && *setting) {
+        char *end;long ms=strtol(setting,&end,10);
+        if(!*end && ms>=255 && ms<=2000)s->trn_frames=(unsigned)(ms*8/6);
+    }
     v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init(&s->upstream);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
 }
@@ -49,6 +59,7 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             v90_training_init(&s->rx);s->rx.cp_mode=1;
             s->have_cp=s->have_ack=s->mp_ack=s->rx_e_logged=0;
             s->generated=s->ed_frame=s->mp_announced=s->reneg_start=0;
+            s->trn_frames=340; /* Do not change the verified rate response. */
             ++s->renegotiations;
             fprintf(stderr,"[v90p4] rate renegotiation S; clamp DTE at %.6fs\n",s->samples/8000.0);
         }
@@ -105,7 +116,7 @@ cp_done:
         unsigned n=s->samples-s->trn_start;
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
-        if(n>=2040 && !s->mp_announced){s->mp_announced=1;fprintf(stderr,"[v90p4] transmit MP at %.6fs\n",s->samples/8000.0);}
+        if(n>=s->trn_frames*6 && !s->mp_announced){s->mp_announced=1;fprintf(stderr,"[v90p4] transmit MP at %.6fs\n",s->samples/8000.0);}
     }
     if(s->stage==6 && !s->reneg_start && (s->samples-s->data_start)%6==0)
         s->reneg_start=s->samples;

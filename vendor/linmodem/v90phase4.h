@@ -5,7 +5,7 @@
 #include "v90upstream.h"
 typedef struct {
     unsigned samples,stage,rbar_end,trn_start,generated,mp_length,mp_ack,mp_announced;
-    unsigned ed_frame,data_start;
+    unsigned ed_frame,data_start,trn_frames;
     int alaw,uinfo,have_cpt,have_cp,have_ack,rx_e_logged;
     V90Training rx;
     V90Cp cpt,cp;

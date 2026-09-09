@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """Replay hardware CPt and independently decode emitted TRN2d/MP."""
 import ctypes as C
+import os
 from pathlib import Path
 import subprocess,tempfile,sys
 import numpy as np
 root=Path(__file__).resolve().parents[2]
+training_frames=340
+if '--long-training' in sys.argv:
+    os.environ['SIPFAX_V90_INITIAL_TRN2D_MS']='1500'
+    training_frames=2000
 with tempfile.TemporaryDirectory() as tmp:
     wrapper=Path(tmp)/'wrap.c';so=Path(tmp)/'p4.so'
     wrapper.write_text('''#include <stdlib.h>
 #include "v90phase4.h"
 void *create(void){V90Phase4 *s=malloc(sizeof(*s));v90_phase4_init(s,0,78);return s;}
+unsigned configured(const char *value){if(value)setenv("SIPFAX_V90_INITIAL_TRN2D_MS",value,1);else unsetenv("SIPFAX_V90_INITIAL_TRN2D_MS");V90Phase4 s;v90_phase4_init(&s,0,78);return s.trn_frames;}
 unsigned start(V90Phase4 *s){return s->trn_start;}
 unsigned length(V90Phase4 *s){return s->mp_length;}
 unsigned data_start(V90Phase4 *s){return s->data_start;}
@@ -20,6 +26,10 @@ unsigned k(V90Phase4 *s){return s->encoder.k;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/n) for n in ['v90upstream.c','v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
+    lib.configured.argtypes=[C.c_char_p]
+    for value,expected in [(None,340),(b'255',340),(b'1500',2000),(b'2000',2666),(b'254',340),(b'2001',340),(b'-1',340),(b'junk',340),(b'999999999999999999999999999',340)]:
+        assert lib.configured(value)==expected
+    lib.configured(b'1500' if '--long-training' in sys.argv else None)
     for name in ['start','length','data_start','ed','k']:getattr(lib,name).argtypes=[C.c_void_p]
     lib.v90_phase4_next.argtypes=[C.c_void_p,C.c_int16];lib.v90_phase4_next.restype=C.c_int16
     complete='--complete' in sys.argv;pcm=np.fromfile(sys.argv[1],dtype='<i2')[(16 if complete else 17)*8000:(24 if complete else 19)*8000];s=lib.create()
@@ -42,8 +52,8 @@ unsigned k(V90Phase4 *s){return s->encoder.k;}
         v=sum(levels.index(abs(v))<<(2*k) for k,v in enumerate(frame))
         decoded.extend(sig+[(v>>k)&1 for k in range(12)])
     plain=[b^(decoded[j-18] if j>=18 else 0)^(decoded[j-23] if j>=23 else 0) for j,b in enumerate(decoded)]
-    assert plain[:340*17]==[1]*(340*17)
-    mp=plain[340*17:340*17+102]
+    assert plain[:training_frames*17]==[1]*(training_frames*17)
+    mp=plain[training_frames*17:training_frames*17+102]
     assert mp[:17]==[1]*17 and all(mp[k]==0 for k in [17,34,51,68,*range(85,102)])
     assert sum(mp[24+k]<<k for k in range(4))==2 and mp[36]==1 and mp[33]==0
     crc=0xffff
@@ -52,7 +62,7 @@ unsigned k(V90Phase4 *s){return s->encoder.k;}
         top=(crc>>15)^mp[k];crc=(crc<<1)&0xffff
         if top:crc^=0x1021
     assert mp[69:85]==[(crc>>(15-k))&1 for k in range(16)]
-    assert plain[340*17+102:340*17+204]==mp
+    assert plain[training_frames*17+102:training_frames*17+204]==mp
     if complete:
         data_start=lib.data_start(s);ed=lib.ed(s);assert data_start and ed
         assert data_start==start+(ed+2)*6
@@ -75,4 +85,4 @@ unsigned k(V90Phase4 *s){return s->encoder.k;}
         b1=[b^(bits[j-18] if j>=18 else 0)^(bits[j-23] if j>=23 else 0) for j,b in enumerate(bits)]
         assert b1==[1]*(48*(K+5))
         print('PASS: complete MP-prime, two Ed frames, and 48 B1d frames using actual data-mode CP constellations')
-    print('PASS: live CPt configures Ri/Ri-bar, first2040 TRN2d symbols and repeated independently decoded MP/CRC')
+    print('PASS: live CPt configures Ri/Ri-bar, configured TRN2d symbols and repeated independently decoded MP/CRC')

@@ -133,6 +133,15 @@ static long reversal_boundary(V90Startup *s)
     }
     return s->samples - n + 1 + split;
 }
+static void begin_retrain(V90Startup *s, const char *reason)
+{
+    long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
+    v90_startup_init(s,law);
+    s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
+    s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
+    fprintf(stderr,"[v90p2] %s retrain %u at %.6fs; silence70ms then Tone B\n",
+            reason,retrains,now/8000.0);
+}
 static void receive_tone(V90Startup *s, int16_t input)
 {
     s->tone_history[s->tone_position] = input;
@@ -157,11 +166,7 @@ static void receive_tone(V90Startup *s, int16_t input)
             ++s->retrain_tone_windows;
         else s->retrain_tone_windows=0;
         if(s->retrain_tone_windows>=11) {
-            long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
-            v90_startup_init(s,law);
-            s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
-            s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
-            fprintf(stderr,"[v90p2] respond to caller retrain %u at %.6fs; silence70ms then Tone B\n",retrains,now/8000.0);
+            begin_retrain(s,"respond to caller");
             return;
         }
     }
@@ -213,6 +218,16 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
     for (int i = 0; i < n; ++i, ++s->samples) {
         receive(s, in[i]);
         receive_tone(s, in[i]);
+        /* 9.6.1: E must arrive within 5s + 2 RTDs of the Rd/Rd-bar
+           transition (384 samples after Rd starts, not the end of Rd-bar).
+           Test before generating the next sample so the first timeout
+           sample already clamps the data pump and starts the 70ms mute. */
+        if(s->phase4_active && s->phase4.reneg_start && !s->phase4.rx_e_logged) {
+            long rtd=s->round_trip>0?s->round_trip:0;
+            unsigned elapsed=s->phase4.samples-s->phase4.reneg_start;
+            if(elapsed>=384 && (long)(elapsed-384)>=40000+2*rtd)
+                begin_retrain(s,"initiate after renegotiation E timeout;");
+        }
         int symbol = (s->samples * 3) / 40;
         if (!s->retrains && symbol < 63 && symbol != s->tx_symbol) {
             s->tx_symbol = symbol;

@@ -44,6 +44,11 @@ void data_mode(V90Startup *s){
 }
 unsigned retrains(V90Startup *s){return s->retrains;}
 long mute_until(V90Startup *s){return s->retrain_mute_until;}
+void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
+ data_mode(s);s->round_trip=rtd;s->phase4.reneg_start=active?1000:0;
+ s->phase4.samples=1384;s->phase4.rx_e_logged=received_e;
+}
+int law(V90Startup *s){return s->alaw;}
 void destroy(void *s) { free(s); }
 ''')
     libpath = Path(tmp)/'test.so'
@@ -57,6 +62,8 @@ void destroy(void *s) { free(s); }
     lib.data_mode.argtypes=[C.c_void_p];lib.data_active.argtypes=[C.c_void_p]
     lib.phase3.argtypes=[C.c_void_p];lib.retrains.argtypes=[C.c_void_p]
     lib.mute_until.argtypes=[C.c_void_p];lib.mute_until.restype=C.c_long
+    lib.reneg_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int]
+    lib.law.argtypes=[C.c_void_p]
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.v90_startup_process.argtypes=[C.c_void_p,ptr,ptr,C.c_int]
@@ -127,6 +134,41 @@ void destroy(void *s) { free(s); }
                     assert lib.consumed()==before,'DTE consumed during retraining'
             lib.destroy(state)
     print('PASS: caller retrain recognition,70ms silence,Tone B and40ms reversal reply; off-band rejection')
+
+    # Renegotiation timeout starts at Rd/Rd-bar, not 24 samples later.
+    # Exercise variable RTP-sized chunks and preserve the outer sample clock.
+    for law in [0,1]:
+        for rtd in [-20,0,420,1280]:
+            for received_e,active in [(0,1),(1,1),(0,0)]:
+                state=lib.create(law);lib.reneg_timeout(state,rtd,received_e,active)
+                deadline=40000+2*max(rtd,0)
+                pcm=np.zeros(deadline,dtype=np.int16);out=np.zeros_like(pcm)
+                for start in range(0,deadline,157):
+                    a=pcm[start:start+157];o=out[start:start+157]
+                    lib.v90_startup_process(state,o,a,len(a))
+                assert lib.retrains(state)==0,'retrain before 5s + 2 RTDs'
+                before=lib.consumed()
+                pcm=np.zeros(1000,dtype=np.int16);out=np.zeros_like(pcm)
+                lib.v90_startup_process(state,out,pcm,len(pcm))
+                if active and not received_e:
+                    assert lib.retrains(state)==1 and not lib.data_active(state)
+                    assert lib.law(state)==law
+                    assert lib.mute_until(state)==20000+deadline+560
+                    assert np.all(out[:560]==0),'timeout mute is not exactly 70ms'
+                    assert lib.consumed()==before,'DTE consumed after timeout'
+                    z=out[560:960]*np.exp(-2j*np.pi*1200*np.arange(560,960)/8000)
+                    assert abs(z.sum())>500000,'timeout did not start Tone B'
+                    # A responding caller's Tone A and reversal must resume ranging.
+                    t=np.arange(1400);sign=np.where(t>=800,-1,1)
+                    reply=(2500*sign*np.cos(2*np.pi*2400*t/8000+.4)).astype(np.int16)
+                    answer=np.zeros_like(reply)
+                    lib.v90_startup_process(state,answer,reply,len(reply))
+                    assert abs(lib.tx_reversal(state)-(20000+deadline+1000+800+320))<=8
+                    assert lib.consumed()==before
+                else:
+                    assert lib.retrains(state)==0 and lib.data_active(state)
+                lib.destroy(state)
+    print('PASS: renegotiation deadline, RTD/law preservation, E cancellation,70ms mute/Tone B and DTE clamp')
 
     # Optional private hardware recording: normal data must not false-trigger,
     # but the caller's late real Tone A must clamp the data transmitter.

@@ -360,3 +360,11 @@ New tools/tests/v90-e-recovery.py sends independently GPA-scrambled valid/corrup
 CT105 had no pppd before deployment. Updated native sources built on CT successfully; unpaced48k configuration retained. Hardware attempt 881bcb02-a338-407f-b790-86d972b9432a started for verification.
 
 That attempt ended Failed during startup/repeated retraining before PPP; it provides no live E-only recovery result. The helper is terminal, API connections empty, no pppd and service active. New code remains deployed. Next concrete incomplete protocol requirement is the digital-side renegotiation timeout and local full-retrain initiation; caller-initiated retrain already exists. Goal remains active.
+
+## Digital-side renegotiation timeout (2026-09-09)
+
+Previous turn was progress: deployed the E alternative with regression coverage. Added the missing 9.6.1 deadline: if no upstream E is recognized within 40000 samples plus twice the measured round-trip delay after the Rd/Rd-bar transition, initiate a full retrain under 9.5.1.1. The transition is 384 samples after Rd starts, not 408. Clamp the native data pump at the first timeout sample, reset training while preserving the outer sample clock and PCM law, emit 560 silent samples then Tone B, and reuse the existing Tone A/reversal ranging path. The surrounding PTY/PPP process is untouched. Negative measured RTD is treated as zero for this deadline. Received E cancels it. This timer does not yet cover initial startup, the pre-Rd S/Sbar wait, or general data-mode impairments.
+
+Extended the startup regression with both PCM laws, RTDs -20/0/420/1280 samples, 157-sample processing chunks, exact deadline and 70ms mute assertions, E cancellation and no-renegotiation guards, DTE consumption checks, and a synthetic caller Tone A/reversal that resumes ranging with the required 40ms response. Full startup/ranging/caller-retrain tests, the E-recovery regression, native build, 100-frame audio framing and whitespace checks pass. These verify the protocol state machine, not successful live recovery after a channel impairment.
+
+Service active and no pppd before deployment; unpaced48k configuration retained. Updated startup source is being built on CT105 for hardware verification.

@@ -27,7 +27,9 @@ static void frame(V90Echo *s,const uint8_t *p,unsigned n,int tx,int64_t now)
         /* Retransmissions may reuse an identifier. Count separated requests,
            not arbitrary repeated flags or an immediate burst. */
         if(!s->count){s->first=s->last=now;s->count=1;}
-        else if(now-s->last>=80000){s->last=now;if(s->count<2)++s->count;}
+        /* Once two requests establish loss, subsequent requests must not
+           keep moving the deadline (including a shorter echo interval). */
+        else if(s->count<2 && now-s->last>=80000){s->last=now;++s->count;}
     } else if(!tx && p[2]==10 && s->pending[id] && now>=s->sent[id] &&
               now-s->sent[id]<=720000 && (!s->magic[id] || magic!=s->magic[id])) {
         s->armed=1;s->fired=0;s->count=0;

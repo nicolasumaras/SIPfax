@@ -27,7 +27,7 @@ for evidence and remaining work; these results do not imply full V.90 conformanc
 The native backend passively monitors PPP echo traffic. After a matching reply
 has demonstrated peer support, repeated unanswered requests can trigger one
 full retrain before PPP times out. It waits at least 40 seconds from the first
-unanswered request and 10 seconds from the latest counted request. Training
+unanswered request and 10 seconds from the second counted request. Training
 pauses this observer; another recovery requires a matching reply to rearm it.
 This recovery mechanism does not diagnose or eliminate the underlying impairment.
 

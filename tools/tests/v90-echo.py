@@ -49,6 +49,11 @@ int armed(V90Echo *s){return s->armed;}
     s=fresh()
     for t in range(10):tx(s,10+t*.01)
     assert not due(s,100);lib.destroy(s)
+    # Later requests must not postpone the established recovery deadline.
+    s=fresh()
+    for t in [10,20,30,40,50]:tx(s,t)
+    assert due(s,50.01),'frequent requests postponed recovery'
+    lib.destroy(s)
     # Same-ID retransmissions are allowed and still establish repeated loss.
     s=fresh();tx(s,10);tx(s,40);assert due(s,50);lib.destroy(s)
     # Correct replies stop detection; unsolicited, looped or stale replies don't.

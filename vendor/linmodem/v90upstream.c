@@ -1,15 +1,24 @@
 /* 4800-bit/s upstream V.34 in V.90: b=12,K=0, four-point constellation.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
- * This initial receiver hard-slices; trellis error correction and adaptive
- * timing recovery remain needed for difficult channels/long packets. GPL-2.0. */
+ * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
+ * streaming trellis correction. Adaptive timing recovery remains unfinished. GPL-2.0. */
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "v90upstream.h"
+static void soft_pair(void *,unsigned,unsigned);
 void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
+    const char *option=getenv("SIPFAX_V90_SOFT_RX");
+    s->soft_enabled=option && !strcmp(option,"1");
+    if(s->soft_enabled)for(unsigned i=0;i<V90_UP_PHASES;++i) {
+        V90UpSoftLane *l=&s->soft[i];l->up=s;l->lane.crc=0xffff;
+        v90_trellis_stream_init(&l->stream);
+        l->stream.opaque=l;l->stream.receive_pair=soft_pair;
+    }
     double beta=.1,sps=2.5;
     for(int fraction=0;fraction<4;++fraction)for(int k=0;k<V90_UP_TAPS;++k) {
         double *taps=s->taps[fraction];
@@ -49,12 +58,25 @@ static void bit(V90Upstream *s,V90UpLane *l,unsigned b)
     if(l->uart_count<=8) {l->uart_value|=plain<<(l->uart_count-1);++l->uart_count;return;}
     l->uart_count=0;if(plain)byte(s,l,l->uart_value);
 }
+static void soft_pair(void *opaque,unsigned a,unsigned b)
+{
+    V90UpSoftLane *l=opaque;
+    if(l->have_previous) {
+        unsigned d=(b-a)&3,q=(a-l->previous)&3;
+        bit(l->up,&l->lane,d>>1);bit(l->up,&l->lane,q&1);bit(l->up,&l->lane,q>>1);
+    }
+    l->previous=a;l->have_previous=1;
+}
 static unsigned delta(double ar,double ai,double br,double bi)
 {
     return (-(int)lrint(atan2(ai*br-ar*bi,ar*br+ai*bi)/(M_PI/2)))&3;
 }
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
+    if(s->soft_enabled) {
+        v90_trellis_stream_symbol(&s->soft[time%V90_UP_PHASES].stream,re,im);
+        return;
+    }
     for(unsigned pair=0;pair<2;++pair) {
         V90UpLane *l=&s->lanes[time%V90_UP_PHASES][pair];
         if(((time/V90_UP_PHASES)&1)==pair){l->a_re=re;l->a_im=im;l->have_a=1;}

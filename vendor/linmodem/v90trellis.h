@@ -3,7 +3,7 @@
 /* Experimental four-point, 16-state V.34 upstream kernel. GPL-2.0.
  * Caller supplies carrier/gain-aligned pairs and the known V0 inversion bit.
  * Acquisition, superframe synchronization and PPP delivery are external.
- * No live data path uses this kernel yet. */
+ * Native upstream integration is opt-in with SIPFAX_V90_SOFT_RX=1. */
 #include <stdint.h>
 #define V90_TRELLIS_DEPTH 64
 

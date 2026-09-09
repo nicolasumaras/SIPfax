@@ -62,6 +62,12 @@ Longer renegotiation training is an unverified interoperability experiment. Serv
 when no call is active. A stored `modem.command` takes precedence over its
 environment seed. The native code retains its GPL-2.0 licensing.
 
+`SIPFAX_V90_SOFT_RX=1` opts into the experimental streaming soft-decision
+upstream decoder. The default remains hard decoding. Both paths reset at the
+existing rate-renegotiation boundaries. Recorded replay matches the default
+receiver, but live reliability and natural-error correction gains are unverified;
+adaptive symbol timing is still unfinished.
+
 For the experimental 4.8 kbit/s upstream, `SIPFAX_PPP_UPSTREAM_TCP_MSS=536`
 optionally limits TCP segment-size advertisements sent to IPv4 PPP clients.
 This reduced a 4 KB request from 16.7 to about 10.2 seconds in controlled tests.

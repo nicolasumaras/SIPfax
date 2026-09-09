@@ -888,3 +888,12 @@ Prepared but did not run `work/v90_bidirectional_api_transfer.py`: bounded32KiB 
 Previous turn completed the bounded failed soak and disconnected the failed call. Added receipt timestamp to CRC-valid INFO1a and an initial Phase4 missing-E guard at15s+5RTDs from that timestamp (V.90 9.4.1). Before generating the deadline sample it invokes existing retraining:70ms mute and DTE clamp. Negative RTD is treated as zero. Guard applies only to active initial Phase4 without E; rate renegotiation retains its separate deadline. This covers missingE, not missing/invalidB1 afterE; full B1 acquisition validation remains incomplete. It is not a demonstrated cure for the observed intermittent acknowledgement failures.
 
 Regression drives the exact deadline with both G.711 laws, multiple RTDs, E cancellation, inactive Phase4 and renegotiation exclusions; verifies timestamp capture from synthetic INFO1a waveform, mute duration, one retrain and no DTE consumption after timeout. Startup suite passes, native build passes, renegotiation-training and CPs waveform regressions pass, diff check clean. Candidate not yet deployed; current server remains5b45059 with48k ceiling,1500ms initial/reneg training,60ms RTP pacing andMSS536. Goal active.
+
+
+## Initial timeout deployed; larger PPP transfer running (2026-09-09)
+
+Previous turn implemented and tested the missing-E timeout. Exact commit31c470e passed CI34410441502. Verified CTidle, backed up native binary/startup sources to `/tmp/sipfax-before-initial-deadline.tgz`, deployed target-built candidate from `/tmp/sipfax-initial-deadline-31c470e`, and restarted SIPfax active. BinarySHA25678561bf44c54747593f32c155385bb077510fd1e954d3dd3c20c83ba9126db99. All experiment settings unchanged.
+
+Attempt55f16b33-97af-4a3a-bada-f28d6389593c connected22:07:43.697UTC48k, Windows0xFF0000/native13949/pppd13950, zero initial error counters. Dial26700 terminal. Public probe still400; existing lock unresolved, not internet validation. Bounded packet capture62144 LIVE for900s on FreePBX `/tmp/v90-initial-deadline.pcap`, both ATA and CT UDP legs.
+
+Larger direct PPP worker42007 LIVE:32KiB request body to XP health followed by the full attempt-list response back, verified with SHA256 against LAN reads before/after. Remote process has480-second hard timeout; each stalled socket read30seconds. It does not use the locked client probe. Preserve call, transfer and capture. No claim yet that the timeout fired in hardware or that the new build improves reliability. Goal active.

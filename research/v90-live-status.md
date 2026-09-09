@@ -646,3 +646,12 @@ Revalidatedprobe41659 andcapture49834LIVE. Current0xF50000 reachesWindows641.122
 Previous turn progressed via actualreceiver CPsaudio regression. BothCIjobs on256ccb3 pass. Extendedstartup tests to prove PPPhealth-watchdog cannotinterruptCPssilence/Rt and that a caller neverclearingCPs reaches theexisting5s+2RTD E deadline, followedbyexact70msmute/retrain andnoDTEconsumption. Checkedbothlaws; fixtureexplicitlysetsphase4lawtomatchstartup. Fullstartuptestpasses. No productioncodechange orruntimechange thisturn.
 
 Revalidated41659live:36completedperiodicrequests throughWindows810.606s,35complete/oneearliertimeout; latestCRC875/alignment7. Keep0xF50000/native12337/pppd12339 andcapture49834, no restart. ReadonlyATAconfigconfirmsversion20260908-v90-faxmode1,g711ulaw/alaw,faxMode1; noexplicitjitter/VAD/echo settingwasreturned bytargetedsearch. This doesnotestablishdevice defaults. PendingCPsnative changes remainundeployed untilidle. Goalactive.
+
+
+## CPs native candidate staged and checked inside CT105 (2026-09-09)
+
+Previous turn progressed viaCPsdeadline tests. BothCIjobs on2da26ec pass. Archivedtrackedvendor/linmodem,tools/tests,test/fixtures andlauncher fromHEAD2da26eca1763d929c4db4d9e69cc511fc19d61b2 intoCT/tmp/sipfax-cps-2da26ec. Builtisolatedcandidate withnice10 andstandardCFLAGS; no /opt/sipfax source/binary orservicechange. Targetnativeframing,192CPsstatecases,32PCMcombinations andE-recovery testsPASS. CandidatebinarySHA256030036b41ce42ae782a3c1ffc4ee3bfbc5bdaf2196bc2b34348813759dba0458. This stagedbuildisreadyforidledeployment, notyetinstalled.
+
+Attemptedtargetaudiointegrationtest couldnotstart: systemPythonlacksNumPy. No packagesinstalledduringactivecall. SameaudiointegrationtestpassedlocallyandinCI; do notclaimtargetaudiointegrationpassed. LogsCT/tmp/sipfax-cps-2da26ec-{build,wave,states}.log. Allstaginghandles41391/58582/42931 terminal. UpdateddraftPR29descriptiontoincludeCPscoverage,pendinghardwareverification,deployedJSengineselection,twowatchdogrecoveriesand24minfallbackfailure; PRremainsdraft.
+
+Probe41659live throughindex42/Windows957.947s (~15m58s),42successful/oneearliertimeout. LatestCRC880/alignment7. Same0xF50000/native12337/pppd12339, capture49834stillactive; preserve. Runtimecontinuespriornative,60ms/48k/1500ms. Goalactive.

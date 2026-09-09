@@ -639,3 +639,10 @@ Liveprobe41659 remainsactive: request14timedout atWindows361.540s CRC643/alignme
 Previous turn made progress implementingcodingcontinuity andpublishingb029b9f. BothCIjobs onthatcommitpass. Addedtools/tests/v90-cps-wave.py: independentGPA recurrence,differentialfourpointmapping,rootraisedcosinepulseand1920Hzcarrier synthesizecallerCPs/CPs-prime/SCR/CP/CP-prime. Inputpassesv90_phase4_next andactualmatchedfilter/CRCparser, notdirectreceive_cp calls. Validsequence reachesU0silence,408samplesRt/Rbar,anddata; CRC-corruptedsequence neverstartsCPshandshake. Allfourfractionalsamplephases pass. Fixtureexpandedconstellationallowsvaliddatamapping; this is syntheticprotocolcoverage, nothardwareCPsacceptance. AddedtoCI. Nativecodeunchangedfromb029b9f andstillNOTDEPLOYED.
 
 Revalidatedprobe41659 andcapture49834LIVE. Current0xF50000 reachesWindows641.122s with27successfulperiodicrequests/oneearliertimeout(index14) outof28completed; lastCRC871/alignment7. Samecallcontinuesafterwatchdogrecovery. No redial,restart,deployment,overlappingprobeornewcapture. Preserveexistinghandles; extendedtestnotfinished.
+
+
+## CPs watchdog/deadline integration checked (2026-09-09)
+
+Previous turn progressed via actualreceiver CPsaudio regression. BothCIjobs on256ccb3 pass. Extendedstartup tests to prove PPPhealth-watchdog cannotinterruptCPssilence/Rt and that a caller neverclearingCPs reaches theexisting5s+2RTD E deadline, followedbyexact70msmute/retrain andnoDTEconsumption. Checkedbothlaws; fixtureexplicitlysetsphase4lawtomatchstartup. Fullstartuptestpasses. No productioncodechange orruntimechange thisturn.
+
+Revalidated41659live:36completedperiodicrequests throughWindows810.606s,35complete/oneearliertimeout; latestCRC875/alignment7. Keep0xF50000/native12337/pppd12339 andcapture49834, no restart. ReadonlyATAconfigconfirmsversion20260908-v90-faxmode1,g711ulaw/alaw,faxMode1; noexplicitjitter/VAD/echo settingwasreturned bytargetedsearch. This doesnotestablishdevice defaults. PendingCPsnative changes remainundeployed untilidle. Goalactive.

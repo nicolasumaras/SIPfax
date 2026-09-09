@@ -48,6 +48,7 @@ void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
  data_mode(s);s->round_trip=rtd;s->phase4.reneg_start=active?1000:0;
  s->phase4.samples=1384;s->phase4.rx_e_logged=received_e;
 }
+void silence_timeout(V90Startup *s,long rtd){reneg_timeout(s,rtd,0,1);s->phase4.stage=7;s->phase4.alaw=s->alaw;s->phase4.cp.silence=1;}
 void echo_ready(V90Startup *s,int stage,int received_e){data_mode(s);s->phase4.stage=stage;s->phase4.rx_e_logged=received_e;}
 int law(V90Startup *s){return s->alaw;}
 void destroy(void *s) { free(s); }
@@ -64,6 +65,7 @@ void destroy(void *s) { free(s); }
     lib.phase3.argtypes=[C.c_void_p];lib.retrains.argtypes=[C.c_void_p]
     lib.mute_until.argtypes=[C.c_void_p];lib.mute_until.restype=C.c_long
     lib.reneg_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int]
+    lib.silence_timeout.argtypes=[C.c_void_p,C.c_long]
     lib.law.argtypes=[C.c_void_p]
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
@@ -72,7 +74,7 @@ void destroy(void *s) { free(s); }
     lib.v90_info0d.argtypes=[C.POINTER(C.c_ubyte),C.c_int]
     lib.echo_ready.argtypes=[C.c_void_p,C.c_int,C.c_int]
     lib.v90_startup_data_retrain.argtypes=[C.c_void_p]
-    for stage,received_e in [(4,1),(4,0),(2,1),(5,1),(6,1)]:
+    for stage,received_e in [(4,1),(4,0),(2,1),(5,1),(6,1),(7,1),(8,1)]:
         state=lib.create(0);lib.echo_ready(state,stage,received_e)
         expected=stage==4 and received_e
         assert lib.v90_startup_data_retrain(state)==expected
@@ -150,6 +152,20 @@ void destroy(void *s) { free(s); }
                     assert lib.consumed()==before,'DTE consumed during retraining'
             lib.destroy(state)
     print('PASS: caller retrain recognition,70ms silence,Tone B and40ms reversal reply; off-band rejection')
+
+    # A caller that never clears CPs must not leave PPP clamped forever.
+    for law in [0,1]:
+        state=lib.create(law);lib.silence_timeout(state,420)
+        pcm=np.zeros(40840,dtype=np.int16);out=np.zeros_like(pcm)
+        lib.v90_startup_process(state,out,pcm,len(pcm))
+        assert lib.retrains(state)==0 and lib.consumed()==0
+        assert np.all(out==(8 if law else 0))
+        pcm=np.zeros(561,dtype=np.int16);out=np.zeros_like(pcm)
+        lib.v90_startup_process(state,out,pcm,len(pcm))
+        assert lib.retrains(state)==1 and lib.consumed()==0
+        assert np.all(out[:560]==0) and out[560]!=0
+        lib.destroy(state)
+    print('PASS: stalled CPs silence reaches the existing E deadline; watchdog does not interrupt silence/Rt')
 
     # Renegotiation timeout starts at Rd/Rd-bar, not 24 samples later.
     # Exercise variable RTP-sized chunks and preserve the outer sample clock.

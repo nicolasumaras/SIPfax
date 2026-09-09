@@ -41,6 +41,6 @@ void destroy(void *p){free(p);}
   assert lib.value(s,7)==12,'renegotiation must retain CPt K'
   assert lib.value(s,5)==0,'DTE consumed while clamped'
   assert lib.value(s,6)>0,'test never entered data mode'
-  assert np.any(out[trn:trn+2040]),'missing renegotiation TRN2d'
+  assert set(np.abs(out[trn:trn+2040]).tolist())=={1244,3772,6140,8316},'TRN2d must use CPt Ucodes, not data Ucodes'
   print('PASS: real late S/Sbar triggers one aligned384+24-symbol Rd response and clamps DTE')
  finally:lib.destroy(s)

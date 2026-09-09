@@ -12,7 +12,7 @@ typedef struct {
 int v90_pcm_level(int alaw,unsigned ucode);
 /* Configure from a CRC-validated CP, reset every coding/filter memory. */
 int v90_pcm_init(V90Pcm *s,const V90Cp *cp,int (*get_bit)(void *),void *opaque);
-/* Renegotiation keeps the preceding data constellation/shaping, with CPt's K. */
+/* Renegotiation uses CPt's constellation/K with preceding data shaping. */
 int v90_pcm_renegotiate(V90Pcm *s,const V90Cp *data,const V90Cp *training,int (*get_bit)(void *),void *opaque);
 void v90_pcm_frame(V90Pcm *s,int16_t out[6]);
 #endif

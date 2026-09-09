@@ -31,13 +31,16 @@ int v90_pcm_init(V90Pcm *s,const V90Cp *cp,int (*get_bit)(void *),void *opaque)
 }
 int v90_pcm_renegotiate(V90Pcm *s,const V90Cp *data,const V90Cp *training,int (*get_bit)(void *),void *opaque)
 {
-    V90Pcm result,trained;
-    if(v90_pcm_init(&result,data,get_bit,opaque) ||
-       v90_pcm_init(&trained,training,0,0))return -1;
-    uint64_t product=1;
-    for(unsigned i=0;i<6;++i)product*=result.m[i];
-    if(product<((uint64_t)1<<trained.k))return -1;
-    result.k=trained.k;*s=result;return 0;
+    V90Pcm result,preceding;
+    if(v90_pcm_init(&result,training,get_bit,opaque) ||
+       v90_pcm_init(&preceding,data,0,0))return -1;
+    /* 8.6.5 retains CPt's constellation; 8.6 substitutes only the
+       preceding data-mode spectral shaping parameters, not its Ucodes. */
+    result.sr=preceding.sr;result.s=preceding.s;
+    result.width=preceding.width;result.depth=preceding.depth;
+    result.a1=preceding.a1;result.a2=preceding.a2;
+    result.b1=preceding.b1;result.b2=preceding.b2;
+    *s=result;return 0;
 }
 static unsigned scramble(V90Pcm *s)
 {

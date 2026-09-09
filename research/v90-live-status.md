@@ -931,3 +931,12 @@ Previous turn produced loss-recovery evidence. Worker78852 completed successfull
 Call0x1000000/native14018/pppd14019 remains connected; at436.327s Windows reports48k,CRC11, other reported error counters0. Started direct PPP healthworker44993 LIVE,30requests/20sgaps/3failurestop, to observe post-transfer stability. RTPcapture11632 remains under its900sbound. Preserve live handles/call. Public probe lock remains unresolved.
 
 Code review confirms native upstream still hard-slices and omits trellis error correction/adaptive timing. Legacy V.34 trellis code contains explicit unresolved labelling/table caveats; do not transplant it without independent validation against the standard and hardware. Completing that receiver remains material work toward reliable V.90, beyond the successful scoped TCP comparison. Goal active.
+
+
+## Hardware validates corrected four-point trellis recurrence (2026-09-09)
+
+Previous turn completed large-transfer integrity verification. Revalidated post-transfer worker44993 live; requests0..4 pass (index2 took19.460s), index5 timed out. Do not infer terminal call failure from one request. Preserve call14018 and worker/capture handles.
+
+Offline analysis of private native14018RX raw25..30s uses an independent matched-filter front end, hard quadrant extraction, both4Dpair alignments, four phase rotations and all16initial states. Tested legacy and corrected middle subset-bit formula from the V.34 code separately. Best corrected recurrence residual rate0.0246299; fitting V.34 Table12's J7 inversion pattern01110111111110 at32-symbol intervals gives ZERO mismatches over7836four-dimensional symbols at offset389 modulo448. Best legacy residual rate0.4866003. This validates the restricted four-point recurrence plus superframe pattern against this hardware interval, not a complete decoder or all V.34 constellations.
+
+Primary reference checked: ITU V.34(02/98),9.6.3/Table12 (periodic inversion),9.6.3.1/Table13 (subset conversion),9.6.3.2 (16-state encoder and one4D delay): https://www.itu.int/rec/dologin_pub.asp?id=T-REC-V.34-199802-I!!PDF-E&lang=e&type=items . Private prototype `work/v90_trellis_hardware_audit.py`, metadata `work/v90-trellis-sync-fit.json` and `work/v90-trellis-hardware-audit.json`. No captured PPP payload committed. This is a concrete basis for a soft-decision error-correcting receiver; no live DSP change made and no correction-performance claim yet. Goal active.

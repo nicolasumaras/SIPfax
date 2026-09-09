@@ -1069,3 +1069,12 @@ Previous turn completed the failed48ksoak and started42667comparison. Transfer58
 Started three-request direct PPP recoveryworker3504 LIVE, work/v90_soft_42667_recovery.py -> work/v90-soft-42667-recovery.json. Preserve call0x1040000/attempt8010fc7f and worker3504. Transfer58330/capture70491 both terminal. Runtime remains61892a9soft decoder, ceiling42667.
 
 Extended the pending deduplication fix: trellis streams retain original input symbol indices across buffering, sliding acquisition and invalid-input reset; decoded pair callbacks expose the original B-symbol index. Native parser uses corresponding source sample times for duplicate comparison, while retaining actual delivery times for logs. This handles later-locking candidates replaying an already-delivered source interval without suppressing genuine later retransmissions. Regression checks delayed replay, genuine repeats and exact output indices after reset/reacquisition. Trellis/frame delivery/soft E-recovery tests pass; integrated long recording still matches313frames/157575bytes in both paths. No deployment this turn; older staged6bc0d8ebuild does not contain this extension. Goal active.
+
+
+## Replay fixes deployed; fresh 42.667k transfer active (2026-09-09)
+
+Recovery3504 terminated with allthree requests failed. Disconnected attempt8010fc7f successfully (disconnect44727 terminal), verified XP connections empty and native/pppd absent. Exact2f6213c CI and target build passed. Installed binary/upstream/trellis sources from /tmp/sipfax-replay-2f6213c; rollback /tmp/sipfax-before-replay-2f6213c.tar.gz. Deployed binary SHA2562d00f1f4708139cd43c598275012abf446dbd53530d065be048f09b1152491cd. Service active; preserved ceiling42667, soft switch1, timing/MSS settings. Older6bc0d8estaging is superseded.
+
+Fresh attemptd749ed13-20b6-45df-ac6e-1ac4fc5bde49 connected23:45:16.193UTC, Windows0x1050000 reports42600bps, native14834/pppd14836. At21.882sWindowsCRC3/othererrors0. Dial96601 terminal; public probe still400. No training/reliability cure claimed.
+
+Confirmed PPPcapture96755 LIVE and listening before launching transfer20324 LIVE. Capture /tmp/v90-replay-42667-ppp.pcap,600sbound; transfer same small-window480s test, helper work/v90_replay_42667_transfer.py -> work/v90-replay-42667-transfer.json. Preserve this call and both handles. Prior recovery3504 and call14599 terminal; previous70491capture terminal. Goal active.

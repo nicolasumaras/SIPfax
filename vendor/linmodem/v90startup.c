@@ -283,11 +283,24 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 v90_train_tx_init(&s->training_tx,s->alaw,s->uinfo);
                 s->training_tx.dil=s->training.dil;
                 s->training_tx_active=1;
+                /* Before Phase4 starts its receiver is available to monitor
+                   CPt. A valid CPt proves the caller has left DIL, even if
+                   the preceding short S/Sbar transition was impaired. */
+                v90_training_init(&s->phase4.rx);s->phase4.rx.cp_mode=1;
                 fprintf(stderr,"[v90p3] transmit Sd/Sbar, TRN1d then Jd at %.6fs UINFO=%d\n",s->samples/8000.0,s->uinfo);
             }
             if(s->phase4_active) {
                 out[i]=v90_phase4_next(&s->phase4,in[i]);
             } else if(s->training_tx_active) {
+                if(s->training_tx.stage==1 && !s->training_tx.stop_dil) {
+                    V90Training *monitor=&s->phase4.rx;
+                    int found=monitor->found;
+                    v90_training_receive(monitor,in+i,1);
+                    if(monitor->found!=found && !monitor->cp.type) {
+                        s->training_tx.stop_dil=1;
+                        fprintf(stderr,"[v90p3] CRC-valid CPt during DIL at %.6fs; finish segment and enter Phase4\n",s->samples/8000.0);
+                    }
+                }
                 if(s->training_tx.sample>=2544) {
                     int event=v90_s_detect(&s->s_detector,in[i]);
                     if(event==1 && !s->training_tx.jd_end) {

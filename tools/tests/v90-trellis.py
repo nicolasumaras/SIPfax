@@ -19,6 +19,13 @@ void destroy(void *s){free(s);}
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
     lib.v90_trellis_pair.argtypes=[C.c_void_p,*([C.c_double]*4),C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
+    lib.v90_trellis_sync.argtypes=[C.c_void_p,C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
+    lib.v90_trellis_inversion.argtypes=[C.c_uint,C.c_uint]
+    def acquire(labels):
+        packed=np.ascontiguousarray(labels[:,0]|(labels[:,1]<<2),dtype=np.uint8)
+        offset=C.c_uint();errors=C.c_uint()
+        ok=lib.v90_trellis_sync(packed.ctypes.data,len(packed),C.byref(offset),C.byref(errors))
+        return ok,offset.value,errors.value
     total_hard=0
     for initial in range(16):
         n=2200;labels=[];inv=[];state=initial
@@ -35,6 +42,10 @@ void destroy(void *s){free(s);}
                 for i in range(150,n-150,101):samples[i,i%2]*=np.exp(1j*np.deg2rad(55))
             hard=(-np.rint(np.angle(samples)/(np.pi/2)).astype(int))%4
             total_hard+=int(np.count_nonzero(hard!=labels))
+            ok,offset,errors=acquire(hard)
+            assert ok and offset==0,(initial,disturb,ok,offset,errors)
+            if not disturb:assert errors==0
+
             s=lib.create();out=[]
             for i,(a,b) in enumerate(samples):
                 aa=C.c_uint();bb=C.c_uint()
@@ -43,5 +54,15 @@ void destroy(void *s){free(s);}
                 if ready:out.append([aa.value,bb.value])
             lib.destroy(s);out=np.array(out)
             assert np.array_equal(out[64:],labels[64:len(out)]),(initial,disturb)
+    # Cropping and rotating symbols must retain the actual superframe phase.
+    for crop in [0,1,31,32,127,389,447]:
+        for rotation in range(4):
+            ok,offset,errors=acquire((labels[crop:]+rotation)%4)
+            assert ok and offset==(-crop)%448 and errors==0,(crop,rotation,offset,errors)
+            for i in range(448):
+                expected=pattern[((i+crop)//32)%14] if (i+crop)%32==0 else 0
+                assert lib.v90_trellis_inversion(i,offset)==expected
+    for bad in [np.zeros((2200,2),dtype=int),rng.integers(0,4,(2200,2)),labels[:895]]:
+        assert not acquire(bad)[0],'false superframe acquisition'
     assert total_hard>0
-    print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected')
+    print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected; automatic superframe sync and rejection guards')

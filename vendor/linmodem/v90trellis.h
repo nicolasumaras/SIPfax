@@ -19,4 +19,9 @@ void v90_trellis_init(V90Trellis *s);
  * Returns 1 with a decoded pair after 63 pairs of lookahead, otherwise 0. */
 int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                     unsigned inversion,unsigned *a,unsigned *b);
+/* Acquire the 448-pair J=7 superframe phase from 896..16384 hard pairs.
+ * Labels are a|(b<<2). offset is relative to labels[0]. Returns 0 if
+ * confidence is insufficient; errors reports the best syndrome score. */
+int v90_trellis_sync(const uint8_t *labels,unsigned n,unsigned *offset,unsigned *errors);
+unsigned v90_trellis_inversion(unsigned pair,unsigned offset);
 #endif

@@ -951,3 +951,12 @@ Added experimental `v90trellis.c/.h`:16states, Euclidean branch metrics,64-pair 
 New standalone `tools/tests/v90-trellis.py` uses an independent Table13 literal transmitter, all16initial states and repeated ring wraps. Clean streams decode exactly after acquisition and304controlled hard-decision errors are corrected. C kernel also passes private hardware/perturbation comparison:7837decoded pairs, no disagreements after acquisition for clean or disturbed input. Metadata `work/v90-c-trellis-hardware-result.json`; full audio remains private. Test added to CI. No deployment made.
 
 Post-transfer healthworker44993 remains live through index17:17passes and one failure(index5), including recovery after the failure. Preserve current call14018 and RTPcapture11632 while checking authoritative handle status. Goal active.
+
+
+## Automatic trellis superframe acquisition validated; live soak failed (2026-09-09)
+
+Previous turn added a tested C soft kernel; exact99a148d CI passed. Added automatic448-pair J7 superframe alignment using a local parity-check syndrome that eliminates unknown encoder memory: observed parity[i]^parity[i-3]^parity[i-4]^Y2[i-3]^Y2[i-2]^Y1[i-1] equalsV0[i]^V0[i-3]^V0[i-4]. Unlike running a hard encoder state indefinitely, individual decision errors affect only nearby checks. Acquisition folds896..16384pairs into448bins, requires bounded residual and a margin over the runner-up, and returns offset plus score. V0 generation is provided separately.
+
+Independent tests pass for all16initial states, clean/damaged streams, shifted starts, four quadrant rotations, and constant/random/short-input rejection. Private hardware audit automatically acquires offset389 for clean and controlled-damaged recordings; C decodes7837pairs with zero post-acquisition disagreement in either case. No manual superframe phase is supplied to the C decoder. Carrier/gain and timing-lane selection remain external, so this is still not connected to the live receiver. Private metadata `work/v90-c-trellis-auto-sync-result.json`; no PCM payload committed.
+
+Healthworker44993 terminated after finalthree failures(indices23..25):26requests,22pass/4fail including earlierindex5. Results preserved `work/v90-health-over-ppp-14018-final.json`; requested disconnect of failedbf17efd6 after worker termination. RTPcapture11632 had already ended at its900sbound with180627captured/180668received/0kernel drops. This remains a failed extended stability outcome despite the earlier verified139KBtransfer. Goal active.

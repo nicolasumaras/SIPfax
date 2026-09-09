@@ -49,3 +49,53 @@ int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
     unsigned index=(slot+1)%V90_TRELLIS_DEPTH,label=s->labels[index][state];
     *out_a=label&3;*out_b=label>>2;return 1;
 }
+
+unsigned v90_trellis_inversion(unsigned pair,unsigned offset)
+{
+    static const uint8_t pattern[14]={0,1,1,1,0,1,1,1,1,1,1,1,1,0};
+    unsigned position=(pair%448+448-offset%448)%448;
+    return position%32==0?pattern[position/32]:0;
+}
+
+static unsigned parity(unsigned label)
+{
+    return ((label>>2)-label)&1;
+}
+static unsigned converter_y1(unsigned label)
+{
+    unsigned a=label&3,b=label>>2;
+    return ((a&1)&((b&1)^1))^(a>>1)^(b>>1);
+}
+
+int v90_trellis_sync(const uint8_t *labels,unsigned n,unsigned *offset,unsigned *errors)
+{
+    unsigned ones[448]={0},total[448]={0};
+    if(n<896 || n>16384)return 0;
+    for(unsigned i=0;i<n;++i)if(labels[i]>15)return 0;
+    for(unsigned i=4;i<n;++i) {
+        /* Eliminate the unknown four encoder memory bits. For u=Y0:
+         * u[i]^u[i-3]^u[i-4] = Y2[i-3]^Y2[i-2]^Y1[i-1].
+         * Observed quadrant parity is u^V0, leaving a local syndrome
+         * V0[i]^V0[i-3]^V0[i-4]. Decision errors therefore stay local. */
+        unsigned bit=parity(labels[i])^parity(labels[i-3])^parity(labels[i-4])^
+                     (labels[i-3]&1)^(labels[i-2]&1)^converter_y1(labels[i-1]);
+        ++total[i%448];ones[i%448]+=bit;
+    }
+    unsigned best=n,second=n,best_offset=0;
+    for(unsigned candidate=0;candidate<448;++candidate) {
+        unsigned score=0;
+        for(unsigned i=0;i<448;++i) {
+            unsigned expected=v90_trellis_inversion(i,candidate)^
+                v90_trellis_inversion(i+448-3,candidate)^
+                v90_trellis_inversion(i+448-4,candidate);
+            score+=expected?total[i]-ones[i]:ones[i];
+        }
+        if(score<best){second=best;best=score;best_offset=candidate;}
+        else if(score<second)second=score;
+    }
+    *errors=best;
+    /* Reject constant/random inputs and ambiguous alignments. These are
+     * acquisition thresholds, not a proof that arbitrary data is valid. */
+    if(best>(n-4)/16 || second-best<(n-4)/128+1)return 0;
+    *offset=best_offset;return 1;
+}

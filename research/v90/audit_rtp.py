@@ -56,19 +56,28 @@ def read_flows(path):
 
 def report(flows):
     for key, packets in flows.items():
-        gaps, clock, intervals = [], [], []
+        gaps, clock, intervals, wraps, timed_intervals = [], [], [], [], []
         for a, b in zip(packets, packets[1:]):
             step = (b[1] - a[1]) & 65535
             if step != 1:
                 gaps.append([round(b[0] - packets[0][0], 6), step])
+            elif b[1] < a[1]:
+                wraps.append({'epoch': b[0],
+                    'relative_seconds': round(b[0] - packets[0][0], 6)})
             ts_step = (b[2] - a[2]) & 0xffffffff
             if ts_step != len(a[3]):
                 clock.append([round(b[0] - packets[0][0], 6), ts_step])
             intervals.append((b[0] - a[0]) * 1000)
+            timed_intervals.append((intervals[-1], b[0]))
         ordered = sorted(intervals)
         print(json.dumps({'flow': key, 'packets': len(packets),
             'lengths': dict(collections.Counter(len(p[3]) for p in packets)),
             'sequence_anomalies': gaps, 'timestamp_anomalies': clock,
+            'first_epoch': packets[0][0], 'last_epoch': packets[-1][0],
+            'first_sequence': packets[0][1], 'sequence_wraps': wraps,
+            'largest_intervals': [{'milliseconds': ms, 'epoch': epoch,
+                'relative_seconds': round(epoch - packets[0][0], 6)}
+                for ms, epoch in sorted(timed_intervals, reverse=True)[:5]],
             'interval_ms_min_median_max': [ordered[0], ordered[len(ordered)//2], ordered[-1]] if ordered else [],
             'payload_sha256': hashlib.sha256(b''.join(p[3] for p in packets)).hexdigest()}))
     # Packet-level exact comparison excludes duplicated silence hashes.
@@ -85,8 +94,14 @@ def report(flows):
                     continue
                 left = collections.Counter(p[3] for p in flows[a])
                 right = collections.Counter(p[3] for p in flows[b])
+                mismatch = next((i for i, (x, y) in enumerate(zip(flows[a], flows[b]))
+                    if x[3] != y[3]), None)
+                if mismatch is None and len(flows[a]) != len(flows[b]):
+                    mismatch = min(len(flows[a]), len(flows[b]))
                 print(json.dumps({'path': [source, dest],
                     'identical_packets': sum((left & right).values()),
+                    'ordered_payloads_identical': mismatch is None,
+                    'first_ordered_mismatch_packet': mismatch,
                     'input_packets': len(flows[a]), 'output_packets': len(flows[b])}))
 
 

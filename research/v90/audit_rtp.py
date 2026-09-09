@@ -79,6 +79,10 @@ def report(flows):
         outgoing = [k for k in keys if k[2] == dest]
         for a in incoming:
             for b in outgoing:
+                # Do not compare separate calls just because their endpoints
+                # match: silence and repeated training share payload hashes.
+                if min(flows[a][-1][0], flows[b][-1][0]) < max(flows[a][0][0], flows[b][0][0]):
+                    continue
                 left = collections.Counter(p[3] for p in flows[a])
                 right = collections.Counter(p[3] for p in flows[b])
                 print(json.dumps({'path': [source, dest],

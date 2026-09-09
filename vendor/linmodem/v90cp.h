@@ -4,7 +4,7 @@
 #define V90_CP_MAX_BITS 1788
 typedef struct {
     unsigned type,drn,sr,ack,alaw,lookahead,gain,upstream_mask;
-    unsigned count,codec_masks;
+    unsigned count,codec_masks,silence;
     int filter[4];
     uint8_t indices[6],mask[2][6][128];
 } V90Cp;

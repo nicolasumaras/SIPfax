@@ -30,6 +30,7 @@ static int data_bit(void *opaque)
 {
     V90Phase4 *s=opaque;
     if(s->data_bits++<48*(s->encoder.k+s->encoder.s))return 1;
+    if(s->stage!=4)return 1; /* DTE clamped as soon as S is recognized. */
     return s->get_data_bit?s->get_data_bit(s->data_opaque):1;
 }
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
@@ -40,24 +41,50 @@ void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 }
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
 {
+    if(s->stage==4 || s->stage==5) {
+        int event=v90_s_detect(&s->rate_detector,input);
+        if(event==1 && s->stage==4) {
+            s->preceding_cp=s->cp;s->stage=5;
+            v90_training_init(&s->rx);s->rx.cp_mode=1;
+            s->have_cp=s->have_ack=s->mp_ack=s->rx_e_logged=0;
+            s->generated=s->ed_frame=s->mp_announced=s->reneg_start=0;
+            ++s->renegotiations;
+            fprintf(stderr,"[v90p4] rate renegotiation S; clamp DTE at %.6fs\n",s->samples/8000.0);
+        }
+        if(event==2 && s->stage==5) {
+            s->stage=6;
+            fprintf(stderr,"[v90p4] rate renegotiation Sbar at %.6fs\n",s->samples/8000.0);
+        }
+    }
     int count=s->rx.found;v90_training_receive(&s->rx,&input,1);
     if(count!=s->rx.found) {
         if(!s->rx.cp.type && !s->have_cpt) {
             s->cpt=s->rx.cp;s->have_cpt=1;
             fprintf(stderr,"[v90p4] live CRC-valid CPt: drn=%u Sr=%u ld=%u gain=%u masks=%u at %.6fs\n",s->cpt.drn,s->cpt.sr,s->cpt.lookahead,s->cpt.gain,s->cpt.count,s->samples/8000.0);
         } else if(s->rx.cp.type) {
+            if(s->stage==4)goto cp_done; /* Do not silently change active CP. */
             s->cp=s->rx.cp;
             if(!s->have_cp || (!s->have_ack && s->cp.ack))
                 fprintf(stderr,"[v90p4] live CRC-valid CP%s: downstream=%u/3 bit/s Sr=%u ack=%u at %.6fs\n",s->cp.ack?"-prime":"",(s->cp.drn+20)*4000,s->cp.sr,s->cp.ack,s->samples/8000.0);
             s->have_cp=1;if(s->cp.ack)s->have_ack=1;
+            if(s->cp.silence) {
+                s->stage=3;
+                fprintf(stderr,"[v90p4] CPs silence procedure not implemented; await retrain\n");
+            }
         }
     }
+cp_done:
     if(s->rx.e_seen && !s->rx_e_logged) {
         s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; starting upstream B1/data receiver\n",s->samples/8000.0);
     }
     if(s->stage==2 && s->ed_frame && s->samples-s->trn_start==(s->ed_frame+2)*6) {
         if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
             s->stage=4;s->data_start=s->samples;
+            s->data_bits=0;memset(&s->rate_detector,0,sizeof(s->rate_detector));
+            /* Keep callbacks but reset the upstream demapper for the new B1. */
+            void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
+            void *opaque=s->upstream.opaque;
+            v90_upstream_init(&s->upstream);s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
             fprintf(stderr,"[v90p4] Ed complete; transmit B1d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable data constellation\n");}
     }
@@ -79,9 +106,24 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         out=s->frame[n%6];
         if(n>=2040 && !s->mp_announced){s->mp_announced=1;fprintf(stderr,"[v90p4] transmit MP at %.6fs\n",s->samples/8000.0);}
     }
-    if(s->stage==4) {
+    if(s->stage==6 && !s->reneg_start && (s->samples-s->data_start)%6==0)
+        s->reneg_start=s->samples;
+    if(s->stage==6 && s->reneg_start) {
+        unsigned n=s->samples-s->reneg_start;
+        int sign=n%6<3?1:-1;if(n>=384)sign=-sign;
+        out=sign*v90_pcm_level(s->alaw,s->encoder.map[n%6][0]);
+        if(n==407) {
+            if(v90_pcm_renegotiate(&s->encoder,&s->preceding_cp,&s->cpt,training_bit,s)) {
+                s->stage=3;fprintf(stderr,"[v90p4] unusable renegotiation constellation\n");
+            } else {
+                s->mp_length=((86+s->encoder.k+s->encoder.s-1)/(s->encoder.k+s->encoder.s))*(s->encoder.k+s->encoder.s);
+                mp_build(s);s->stage=2;s->trn_start=s->samples+1;
+                fprintf(stderr,"[v90p4] Rd/Rd-bar complete; renegotiation TRN2d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->trn_start/8000.0);
+            }
+        }
+    } else if(s->stage==4 || s->stage==5 || s->stage==6) {
         unsigned n=s->samples-s->data_start;
-        if(s->rx_e_logged)v90_upstream_receive(&s->upstream,input);
+        if(s->stage==4 && s->rx_e_logged)v90_upstream_receive(&s->upstream,input);
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
         if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; bidirectional PPP data path enabled\n");

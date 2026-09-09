@@ -14,6 +14,7 @@ int parse(const unsigned char *b,unsigned n) {
  if(r!=1)return r;
  return used==428 && cp.type==0 && cp.drn==9 && cp.sr==1 && cp.lookahead==1 && cp.gain==8180 && cp.filter[0]==63 && cp.count==1 && cp.codec_masks==1 && cp.mask[0][0][53] && cp.mask[0][0][78] && cp.mask[0][0][88] && cp.mask[0][0][96]?1:-2;
 }
+int silence(const unsigned char *b,unsigned n){V90Cp cp;return v90_cp_parse(&cp,b,n,0)==1?(int)cp.silence:-1;}
 void *create(void){V90Training *s=malloc(sizeof(*s));v90_training_init(s);s->cp_mode=1;return s;}
 int drn(V90Training *s){return s->cp.drn;}
 ''')
@@ -23,6 +24,16 @@ int drn(V90Training *s){return s->cp.drn;}
     for i in range(len(b)):assert lib.parse(b,i)!=1
     for i in range(len(b)):
         bad=bytearray(b);bad[i]^=1;assert lib.parse(bytes(bad),len(bad))!=1,i
+    lib.silence.argtypes=[C.c_char_p,C.c_uint]
+    assert lib.silence(b,len(b))==0
+    request=bytearray(b);request[19]=1;request[30]=1
+    register=0xffff
+    for j in range(18,409):
+        if j%17==0:continue
+        top=(register>>15)^request[j];register=(register<<1)&0xffff
+        if top:register^=0x1021
+    request[409:425]=bytes((register>>(15-j))&1 for j in range(16))
+    assert lib.silence(bytes(request),len(request))==1
     if len(sys.argv)>1:
         lib.create.restype=C.c_void_p;lib.drn.argtypes=[C.c_void_p]
         lib.v90_training_receive.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_int]

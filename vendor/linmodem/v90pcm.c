@@ -29,6 +29,16 @@ int v90_pcm_init(V90Pcm *s,const V90Cp *cp,int (*get_bit)(void *),void *opaque)
     result.b1=cp->filter[2]/64.0;result.b2=cp->filter[3]/64.0;
     result.get_bit=get_bit;result.opaque=opaque;*s=result;return 0;
 }
+int v90_pcm_renegotiate(V90Pcm *s,const V90Cp *data,const V90Cp *training,int (*get_bit)(void *),void *opaque)
+{
+    V90Pcm result,trained;
+    if(v90_pcm_init(&result,data,get_bit,opaque) ||
+       v90_pcm_init(&trained,training,0,0))return -1;
+    uint64_t product=1;
+    for(unsigned i=0;i<6;++i)product*=result.m[i];
+    if(product<((uint64_t)1<<trained.k))return -1;
+    result.k=trained.k;*s=result;return 0;
+}
 static unsigned scramble(V90Pcm *s)
 {
     unsigned bit=s->get_bit?(unsigned)s->get_bit(s->opaque)&1:1;

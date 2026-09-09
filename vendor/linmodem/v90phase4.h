@@ -16,6 +16,9 @@ typedef struct {
     int (*get_data_bit)(void *);
     uint8_t mp[132];
     int16_t frame[6];
+    V90SDetect rate_detector;
+    V90Cp preceding_cp;
+    unsigned renegotiations,reneg_start;
 } V90Phase4;
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo);
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input);

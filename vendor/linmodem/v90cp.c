@@ -35,7 +35,7 @@ int v90_cp_parse(V90Cp *out,const uint8_t *b,unsigned count,unsigned *consumed)
     if(crc!=get(b,cs,16))return -1;
     V90Cp result;memset(&result,0,sizeof(result));
     result.type=b[19];result.drn=get(b,20,5);result.sr=get(b,31,2);
-    result.ack=b[33];result.alaw=b[35];result.upstream_mask=get(b,36,13);
+    result.ack=b[33];result.alaw=b[35];result.upstream_mask=get(b,36,13);result.silence=b[30];
     result.lookahead=get(b,49,2);result.gain=get(b,52,16);
     if(result.drn>22)return -1;
     for(unsigned j=0;j<4;++j) {

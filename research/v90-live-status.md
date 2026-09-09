@@ -655,3 +655,8 @@ Previous turn progressed viaCPsdeadline tests. BothCIjobs on2da26ec pass. Archiv
 Attemptedtargetaudiointegrationtest couldnotstart: systemPythonlacksNumPy. No packagesinstalledduringactivecall. SameaudiointegrationtestpassedlocallyandinCI; do notclaimtargetaudiointegrationpassed. LogsCT/tmp/sipfax-cps-2da26ec-{build,wave,states}.log. Allstaginghandles41391/58582/42931 terminal. UpdateddraftPR29descriptiontoincludeCPscoverage,pendinghardwareverification,deployedJSengineselection,twowatchdogrecoveriesand24minfallbackfailure; PRremainsdraft.
 
 Probe41659live throughindex42/Windows957.947s (~15m58s),42successful/oneearliertimeout. LatestCRC880/alignment7. Same0xF50000/native12337/pppd12339, capture49834stillactive; preserve. Runtimecontinuespriornative,60ms/48k/1500ms. Goalactive.
+
+
+## Recovered call passes previous 24-minute disconnect window (2026-09-09)
+
+Previous turn progressed viaisolatedCTcandidatebuild. Thisturn revalidatedprobe41659/capture49834 and waitedon41659 withoutrestarting. Currentcall0xF50000/native12337/pppd12339 has70completedperiodicrequests, 69HTTP200/559byte responses individuallyhashverified, andoneearliertimeout(index14). LatestWindowsduration1528598ms, CRC915/alignment7. It passedtheprior24minterminationwindow onsameconnection afterwatchdogrecovery; teststillrunning toward100requests, notacleanreliabilitypass. ATAreportedloss51atWindows1295.963s whiletrafficcontinued; inspectfinalpcapbeforeattributingwireloss. Keep41659 and49834; nocall/native/service/ATAchanges. CandidateCT/tmp/sipfax-cps-2da26ec remainsstagednotdeployed. Goalactive.

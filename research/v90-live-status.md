@@ -687,3 +687,12 @@ Live0xF70000/native12605/pppd12606 has8successfulperiodicrequests throughWindows
 Previous turn progressedbyold/newwaveformequality. Revalidated35217live. Existingv90-phase4.py withfailedRX12601 and--long-training passesindependentTRN/MP/CRCdecoding. Moreimportantly, privatehelperwork/audit_v90_failed_startup_tx.py appliesindependentdemapping/descrambling directlytocapturedTXraw16.876125..20.163625s: actualRi/Rbar,1500msTRN,firsttworepeatedMPmessagesandMPCRC allPASS. This supplementsold/newequalitywithwirecontentvalidation, withoutclaiminganalogdeliveryortimingconformance. No productionchange.
 
 Current0xF70000/native12605/pppd12606 has15successfulperiodicrequests throughWindows316.385s,CRC11/alignment1. Keep35217/capture16738; no restart. ReadonlylegacyV34inspectionconfirmsseparateV34_init/V34_process state API,notanexistingdrop-infallbackhook inV90_startup. Nounverifiedfallbackwiringadded. Goalactive.
+
+
+## Larger upstream request passes on deployed CPs build (2026-09-09)
+
+Previous turn progressedbycapturedMPvalidation. Revalidated35217live. Reviewedupstreamreceiver: stillhard-sliced4800bit/s withno trellisFEC/adaptivetiming; smallperiodicGETs alone donotvalidatefull-sizedupstreampackets. StartedtemporaryPPP-onlyfixturev90-upstream-check on10.64.0.1:8082 with300slifetime. Privatehelperwork/probe_large_v90_request.py verifiedexactworkerPID728062 commandline, waitedforcompletedperiodicrequest, SIGSTOPpedonlythatworker betweenAPIrequests, issuedoneGETwith4096-bytequery, andSIGCONTresumedworker in finally. Modem/PPP remainedconnected. This intentionaladditionaltestmustbeincludedinthetrafficprofile.
+
+GETPASSEDHTTP200/15byte expectedSHA256179937346cbd120ccd471233f6718604bf7a22884538f0f12efb2b56d50b73a0 in16.667s atWindows502.983s. Windowsbytecounterdelta sent8696/received602,8framesSent/9framesReceived,0additionalCRCerrors. NativelogincludesCRCvalidupstreamPPPframes1467,1503,1267,1303bytes. Thisvalidateslargerrequestdelivery, notoptimalupstreamthroughput; extra sentbytes/delaymayinvolveretransmissions butnotverifiedfromTCPmetadata. Privatework/v90-large-upstream-0xF70000.json and-native-log.txt. Helper71494terminal; temporaryfixtureexplicitlySTOPPED.
+
+Confirmedperiodicworkerresumed: request23PASSED3.729s atWindows509.853s, CRC19/alignment3. Total24periodicrequestsallcomplete. Same0xF70000/native12605/pppd12606. Preserve35217/capture16738. No modemconfigurationorcodechange. Goalactive.

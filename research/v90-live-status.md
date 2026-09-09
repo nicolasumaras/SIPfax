@@ -660,3 +660,16 @@ Probe41659live throughindex42/Windows957.947s (~15m58s),42successful/oneearliert
 ## Recovered call passes previous 24-minute disconnect window (2026-09-09)
 
 Previous turn progressed viaisolatedCTcandidatebuild. Thisturn revalidatedprobe41659/capture49834 and waitedon41659 withoutrestarting. Currentcall0xF50000/native12337/pppd12339 has70completedperiodicrequests, 69HTTP200/559byte responses individuallyhashverified, andoneearliertimeout(index14). LatestWindowsduration1528598ms, CRC915/alignment7. It passedtheprior24minterminationwindow onsameconnection afterwatchdogrecovery; teststillrunning toward100requests, notacleanreliabilitypass. ATAreportedloss51atWindows1295.963s whiletrafficcontinued; inspectfinalpcapbeforeattributingwireloss. Keep41659 and49834; nocall/native/service/ATAchanges. CandidateCT/tmp/sipfax-cps-2da26ec remainsstagednotdeployed. Goalactive.
+
+
+## 36-minute run complete; CPs build deployed and hardware data verified (2026-09-09)
+
+Previous turn progressed by passingpriorfailurewindow. Keptsame0xF50000/native12337/pppd12339 through100periodicrequests. Probe41659 nowterminal:99HTTP200/559byte expectedhash responses individuallyverified,oneRequestCanceled(index14),finalWindows2163.771s (~36m04s),CRC963/alignment8. No additionaltimeouts afterearlierwatchdogrecovery. Explicitlydisconnectedattemptfcf1b640 aftertestcompletion(API200); confirmedno lm/pppd. This is a recoveredextendedrun, notzero-failureacceptance.
+
+StoppedexactFreePBXtcpdumppid11505; capture49834terminal437054packets/0kerneldrops. Privatework/v90-engine-deployment-final.pcap and-audit.txt:108858upstreampackets matchedexactlybetweenPBXlegs;108860downstreampackets likewise. Nosequence/timestampanomalies. Capturestartedafterstartup, so onlycapturedintervalclaimed. CTout17.634..22.521ms/PBX-to-ATA12.668..26.862ms. ATAreportedloss96/jitter22atWindows1931.057s despitecontinuedtraffic; notexplainedbycapturedmissingpackets.
+
+Backedupentire/opt/sipfax/vendor/linmodem toCT/tmp/sipfax-before-cps-native.tgz. Installedstaged2da26ec v90pcm.c/h,v90phase4.c/h andvalidatednativebinary; installedSHA256030036b41ce42ae782a3c1ffc4ee3bfbc5bdaf2196bc2b34348813759dba0458. Service restartedactive. Runtime60ms/48k/1500ms/privatecapturecommandunchanged. NewCPsnativeisNOWDEPLOYED.
+
+Startedcapture16738beforefreshdial,FreePBX/tmp/v90-cps-live.pcap,2400sbound; remainsLIVEandcontainsbothattempts. Firstattempt3c2e7526-7bfe-4de9-b444-0dc1b1d165c7 failed678: Ja/S/DIL/CPt received,callerrenegretrainatstartup14.923625 thenV34fallback. NoCPsseen; failuremustremaininacceptanceresults. Privatework/v90-cps-first-startup-log.txt; helper67239terminal. Retryce96428f-f366-4c75-b24f-2150be272a64 connected19:58:54.333UTC,Windows0xF70000/native12605/pppd12606. FirstpublicHTTP200/559byte expectedhash in1.257s,allmodemerrors0. Helper14121terminalleavesconnected. Thisverifiesordinaryhardwaredataonnewbuild, notCPsinteroperabilityorabsenceofregression.
+
+Started100periodicprobeson0xF70000,handle35217LIVE,work/v90-probes-0xF70000.json. Preserve35217/capture16738andexistingcall; nooverlappingprobe/redial. Goalactive; intermittentstartup,underlyingimpairment,hardwareCPs/fallback/higherupstreamremainincomplete.

@@ -696,3 +696,14 @@ Previous turn progressedbycapturedMPvalidation. Revalidated35217live. Reviewedup
 GETPASSEDHTTP200/15byte expectedSHA256179937346cbd120ccd471233f6718604bf7a22884538f0f12efb2b56d50b73a0 in16.667s atWindows502.983s. Windowsbytecounterdelta sent8696/received602,8framesSent/9framesReceived,0additionalCRCerrors. NativelogincludesCRCvalidupstreamPPPframes1467,1503,1267,1303bytes. Thisvalidateslargerrequestdelivery, notoptimalupstreamthroughput; extra sentbytes/delaymayinvolveretransmissions butnotverifiedfromTCPmetadata. Privatework/v90-large-upstream-0xF70000.json and-native-log.txt. Helper71494terminal; temporaryfixtureexplicitlySTOPPED.
 
 Confirmedperiodicworkerresumed: request23PASSED3.729s atWindows509.853s, CRC19/alignment3. Total24periodicrequestsallcomplete. Same0xF70000/native12605/pppd12606. Preserve35217/capture16738. No modemconfigurationorcodechange. Goalactive.
+
+
+## TCP retransmissions isolated; smaller-segment comparison improves upload (2026-09-09)
+
+Previous turn progressedthroughlargerupstreamdelivery. Repeatedsame4096bytequerywithPPP-headercapture: MSS1460run16.671s,8696sentbytecounterdelta. PrivateCT/tmp/v90-upstream-tcp.pcap(28packets/0drops),localwork/v90-upstream-tcp-metadata.txt showoriginal1460byteTCPsegments acknowledgedimmediatelybyserverthenretransmitted;7receiveddatasegmentscontained3uniquebyteranges/9620payloadbytes includingpost-API-completionretries. This verifiesduplicateTCPdata, notthecauseofclienttimer/ACKhandling.
+
+Controlledendpoint-onlycomparison: temporaryPythonHTTPlistener TCP_MAXSEG536 advertised536inSYNACK (captured), withoutchangingPPP/modem/globalnetworkconfiguration. TwoidenticalqueriesPASS15bytehash in10.175s and10.258s,4680sentbytes each. PrivateCT/tmp/v90-upstream-small-mss.pcap (48packets/0drops),localwork/v90-upstream-small-mss-metadata.txt show8segments/8uniqueranges/4180payloadbytes perrequest, noduplicateddataranges. Approximately39%shorterrequesttime thanboth1460baselineattempts16.667/16.671s. Supportscontrolledsmallsegmenttuningforcurrent4800upstream; higherupstreamimplementationstillrequired, andfullinternet/downstreamtradeoffnotyettested.
+
+Eachlargeprobeusedexistingprivateworkerpause/finally-resumehelperonlybetweenperiodicrequests; samecallthroughout. Bothtemporaryfixturesv90-upstream-check andv90-upstream-small-mss explicitlySTOPPED. ExactCTtcpdumppids12652/12665stopped; handles10372/68007terminal, alllargeprobehelpers53395/78924/52935terminal. NoTCPMSSclamporPPPsettingsleftchanged. Savedfirst/baseline/MSS536JSONseparately, currentwork/v90-large-upstream-0xF70000.json holdssecond536result. Privatehelperwork/v90-small-mss-server.py.
+
+Periodic35217live through42requests/Windows899.753s, allcomplete,CRC36/alignment3; request40took7.724s, next0.956s. Preserve35217/capture16738 and0xF70000/native12605/pppd12606. Goalactive.

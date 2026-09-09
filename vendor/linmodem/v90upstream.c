@@ -34,7 +34,16 @@ static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 {
     if(value==0x7e) {
         if(!l->overflow && !l->escape && l->length>=4 && l->crc==0xf0b8) {
-            if(s->samples-s->last_frame_sample>=40 || s->last_length!=l->length || memcmp(s->last_frame,l->frame,l->length)) {
+            unsigned duplicate=0;
+            for(unsigned i=0;i<s->recent_count;++i)
+                if(s->samples-s->recent[i].sample<40 && s->recent[i].length==l->length &&
+                   !memcmp(s->recent[i].frame,l->frame,l->length)){duplicate=1;break;}
+            if(!duplicate) {
+                unsigned i=s->recent_next;
+                s->recent[i].sample=s->samples;s->recent[i].length=l->length;
+                memcpy(s->recent[i].frame,l->frame,l->length);
+                s->recent_next=(i+1)%V90_UP_RECENT;
+                if(s->recent_count<V90_UP_RECENT)++s->recent_count;
                 ++s->frames;s->last_frame_sample=s->samples;s->last_length=l->length;
                 memcpy(s->last_frame,l->frame,l->length);
                 fprintf(stderr,"[v90data] CRC-valid PPP frame %u bytes at %.6fs\n",l->length,s->samples/8000.0);

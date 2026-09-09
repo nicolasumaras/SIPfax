@@ -5,6 +5,7 @@
 #define V90_UP_TAPS 81
 #define V90_UP_PHASES 10
 #define V90_UP_FRAME 4096
+#define V90_UP_RECENT 128
 typedef struct {
     double a_re,a_im,previous_re,previous_im;
     unsigned have_a,have_previous,scrambler,uart_count,uart_value;
@@ -24,6 +25,9 @@ typedef struct V90Upstream {
     long samples,last_frame_sample;
     unsigned last_length;
     uint8_t last_frame[V90_UP_FRAME];
+    /* Acquisition can replay at most 123 minimal frames per lane in a burst. */
+    struct {long sample;unsigned length;uint8_t frame[V90_UP_FRAME];} recent[V90_UP_RECENT];
+    unsigned recent_count,recent_next;
     V90UpLane lanes[V90_UP_PHASES][2];
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];

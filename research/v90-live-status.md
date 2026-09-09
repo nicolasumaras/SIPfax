@@ -847,3 +847,12 @@ User reports the pending XP intervention done. API health works and connections 
 
 
 The48k retry815462d1-2bd2-4b12-9bb0-3866f352391d also failed before PPP. Native trace includes CRC-valid48k CP/CP-prime and Ed completion, followed by caller retrain and V.34 fallback. ATA console confirms Voice->VBD transition on2100-PR-Net. This is not evidence that the XP probe remains locked: neither new call reached the probe. Private diagnostic outputs and both attempt JSON files retained; packet capture `/tmp/v90-after-xp-restart.pcap` stopped after tests. Restored48k ceiling remains deployed. No success claim and no additional fault injection.
+
+
+## Failed startup waveform audited; ATA PCM logging verified (2026-09-09)
+
+Previous turn was progress: completed hardware trials and enabled diagnostic access. Revalidated native/pppd idle, then retrieved private RX/TX for native13686. Independent NumPy CP decoding finds repeated CRC-valid CP-prime from raw31.6065 through34.6828s. Matched-filter timing hypotheses contain only17-bit framing runs on the clean lanes, with no20-bit E. Thus this event is not explained by the native receiver merely overlooking an otherwise intact E sequence.
+
+Independent inverse mapping of captured server TX at samples224103..253461 verifies Ri/Ri-bar,1500ms TRN2d,452 valid MP messages including15 MP-prime messages, followed by exactly34 zero bits (two17-bit data frames) of Ed. This checks the generated waveform, not the waveform after ATA playout. ITU V.90 clauses8.6.2 and9.4.1.4 match the audited ending; caller continues CP-prime despite the valid server output, so further evidence at the receive path is needed. Private scripts `work/audit_v90_13686_e.py` and `work/audit_v90_13686_tx.py`, raw audio and outputs remain outside git. No modem parameter change or additional call made in this audit.
+
+ATA CLI help verifies `set pcm 0 1` starts channel0 PCM capture and `set pcm 0 0` stops it. Executed a two-second idle start/stop: console confirms pcm_dbgOpen/Start and pcm_dbgClose. Logging is stopped. Firmware metadata identifies PCM trace-to-telephony/network diagnostics and `/var/ti.log`; export CLI help is being inspected before a live capture. Only one SSH diagnostic login is supported at a time; serialize sessions. This provides a next observability step, not evidence of a fixed channel. Goal active.

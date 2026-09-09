@@ -783,3 +783,8 @@ The direct PPP health worker 90121 remains live, with ten successful requests so
 Added optional `SIPFAX_V90_RENEG_TRN2D_MS`, default 255 ms, accepting 0–2000 ms rounded down to six-sample frames. V.90 9.6.1.2.2 explicitly permits optional TRN2d up to 2000 ms. This prepares a controlled comparison of longer training after independently validating emitted MP/MP-prime during failures; improvement is a hypothesis, not an observed result. Initial training retains its separate 255–2000 ms bounds and existing deployment value. CPs silence/Rt still resumes MP without new training.
 
 New CI regression drives actual S/Sbar through the detector, checks one aligned 384+24-sample Rd response, DTE clamping and independently inverse-maps/descrambles training and MP CRC at default, zero, short, 1500, 2000 and invalid settings. It passes. Existing startup/deadline and CPs structural/audio suites pass; native build passes. Candidate is not deployed. Goal active.
+
+
+## Renegotiation candidate built on target; PPP soak remains live (2026-09-09)
+
+Candidate 5b45059 builds successfully in CT105 under `/tmp/sipfax-reneg-training-5b45059`. GitHub run 34403916810 passes on that exact commit. The active installation and 255 ms renegotiation setting are unchanged. The direct PPP health worker 90121 is confirmed live through eighteen successful requests; preserve it and capture5144 until the bounded test ends. The update archive for the pending XP intervention is `/home/ncolasumaras/Documents/Codex/2026-09-07/we-x20/outputs/DialUpLab-XP-probe-fix.zip`. No new hardware or internet acceptance claim is made. Goal active.

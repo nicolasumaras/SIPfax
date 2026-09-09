@@ -729,3 +729,10 @@ The previous failed recovery on native PID 12605 rejected a CRC-valid CPt at Pha
 The startup controller now initiates a full retrain immediately when Phase 4 rejects parameters, instead of remaining in failed-stage silence until the caller restarts or falls back. V.90 section 9.4.1 permits retrain at any point in Phase 4; the existing retrain path implements section 9.5.1.1 silence and Tone B. A regression uses the observed six transmit masks and verifies one restart, 70 ms mute, DTE clamp and law preservation. The complete startup test passes, including existing echo-watchdog and CPs deadline checks; the native build passes. This change is not yet deployed or hardware-validated.
 
 The existing MSS-enabled call 0xF80000 remains untouched: 25/25 periodic HTTP probes complete through Windows duration 649.865 s. Preserve live probe handle 45640 and capture handle 17887. The active native binary remains the prior CPs build. Goal remains active; recovery reliability and higher upstream rates are unfinished.
+
+
+## Exact rejected CPt regression and target build (2026-09-09)
+
+The startup regression now parses the exact 1788-bit training-only CPt from PID 12605, committed as `test/fixtures/v90-cpt-unusable-12605.bits` with provenance documentation. It verifies CRC acceptance and the 1215-entry capacity before exercising rejection/retrain. The complete startup suite passes. Native commit 2b8f411 builds successfully in CT105 under `/tmp/sipfax-rejected-cpt-2b8f411`; the active installation is unchanged. GitHub run 34401633545 passes both JavaScript and native jobs.
+
+Probe handle 45640 is confirmed live; 31/31 requests complete through Windows duration 777.258 s, CRC 34/alignment 0. Native PID 12771 and pppd 12772 are confirmed active. Native logs reveal full caller retrains at startup seconds 215.513125 and 275.673125, plus two later successful rate renegotiations (Phase 4 seconds 140.444750 and 296.586000). Therefore passing application probes must not be described as an uninterrupted channel. Preserve the current call and capture; the rejected-parameters recovery change still awaits deployment/hardware validation.

@@ -43,14 +43,14 @@ void data_mode(V90Startup *s){
  dte_bits=0;
 }
 unsigned retrains(V90Startup *s){return s->retrains;}
-void invalid_cpt(V90Startup *s){
+void invalid_cpt(V90Startup *s,const unsigned char *bits,unsigned n){
  data_mode(s);s->phase4.stage=0;s->phase4.samples=192;s->phase4.have_cpt=1;
- V90Cp *cp=&s->phase4.cpt;*cp=(V90Cp){0};
- cp->drn=9;cp->sr=1;cp->lookahead=1;cp->count=6;cp->gain=8192;cp->filter[0]=63;
- /* Hardware CPt: 1215 combinations cannot carry K=12 (4096). */
- unsigned sizes[6]={3,3,3,5,3,3};
- unsigned masks[6][5]={{0,96,116},{3,114,116},{0,96,116},{0,53,78,88,96},{3,114,116},{84,100,112}};
- for(unsigned i=0;i<6;++i){cp->indices[i]=i;for(unsigned j=0;j<sizes[i];++j)cp->mask[0][i][masks[i][j]]=1;}
+ V90Cp *cp=&s->phase4.cpt;unsigned used=0;
+ if(v90_cp_parse(cp,bits,n,&used)!=1 || used!=1788 || cp->type || cp->drn!=9 || cp->sr!=1 || cp->count!=6)abort();
+ /* This CRC-valid hardware CPt has only 1215 combinations for K=12. */
+ unsigned product=1;
+ for(unsigned i=0;i<6;++i){unsigned count=0;for(unsigned u=0;u<128;++u)count+=cp->mask[0][cp->indices[i]][u];product*=count;}
+ if(product!=1215)abort();
 }
 long mute_until(V90Startup *s){return s->retrain_mute_until;}
 void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
@@ -83,9 +83,10 @@ void destroy(void *s) { free(s); }
     lib.v90_info0d.argtypes=[C.POINTER(C.c_ubyte),C.c_int]
     lib.echo_ready.argtypes=[C.c_void_p,C.c_int,C.c_int]
     lib.v90_startup_data_retrain.argtypes=[C.c_void_p]
-    lib.invalid_cpt.argtypes=[C.c_void_p]
+    lib.invalid_cpt.argtypes=[C.c_void_p,C.c_char_p,C.c_uint]
+    cpt=(root/'test/fixtures/v90-cpt-unusable-12605.bits').read_bytes()
     for law in [0,1]:
-        state=lib.create(law);lib.invalid_cpt(state)
+        state=lib.create(law);lib.invalid_cpt(state,cpt,len(cpt))
         quiet=np.zeros(720,dtype=np.int16);out=quiet.copy()
         lib.v90_startup_process(state,out,quiet,len(out))
         assert lib.retrains(state)==1 and not lib.data_active(state)

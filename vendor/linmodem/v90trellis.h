@@ -24,4 +24,13 @@ int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
  * confidence is insufficient; errors reports the best syndrome score. */
 int v90_trellis_sync(const uint8_t *labels,unsigned n,unsigned *offset,unsigned *errors);
 unsigned v90_trellis_inversion(unsigned pair,unsigned offset);
+typedef struct {
+    double phase,gain,coherence;
+    unsigned pair_alignment,offset,errors,pairs;
+} V90TrellisAcquisition;
+/* Buffered acquisition from one matched-filter timing hypothesis. Tests both
+ * pair alignments; phase has an irrelevant quadrant ambiguity. No tracking
+ * or timing-hypothesis selection is performed here. Returns 0 on rejection. */
+int v90_trellis_acquire(const double *re,const double *im,unsigned symbols,
+                       V90TrellisAcquisition *result);
 #endif

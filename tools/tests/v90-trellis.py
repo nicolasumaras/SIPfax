@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as directory:
 void *create(void){V90Trellis *s=malloc(sizeof(*s));v90_trellis_init(s);return s;}
 void destroy(void *s){free(s);}
 ''')
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
     lib.v90_trellis_pair.argtypes=[C.c_void_p,*([C.c_double]*4),C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
     lib.v90_trellis_sync.argtypes=[C.c_void_p,C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
@@ -26,6 +26,13 @@ void destroy(void *s){free(s);}
         offset=C.c_uint();errors=C.c_uint()
         ok=lib.v90_trellis_sync(packed.ctypes.data,len(packed),C.byref(offset),C.byref(errors))
         return ok,offset.value,errors.value
+    class Acquisition(C.Structure):
+        _fields_=[('phase',C.c_double),('gain',C.c_double),('coherence',C.c_double),('pair_alignment',C.c_uint),('offset',C.c_uint),('errors',C.c_uint),('pairs',C.c_uint)]
+    lib.v90_trellis_acquire.argtypes=[C.c_void_p,C.c_void_p,C.c_uint,C.POINTER(Acquisition)]
+    def acquire_samples(samples):
+        re=np.ascontiguousarray(samples.real,dtype=np.float64);im=np.ascontiguousarray(samples.imag,dtype=np.float64);a=Acquisition()
+        ok=lib.v90_trellis_acquire(re.ctypes.data,im.ctypes.data,len(re),C.byref(a))
+        return ok,a
     total_hard=0
     for initial in range(16):
         n=2200;labels=[];inv=[];state=initial
@@ -64,5 +71,20 @@ void destroy(void *s){free(s);}
                 assert lib.v90_trellis_inversion(i,offset)==expected
     for bad in [np.zeros((2200,2),dtype=int),rng.integers(0,4,(2200,2)),labels[:895]]:
         assert not acquire(bad)[0],'false superframe acquisition'
+    for angle in [-2.4,-.7,0,.4,1.8]:
+        for gain in [.01,1,5000]:
+            for prefix in [0,1]:
+                signal=np.exp(-1j*labels.flatten()*np.pi/2)*gain*np.exp(1j*angle)
+                if prefix:signal=np.r_[signal[0],signal]
+                ok,acq=acquire_samples(signal)
+                assert ok and acq.pair_alignment==prefix and acq.offset==0
+                assert abs(acq.gain/gain-1)<1e-12 and acq.coherence>.999
+                assert abs(np.sin(4*(acq.phase-angle)))<1e-12
+    damaged=np.exp(-1j*labels.flatten()*np.pi/2)*np.exp(.37j)*12
+    damaged[300:-300:202]*=np.exp(1j*np.deg2rad(55))
+    ok,acq=acquire_samples(damaged)
+    assert ok and acq.offset==0 and acq.pair_alignment==0
+    for bad in [np.zeros(4000,dtype=complex),np.full(4000,np.nan,dtype=complex),np.ones(4000,dtype=complex),rng.normal(size=4000)+1j*rng.normal(size=4000),np.ones(1792,dtype=complex)]:
+        assert not acquire_samples(bad)[0],'invalid or ambiguous carrier acquired'
     assert total_hard>0
     print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected; automatic superframe sync and rejection guards')

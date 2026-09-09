@@ -1,5 +1,7 @@
 /* Restricted four-point V.34/V.90 16-state soft trellis. GPL-2.0. */
 #include <float.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #include "v90trellis.h"
 
@@ -98,4 +100,48 @@ int v90_trellis_sync(const uint8_t *labels,unsigned n,unsigned *offset,unsigned 
      * acquisition thresholds, not a proof that arbitrary data is valid. */
     if(best>(n-4)/16 || second-best<(n-4)/128+1)return 0;
     *offset=best_offset;return 1;
+}
+
+int v90_trellis_acquire(const double *re,const double *im,unsigned symbols,
+                       V90TrellisAcquisition *result)
+{
+    if(symbols<1793 || symbols>32768)return 0;
+    double fourth_re=0,fourth_im=0,gain=0;
+    unsigned nonzero=0;
+    for(unsigned i=0;i<symbols;++i) {
+        if(!isfinite(re[i]) || !isfinite(im[i]))return 0;
+        double magnitude=hypot(re[i],im[i]);
+        if(!isfinite(magnitude))return 0;
+        gain+=magnitude;
+        if(magnitude<1e-12)continue;
+        double a=re[i]/magnitude,b=im[i]/magnitude;
+        fourth_re+=a*a*a*a-6*a*a*b*b+b*b*b*b;
+        fourth_im+=4*a*b*(a*a-b*b);++nonzero;
+    }
+    if(nonzero<symbols*3/4 || !isfinite(gain) || gain<1e-9)return 0;
+    double coherence=hypot(fourth_re,fourth_im)/nonzero;
+    if(coherence<0.5)return 0;
+    double phase=atan2(fourth_im,fourth_re)/4;
+    double c=cos(phase),s=sin(phase);
+    uint8_t *quadrants=malloc(symbols),*labels=malloc(symbols/2);
+    if(!quadrants || !labels){free(quadrants);free(labels);return 0;}
+    for(unsigned i=0;i<symbols;++i) {
+        double a=re[i]*c+im[i]*s,b=im[i]*c-re[i]*s;
+        quadrants[i]=(uint8_t)(fabs(a)>=fabs(b)?(a>=0?0:2):(b<0?1:3));
+    }
+    int found=0;V90TrellisAcquisition best={0};
+    for(unsigned pair=0;pair<2;++pair) {
+        unsigned n=(symbols-pair)/2,offset,errors;
+        for(unsigned i=0;i<n;++i)
+            labels[i]=quadrants[pair+2*i]|(quadrants[pair+2*i+1]<<2);
+        if(v90_trellis_sync(labels,n,&offset,&errors) &&
+           (!found || (uint64_t)errors*best.pairs<(uint64_t)best.errors*n)) {
+            best.phase=phase;best.gain=gain/symbols;best.coherence=coherence;
+            best.pair_alignment=pair;best.offset=offset;best.errors=errors;best.pairs=n;
+            found=1;
+        }
+    }
+    free(quadrants);free(labels);
+    if(found)*result=best;
+    return found;
 }

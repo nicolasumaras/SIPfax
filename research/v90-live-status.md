@@ -226,3 +226,16 @@ Extendedstartupregressiontocoverphase3anddatamode,checkDTEcallbackstopsduringret
 Hardwaretrialf3262dd1-650d-4c4a-840c-c69086eb274d,modem8889/pppd8890: firststartup53.333k,CHAPauthenticated06:37:41,IP10.64.0.2. SmallHTTPconnectiontimeout20seconds,0bytes. **Liveverifieddataretrainresponse:**firstToneAresponseatstartup29.059s (~raw33.9),77.25msRTD,CRC-validINFO1a stilldownstream6,andnewJa/Sd/Jd/DIL. ThisretrainfailedbeforesecondS; subsequentrequestsselecteddownstream4(unsupported). PPPprocess8890remaineduntilactualmodemhangup06:38:13,0.6min afterIPup,notrestartedbyretrain. No data-mode recovery or successfulinternet claimed. RX/TX8889savedprivately. Private trialhelperconnecttimeoutnow20secondsbasedonV22control.
 
 Hardwarecallandtoolsended;baselineconfigrestoredwithcorrectowner/mode,serviceactive. PPPoptionsunchanged(debug/novjoff). XPdiagnosticdownloadremainsavailableviaCT8081transient24hserver. Goalactive; needslaptopdiagnosticupdateforreceivecounters/outboundinternetprobe,plusreliabletraininganddatarecovery.
+
+
+## XP diagnostics installed; public internet verified in control mode (2026-09-09)
+
+User installed the update. Health at15:14:53UTC reportsDialUpLab-XP1.1.0.0; connectionstatisticsandHTTPprobe endpoints work. Newprivatehelperwork/trial_v90_diagnostics.py readsPPPcredentialsinmemory, dialsSupplied, andonConnected requestshttp://example.com/ boundtoPPPsource, savingcounter/proberesultswithoutcredentials.
+
+V90attemptsc195e7e7-fa61-42b0-a48d-b47b37d5c8fc and7c9868a4-751d-4e1f-8533-e31460125b69 bothendedFailedbeforePPP. NoV90internetorcounterresultfromthese. ServerdirectegresscontrolreturnedHTTP200/559bytes.
+
+**First actual notebook-originated public internet control:** baselineV22bisattempt e720f2cc-122e-4eae-9b35-35b31ee0e312. WindowsRAS reports2400bps. Probe source10.64.0.2 ->http://example.com/ returnedHTTP200,complete559bytes,16.969seconds. SHA256ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d exactlymatchesindependentserverfetch. CTtcpdumpverifiedPPPinterface traffic10.64.0.2:1755 <->172.66.147.243:80 includingrequest56bytesandpublicresponse/retransmissions. ThusrequestactuallycrossedPPP/publicegress,notjustLAN. RASbefore:886sent/322receivedbytes,22sent/16receivedframes,CRC18/alignment1. After:2504sent/2300received,42sent/25receivedframes,CRC24/alignment1. SixnewreceiveCRCerrorsduringprobe; networkingworksdespiteerrors.
+
+Comparedbaselinewith100msoutgoingRTPpacing: attempt739b0670-7034-43a9-9b79-535486dc45d5,2400bps. HTTP200,complete559bytes,sameSHA256,15.550seconds. CRC18->23(fivenew),goodreceivedframes16->25,alignment1unchanged. Onecallperconditionisnotastatisticallymeaningfulimprovement;donotclaimpacingfixesBERorV90. NoextrapolationofV22CRCcauseontoV90withoutdata. Bothcontrols explicitlyAPI-disconnected. Capturesbounded100/120secondsfinishedwith0kernel-drops. Allhelper/toolhandlescompleted.
+
+Finalstate: baselineconfigselected,temporaryv90-pacing.confremoved,daemon-reload/restart,serviceactive. Nopppoptionchanges. NewAPIremainsinstalledonXP. Goalstillunachieved: V90trainingreliabilityandactualV90data/internetverificationremain. End-to-endcontrolnowprovesPPP/NAT/publicendpointandprovidesvalidlaptopreceivecounterinstrumentationfornextV90success.

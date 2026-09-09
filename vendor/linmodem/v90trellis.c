@@ -177,3 +177,42 @@ int v90_carrier_normalize(V90Carrier *s,double re,double im,double *out_re,doubl
     s->phase=remainder(s->phase+s->frequency+.005*error,2*acos(-1.0));
     return 1;
 }
+
+void v90_trellis_stream_init(V90TrellisStream *s)
+{
+    memset(s,0,sizeof(*s));
+}
+static void stream_locked(V90TrellisStream *s,double re,double im)
+{
+    double ar,ai;
+    if(!v90_carrier_normalize(&s->carrier,re,im,&ar,&ai)) {
+        s->locked=0;s->count=0;s->have_a=0;return;
+    }
+    if(!s->have_a){s->a_re=ar;s->a_im=ai;s->have_a=1;return;}
+    unsigned a,b;
+    unsigned inversion=v90_trellis_inversion((unsigned)(s->pair_index%448),s->acquisition.offset);
+    int ready=v90_trellis_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inversion,&a,&b);
+    ++s->pair_index;s->have_a=0;
+    if(ready && s->receive_pair)s->receive_pair(s->opaque,a,b);
+}
+void v90_trellis_stream_symbol(V90TrellisStream *s,double re,double im)
+{
+    if(!isfinite(re) || !isfinite(im)) {
+        /* Do not silently lose a symbol and shift all subsequent 4D pairs. */
+        s->locked=0;s->count=0;s->have_a=0;return;
+    }
+    if(s->locked){stream_locked(s,re,im);return;}
+    s->re[s->count]=re;s->im[s->count++]=im;
+    if(s->count<V90_STREAM_BUFFER)return;
+    if(!v90_trellis_acquire(s->re,s->im,s->count,&s->acquisition)) {
+        s->count=V90_STREAM_BUFFER/2;
+        memmove(s->re,s->re+s->count,s->count*sizeof(double));
+        memmove(s->im,s->im+s->count,s->count*sizeof(double));
+        return;
+    }
+    v90_carrier_init(&s->carrier,s->acquisition.phase,s->acquisition.gain);
+    v90_trellis_init(&s->trellis);s->pair_index=0;s->have_a=0;s->locked=1;
+    for(unsigned i=s->acquisition.pair_alignment;i<s->count;++i)
+        stream_locked(s,s->re[i],s->im[i]);
+    s->count=0;
+}

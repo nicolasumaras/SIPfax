@@ -15,6 +15,10 @@ with tempfile.TemporaryDirectory() as directory:
 #include "v90trellis.h"
 void *create(void){V90Trellis *s=malloc(sizeof(*s));v90_trellis_init(s);return s;}
 void destroy(void *s){free(s);}
+void *stream_create(void (*cb)(void *,unsigned,unsigned)) {
+ V90TrellisStream *s=malloc(sizeof(*s));v90_trellis_stream_init(s);s->receive_pair=cb;return s;
+}
+unsigned stream_locked(V90TrellisStream *s){return s->locked;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
@@ -112,5 +116,33 @@ void destroy(void *s){free(s);}
         assert not lib.v90_carrier_normalize(C.byref(carrier),float('nan'),0,C.byref(re),C.byref(im))
     for phase,gain in [(0,0),(0,-1),(float('inf'),1),(0,float('nan'))]:
         carrier=Carrier();assert not lib.v90_carrier_init(C.byref(carrier),phase,gain)
+    callback_type=C.CFUNCTYPE(None,C.c_void_p,C.c_uint,C.c_uint)
+    lib.stream_create.argtypes=[callback_type];lib.stream_create.restype=C.c_void_p
+    lib.stream_locked.argtypes=[C.c_void_p]
+    lib.v90_trellis_stream_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double]
+    for prefix in [0,1]:
+        decoded=[]
+        cb=callback_type(lambda _,a,b:decoded.append([a,b]))
+        stream=lib.stream_create(cb)
+        signal=np.exp(-1j*labels.flatten()*np.pi/2)*3*np.exp(.37j)
+        if prefix:signal=np.r_[signal[0],signal]
+        for i,value in enumerate(signal):
+            lib.v90_trellis_stream_symbol(stream,value.real,value.imag)
+            if i<4095:assert not decoded
+        expected_pairs=(len(signal)-prefix)//2-63
+        assert len(decoded)==expected_pairs
+        assert np.array_equal(np.array(decoded)[64:],labels[64:expected_pairs])
+        assert lib.stream_locked(stream)
+        lib.v90_trellis_stream_symbol(stream,float('nan'),0)
+        assert not lib.stream_locked(stream)
+        decoded.clear()
+        # Noise/silence must not lock; the sliding window must later acquire.
+        for i in range(4096):lib.v90_trellis_stream_symbol(stream,0,0)
+        assert not lib.stream_locked(stream) and not decoded
+        for value in signal:lib.v90_trellis_stream_symbol(stream,value.real,value.imag)
+        assert lib.stream_locked(stream)
+        assert len(decoded)==expected_pairs
+        assert np.array_equal(np.array(decoded)[64:],labels[64:expected_pairs])
+        lib.destroy(stream)
     assert total_hard>0
-    print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected; automatic superframe sync and rejection guards')
+    print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected; automatic superframe sync, streaming replay/reset and rejection guards')

@@ -41,4 +41,22 @@ int v90_carrier_init(V90Carrier *s,double phase,double gain);
 /* One matched-filter complex symbol per call. This tracks carrier/gain,
  * not symbol timing; returns zero for invalid state or nonfinite input. */
 int v90_carrier_normalize(V90Carrier *s,double re,double im,double *out_re,double *out_im);
+/* Experimental single timing-lane stream. Buffers acquisition samples and
+ * replays them so acquisition latency does not discard early PPP bytes.
+ * Callbacks can arrive in a bounded burst on acquisition. No timing tracking
+ * or automatic loss-of-lock detection; caller resets at retraining. */
+#define V90_STREAM_BUFFER 4096
+typedef struct {
+    double re[V90_STREAM_BUFFER],im[V90_STREAM_BUFFER];
+    unsigned count,locked,have_a;
+    double a_re,a_im;
+    uint64_t pair_index;
+    V90TrellisAcquisition acquisition;
+    V90Carrier carrier;
+    V90Trellis trellis;
+    void *opaque;
+    void (*receive_pair)(void *,unsigned,unsigned);
+} V90TrellisStream;
+void v90_trellis_stream_init(V90TrellisStream *s);
+void v90_trellis_stream_symbol(V90TrellisStream *s,double re,double im);
 #endif

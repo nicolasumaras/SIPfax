@@ -23,7 +23,7 @@ static int training_bit(void *opaque)
     if(n<s->trn_frames*d)return 1;
     unsigned index=(n-s->trn_frames*d)%s->mp_length;
     if(!s->ed_frame && !index && s->have_cp &&
-       (s->have_ack || s->rx.e_seen) && s->mp_ack)s->ed_frame=n/d;
+       (s->have_ack || (!s->cp.silence && s->rx.e_seen)) && s->mp_ack)s->ed_frame=n/d;
     if(s->ed_frame && n>=s->ed_frame*d)return 0;
     if(!index && s->have_cp && !s->mp_ack){s->mp_ack=1;mp_build(s);}
     return s->mp[index];
@@ -50,6 +50,32 @@ void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
     v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init(&s->upstream);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
 }
+static void receive_cp(V90Phase4 *s)
+{
+    if(!s->rx.cp.type && !s->have_cpt) {
+        s->cpt=s->rx.cp;s->have_cpt=1;
+        fprintf(stderr,"[v90p4] live CRC-valid CPt: drn=%u Sr=%u ld=%u gain=%u masks=%u at %.6fs\n",s->cpt.drn,s->cpt.sr,s->cpt.lookahead,s->cpt.gain,s->cpt.count,s->samples/8000.0);
+    } else if(s->rx.cp.type) {
+        if(s->stage==4)return; /* Do not silently change active CP. */
+        s->cp=s->rx.cp;
+        if(!s->have_cp || (!s->have_ack && s->cp.ack))
+            fprintf(stderr,"[v90p4] live CRC-valid CP%s: downstream=%u/3 bit/s Sr=%u ack=%u at %.6fs\n",s->cp.ack?"-prime":"",(s->cp.drn+20)*4000,s->cp.sr,s->cp.ack,s->samples/8000.0);
+        s->have_cp=1;if(s->cp.ack)s->have_ack=1;
+        if(s->stage==7 && !s->cp.silence) {
+            /* 9.6.1.2.6: leave silence only on a fresh non-silence CP.
+               Retain data-frame alignment for the following Rt. */
+            s->stage=8;s->rt_start=0;
+            s->have_ack=s->mp_ack=0;
+            s->generated=s->ed_frame=s->mp_announced=0;
+            s->trn_frames=0;s->rx.e_seen=s->rx_e_logged=0;
+            mp_build(s);
+            fprintf(stderr,"[v90p4] CP clears silence; transmit Rt at next frame boundary\n");
+        } else if(s->cp.silence && !s->renegotiations) {
+            s->stage=3;
+            fprintf(stderr,"[v90p4] CPs outside rate renegotiation; await retrain\n");
+        }
+    }
+}
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
 {
     if(s->stage==4 || s->stage==5) {
@@ -69,28 +95,19 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         }
     }
     int count=s->rx.found;v90_training_receive(&s->rx,&input,1);
-    if(count!=s->rx.found) {
-        if(!s->rx.cp.type && !s->have_cpt) {
-            s->cpt=s->rx.cp;s->have_cpt=1;
-            fprintf(stderr,"[v90p4] live CRC-valid CPt: drn=%u Sr=%u ld=%u gain=%u masks=%u at %.6fs\n",s->cpt.drn,s->cpt.sr,s->cpt.lookahead,s->cpt.gain,s->cpt.count,s->samples/8000.0);
-        } else if(s->rx.cp.type) {
-            if(s->stage==4)goto cp_done; /* Do not silently change active CP. */
-            s->cp=s->rx.cp;
-            if(!s->have_cp || (!s->have_ack && s->cp.ack))
-                fprintf(stderr,"[v90p4] live CRC-valid CP%s: downstream=%u/3 bit/s Sr=%u ack=%u at %.6fs\n",s->cp.ack?"-prime":"",(s->cp.drn+20)*4000,s->cp.sr,s->cp.ack,s->samples/8000.0);
-            s->have_cp=1;if(s->cp.ack)s->have_ack=1;
-            if(s->cp.silence) {
-                s->stage=3;
-                fprintf(stderr,"[v90p4] CPs silence procedure not implemented; await retrain\n");
-            }
-        }
-    }
-cp_done:
+    if(count!=s->rx.found)receive_cp(s);
     if(s->rx.e_seen && !s->rx_e_logged) {
         s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; starting upstream B1/data receiver\n",s->samples/8000.0);
     }
     if(s->stage==2 && s->ed_frame && s->samples-s->trn_start==(s->ed_frame+2)*6) {
-        if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
+        if(s->cp.silence) {
+            /* 9.6.1.2.5: Ed is followed by Ucode-zero silence, preserving
+               alignment and keeping the DTE clamped during echo training. */
+            s->generated-=v90_pcm_discard_lookahead(&s->encoder);
+            s->stage=7;s->have_cp=s->have_ack=0;
+            s->rx.e_seen=s->rx_e_logged=0;
+            fprintf(stderr,"[v90p4] Ed complete; CPs echo-training silence\n");
+        } else if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
             s->stage=4;s->data_start=s->samples;
             s->data_bits=0;memset(&s->rate_detector,0,sizeof(s->rate_detector));
             /* Keep callbacks but reset the upstream demapper for the new B1. */
@@ -139,6 +156,25 @@ cp_done:
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
         if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; bidirectional PPP data path enabled\n");
+    }
+    if(s->stage==7 || s->stage==8) {
+        out=v90_pcm_level(s->alaw,0);
+        if(s->stage==8) {
+            if(!s->rt_start && (s->samples-s->data_start)%6==0)
+                s->rt_start=s->samples;
+            if(s->rt_start) {
+                unsigned n=s->samples-s->rt_start;
+                int sign=n%6<3?1:-1;if(n>=384)sign=-sign;
+                out=sign*v90_pcm_level(s->alaw,s->encoder.map[n%6][0]);
+                if(n==407) {
+                    /* Rt is uncoded: resume MP with the coding/filter state
+                       left after Ed, without a new TRN2d initialization. */
+                    s->mp_length=((86+s->encoder.k+s->encoder.s-1)/(s->encoder.k+s->encoder.s))*(s->encoder.k+s->encoder.s);
+                    mp_build(s);s->stage=2;s->trn_start=s->samples+1;
+                    fprintf(stderr,"[v90p4] Rt/Rt-bar complete; resume MP after silence\n");
+                }
+            }
+        }
     }
     ++s->samples;return out;
 }

@@ -52,6 +52,8 @@ static unsigned scramble(V90Pcm *s)
 }
 static void prepare(V90Pcm *s)
 {
+    unsigned saved_scrambler=s->scrambler,saved_odd=s->odd,saved_sign=s->last_sign;
+    unsigned begin=s->queued;
     unsigned bits[45];
     for(unsigned j=0;j<s->s+s->k;++j)bits[j]=scramble(s);
     uint64_t value=0;
@@ -75,6 +77,21 @@ static void prepare(V90Pcm *s)
             f->pp|=b<<k;f->magnitude[k]=mag[j*s->width+k];
         }
     }
+    for(unsigned j=begin;j<s->queued;++j) {
+        s->queue[j].scrambler=saved_scrambler;
+        s->queue[j].odd=saved_odd;s->queue[j].last_sign=saved_sign;
+    }
+}
+unsigned v90_pcm_discard_lookahead(V90Pcm *s)
+{
+    unsigned frames=s->sr?s->sr:1;
+    unsigned bits=s->queued/frames*(s->k+s->s);
+    if(s->queued) {
+        s->scrambler=s->queue[0].scrambler;
+        s->odd=s->queue[0].odd;s->last_sign=s->queue[0].last_sign;
+        s->queued=0;
+    }
+    return bits;
 }
 void v90_pcm_frame(V90Pcm *s,int16_t out[6])
 {

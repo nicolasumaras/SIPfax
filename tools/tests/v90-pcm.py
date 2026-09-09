@@ -7,6 +7,7 @@ root=Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory() as tmp:
     wrapper=Path(tmp)/'wrap.c';so=Path(tmp)/'pcm.so'
     wrapper.write_text('''#include <stdlib.h>
+#include <string.h>
 #include "v90pcm.h"
 void *create(unsigned sr,unsigned ld,unsigned law){
  V90Pcm *s=malloc(sizeof(*s));V90Cp cp={0};
@@ -15,9 +16,26 @@ void *create(unsigned sr,unsigned ld,unsigned law){
  for(unsigned u=0;u<4;++u)cp.mask[0][0][(unsigned[]){53,78,88,96}[u]]=1;
  if(v90_pcm_init(s,&cp,0,0)){free(s);return 0;}return s;
 }
+int check_pause(V90Pcm *s){
+ int16_t a[6],b[6];
+ for(unsigned n=0;n<13;++n)v90_pcm_frame(s,a);
+ V90Pcm original=*s;
+ unsigned pending=s->queued/(s->sr?s->sr:1)*(s->k+s->s);
+ if(v90_pcm_discard_lookahead(s)!=pending || s->queued)return 1;
+ if(s->q!=original.q || s->t!=original.t || s->x!=original.x ||
+    s->y!=original.y || s->v!=original.v)return 2;
+ /* All-one input regenerated after discard must reproduce the queued
+    waveform exactly, including differential/filter history. */
+ for(unsigned n=0;n<20;++n){
+  v90_pcm_frame(s,a);v90_pcm_frame(&original,b);
+  if(memcmp(a,b,sizeof(a)))return 3;
+ }
+ return 0;
+}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),str(root/'vendor/linmodem/v90pcm.c'),'-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.create.argtypes=[C.c_uint]*3
+    lib.check_pause.argtypes=[C.c_void_p]
     lib.v90_pcm_frame.argtypes=[C.c_void_p,C.POINTER(C.c_int16)]
     for sr in range(4):
       for ld in range(4):
@@ -49,4 +67,5 @@ void *create(unsigned sr,unsigned ld,unsigned law){
         decoded=[b^(bits[i-18] if i>=18 else 0)^(bits[i-23] if i>=23 else 0) for i,b in enumerate(bits)]
         assert decoded==[1]*len(decoded),(sr,ld,law,next(i for i,b in enumerate(decoded) if b!=1))
         assert first==[levels[3]]*6,first
+        assert lib.check_pause(s)==0,(sr,ld,law,'lookahead rewind changed output')
     print('PASS: 32 law/redundancy/lookahead combinations recover every scrambled training bit; no lost first frame')

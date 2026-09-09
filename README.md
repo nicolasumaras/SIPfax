@@ -14,6 +14,42 @@ The first supported baseline follows the LKMA-168 decision:
 - spandsp soft-modem worker on the SIPfax VM; no physical modem is required on
   the server
 
+## Experimental V.90 backend
+
+The native C backend in `vendor/linmodem` has established V.90 calls with
+48 kbit/s downstream, 4.8 kbit/s upstream and authenticated PPP internet access
+using a Windows XP hardware modem through a Cisco ATA187 and FreePBX.
+Rate renegotiation and full retraining have restored traffic within an existing
+PPP session. Longer-term reliability remains under development: earlier soak
+tests encountered a one-way failure. See the [live development record](research/v90-live-status.md)
+for evidence and remaining work; these results do not imply full V.90 conformance.
+
+Build on Linux with GCC and make:
+
+```bash
+make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+```
+
+Set the persisted configuration's `modem.command` to the absolute path of
+`bin/sipfax-linmodem`, for example `/opt/sipfax/bin/sipfax-linmodem`.
+For a newly created configuration, `SIPFAX_MODEM_COMMAND` seeds this value.
+The launcher uses the built `vendor/linmodem/lm` alongside the repository;
+it does not enable private audio capture. The normal SIPfax PPP configuration,
+G.711 codec negotiation and per-call backend lifecycle still apply.
+
+Current hardware experiments use these service environment settings:
+
+| Variable | Default | Current test setting |
+| --- | --- | --- |
+| `SIPFAX_V90_MAX_BPS` | `56000` | `48000` downstream ceiling |
+| `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
+
+The initial training setting accepts 255–2000 ms, rounded down to a complete
+six-sample frame; invalid values use the default. Rate renegotiation retains
+its 255 ms training interval. Service environment changes require a restart
+when no call is active. A stored `modem.command` takes precedence over its
+environment seed. The native code retains its GPL-2.0 licensing.
+
 ## Run
 
 ```bash

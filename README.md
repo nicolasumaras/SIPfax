@@ -24,6 +24,13 @@ PPP session. Longer-term reliability remains under development: earlier soak
 tests encountered a one-way failure. See the [live development record](research/v90-live-status.md)
 for evidence and remaining work; these results do not imply full V.90 conformance.
 
+The native backend passively monitors PPP echo traffic. After a matching reply
+has demonstrated peer support, repeated unanswered requests can trigger one
+full retrain before PPP times out. It waits at least 40 seconds from the first
+unanswered request and 10 seconds from the latest counted request. Training
+pauses this observer; another recovery requires a matching reply to rearm it.
+This recovery mechanism does not diagnose or eliminate the underlying impairment.
+
 Build on Linux with GCC and make:
 
 ```bash

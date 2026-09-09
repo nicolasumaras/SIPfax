@@ -48,6 +48,7 @@ void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
  data_mode(s);s->round_trip=rtd;s->phase4.reneg_start=active?1000:0;
  s->phase4.samples=1384;s->phase4.rx_e_logged=received_e;
 }
+void echo_ready(V90Startup *s,int stage,int received_e){data_mode(s);s->phase4.stage=stage;s->phase4.rx_e_logged=received_e;}
 int law(V90Startup *s){return s->alaw;}
 void destroy(void *s) { free(s); }
 ''')
@@ -69,6 +70,21 @@ void destroy(void *s) { free(s); }
     lib.v90_startup_process.argtypes=[C.c_void_p,ptr,ptr,C.c_int]
     lib.v90_startup_history.argtypes=[C.c_void_p,ptr,C.c_int]
     lib.v90_info0d.argtypes=[C.POINTER(C.c_ubyte),C.c_int]
+    lib.echo_ready.argtypes=[C.c_void_p,C.c_int,C.c_int]
+    lib.v90_startup_data_retrain.argtypes=[C.c_void_p]
+    for stage,received_e in [(4,1),(4,0),(2,1),(5,1),(6,1)]:
+        state=lib.create(0);lib.echo_ready(state,stage,received_e)
+        expected=stage==4 and received_e
+        assert lib.v90_startup_data_retrain(state)==expected
+        assert lib.retrains(state)==expected
+        if expected:
+            assert not lib.v90_startup_data_retrain(state)
+            quiet=np.zeros(720,dtype=np.int16);out=quiet.copy()
+            lib.v90_startup_process(state,out,quiet,len(out))
+            assert np.all(out[:560]==0) and np.any(out[560:])
+            assert lib.consumed()==0
+        lib.destroy(state)
+    print('PASS: PPP health retrain data-state guards, one transition, 70ms mute and DTE clamp')
     for law in [0,1]:
         b=(C.c_ubyte*62)();lib.v90_info0d(b,law);b=list(b)
         assert b[:12]==[1]*4+[0,1,1,1,0,0,1,0]

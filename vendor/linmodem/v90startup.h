@@ -40,6 +40,7 @@ typedef struct {
 void v90_info0d(unsigned char bits[62], int alaw);
 void v90_info1d(unsigned char bits[109]);
 void v90_startup_init(V90Startup *s, int alaw);
+int v90_startup_data_retrain(V90Startup *s);
 void v90_startup_history(V90Startup *s, const int16_t *in, int n);
 void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n);
 #endif

@@ -142,6 +142,12 @@ static void begin_retrain(V90Startup *s, const char *reason)
     fprintf(stderr,"[v90p2] %s retrain %u at %.6fs; silence70ms then Tone B\n",
             reason,retrains,now/8000.0);
 }
+int v90_startup_data_retrain(V90Startup *s)
+{
+    if(!s->phase4_active || s->phase4.stage!=4 || !s->phase4.rx_e_logged)return 0;
+    begin_retrain(s,"initiate after unanswered PPP echoes;");
+    return 1;
+}
 static void receive_tone(V90Startup *s, int16_t input)
 {
     s->tone_history[s->tone_position] = input;

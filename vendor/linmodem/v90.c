@@ -752,6 +752,7 @@ void V90_init(struct V90State *s, int calling)
 {
     s->calling = calling;
     s->fpos = 0;s->serial_word=0;s->serial_remaining=0;
+    v90_echo_init(&s->echo);
     if (calling) {
         /* analog client: downstream decoder */
         memset(&s->dec, 0, sizeof(s->dec));
@@ -771,6 +772,7 @@ static int v90_serial_bit(void *opaque)
     V90State *s=opaque;struct sm_state *sm=s->opaque;
     if(!s->serial_remaining) {
         int value=sm_get_bit(&sm->tx_fifo);if(value<0)return 1;
+        v90_echo_tx(&s->echo,(unsigned)value,s->startup.samples);
         s->serial_word=((unsigned)value<<1)|(1u<<9);s->serial_remaining=10;
     }
     unsigned bit=s->serial_word&1;s->serial_word>>=1;--s->serial_remaining;return bit;
@@ -778,6 +780,10 @@ static int v90_serial_bit(void *opaque)
 static void v90_ppp_frame(void *opaque,const uint8_t *frame,unsigned length)
 {
     V90State *s=opaque;struct sm_state *sm=s->opaque;
+    int was_armed=s->echo.armed,was_fired=s->echo.fired;
+    v90_echo_rx(&s->echo,frame,length,s->startup.samples);
+    if(!was_armed && s->echo.armed)fprintf(stderr,"[v90data] PPP echo health monitoring armed\n");
+    else if(was_fired && !s->echo.fired)fprintf(stderr,"[v90data] PPP echo replies resumed after recovery\n");
     unsigned needed=2;
     for(unsigned j=0;j<length;++j)needed+=(frame[j]<0x20 || frame[j]==0x7d || frame[j]==0x7e)?2:1;
     if(needed>SM_FIFO_SIZE-(unsigned)sm_size(&sm->rx_fifo)) {
@@ -809,6 +815,10 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
             output[i] = 0;
         }
     } else {
+        if(!s->startup.phase4_active || s->startup.phase4.stage!=4 || !s->startup.phase4.rx_e_logged)
+            v90_echo_pause(&s->echo);
+        else if(v90_echo_due(&s->echo,s->startup.samples))
+            v90_startup_data_retrain(&s->startup);
         if(s->startup.phase4_active) {
             V90Phase4 *p=&s->startup.phase4;
             p->get_data_bit=v90_serial_bit;p->data_opaque=s;

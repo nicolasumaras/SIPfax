@@ -33,6 +33,10 @@ void destroy(void *s){free(s);}
         re=np.ascontiguousarray(samples.real,dtype=np.float64);im=np.ascontiguousarray(samples.imag,dtype=np.float64);a=Acquisition()
         ok=lib.v90_trellis_acquire(re.ctypes.data,im.ctypes.data,len(re),C.byref(a))
         return ok,a
+    class Carrier(C.Structure):
+        _fields_=[('phase',C.c_double),('gain',C.c_double),('frequency',C.c_double),('initialized',C.c_uint)]
+    lib.v90_carrier_init.argtypes=[C.POINTER(Carrier),C.c_double,C.c_double]
+    lib.v90_carrier_normalize.argtypes=[C.POINTER(Carrier),C.c_double,C.c_double,C.POINTER(C.c_double),C.POINTER(C.c_double)]
     total_hard=0
     for initial in range(16):
         n=2200;labels=[];inv=[];state=initial
@@ -86,5 +90,27 @@ void destroy(void *s){free(s);}
     assert ok and acq.offset==0 and acq.pair_alignment==0
     for bad in [np.zeros(4000,dtype=complex),np.full(4000,np.nan,dtype=complex),np.ones(4000,dtype=complex),rng.normal(size=4000)+1j*rng.normal(size=4000),np.ones(1792,dtype=complex)]:
         assert not acquire_samples(bad)[0],'invalid or ambiguous carrier acquired'
+    for frequency in [-1.0,-.1,.1,1.0]:
+        carrier=Carrier();assert lib.v90_carrier_init(C.byref(carrier),.37,.3)
+        signal=np.exp(-1j*labels.flatten()*np.pi/2)
+        time=np.arange(len(signal))/3200
+        signal*=np.exp(1j*(.37+2*np.pi*frequency*time))*np.linspace(.3,2,len(signal))
+        normalized=[]
+        for value in signal:
+            re=C.c_double();im=C.c_double()
+            assert lib.v90_carrier_normalize(C.byref(carrier),value.real,value.imag,C.byref(re),C.byref(im))
+            normalized.append(re.value+1j*im.value)
+        tracked=(-np.rint(np.angle(normalized)/(np.pi/2)).astype(int))%4
+        assert np.array_equal(tracked[256:],labels.flatten()[256:]),frequency
+        fixed=(-np.rint((np.angle(signal)-.37)/(np.pi/2)).astype(int))%4
+        assert np.count_nonzero(fixed!=labels.flatten())>0
+        assert abs(carrier.frequency-2*np.pi*frequency/3200)<.0001
+        phase_before=carrier.phase
+        re=C.c_double();im=C.c_double()
+        assert lib.v90_carrier_normalize(C.byref(carrier),0,0,C.byref(re),C.byref(im))
+        assert re.value==0 and im.value==0 and carrier.phase!=phase_before
+        assert not lib.v90_carrier_normalize(C.byref(carrier),float('nan'),0,C.byref(re),C.byref(im))
+    for phase,gain in [(0,0),(0,-1),(float('inf'),1),(0,float('nan'))]:
+        carrier=Carrier();assert not lib.v90_carrier_init(C.byref(carrier),phase,gain)
     assert total_hard>0
     print('PASS: all16 initial states, superframe inversions,64-pair ring wrap, clean data and',total_hard,'controlled hard-decision errors corrected; automatic superframe sync and rejection guards')

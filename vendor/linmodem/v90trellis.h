@@ -33,4 +33,12 @@ typedef struct {
  * or timing-hypothesis selection is performed here. Returns 0 on rejection. */
 int v90_trellis_acquire(const double *re,const double *im,unsigned symbols,
                        V90TrellisAcquisition *result);
+typedef struct {
+    double phase,gain,frequency;
+    unsigned initialized;
+} V90Carrier;
+int v90_carrier_init(V90Carrier *s,double phase,double gain);
+/* One matched-filter complex symbol per call. This tracks carrier/gain,
+ * not symbol timing; returns zero for invalid state or nonfinite input. */
+int v90_carrier_normalize(V90Carrier *s,double re,double im,double *out_re,double *out_im);
 #endif

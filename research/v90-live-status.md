@@ -969,3 +969,12 @@ Previous turn added automatic superframe alignment;51f3479CI passed. Revalidated
 Independent tests pass across carrier rotations, three gains, both leading-symbol alignments, controlled phase errors, and constant/random/nonfinite/short rejection. Private hardware replay searches allfive independent front-end timing phases without a manually chosen carrier/pair/superframe parameter. Two candidates pass; selected phase0,pair1,offset389,zero syndrome errors. C decodes7836pairs and produces two complete PPP frames (29,31bytes) with valid FCS, exactly matching the hard-reference frames in this clean interval. Initial arbitrary expectation of three frames was checked against the reference: only two complete frames exist in this interval; final audit requires those exact two. Private result `work/v90-c-acquisition-hardware-result.json`. No captured payload committed.
 
 This validates acquisition plus decoding on the bounded recording, not continuous timing/carrier tracking or correction of natural modem errors. No deployment or new hardware call this turn. Goal active.
+
+
+## Carrier/gain tracking added and checked offline (2026-09-09)
+
+Previous turn validated buffered acquisition. Added experimental per-symbol carrier/gain tracker initialized from acquisition: bounded second-order phase loop, slow gain adaptation, finite-input guards, and phase prediction without adaptation during fades/extreme amplitude outliers. Symbol timing is not tracked by this helper. The kernel remains disconnected from the live upstream path.
+
+Independent synthetic tests pass for signed0.1/1Hz offsets at3200baud, gain ramps0.3..2, phase evolution, fade handling and invalid initialization/nonfinite input rejection. Fixed-phase decisions fail these changing-carrier streams, while tracked decisions match the transmitter after the acquisition transient. Full trellis/synchronization/acquisition regressions still pass. Private hardware acquisition->tracking->Ctrellis replay preserves the exact two29/31-byte FCS-valid PPP frames from the earlier interval; metadata `work/v90-c-tracking-hardware-result.json`. This is bounded offline validation, not proof of long-call robustness or natural-error correction.
+
+No live modem call started and no deployment made this turn. Continuous timing selection and integration with the native UART/PPP path remain required. Goal active.

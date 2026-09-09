@@ -145,3 +145,35 @@ int v90_trellis_acquire(const double *re,const double *im,unsigned symbols,
     if(found)*result=best;
     return found;
 }
+
+int v90_carrier_init(V90Carrier *s,double phase,double gain)
+{
+    memset(s,0,sizeof(*s));
+    if(!isfinite(phase) || !isfinite(gain) || gain<=0)return 0;
+    s->phase=remainder(phase,2*acos(-1.0));s->gain=gain;s->initialized=1;
+    return 1;
+}
+
+int v90_carrier_normalize(V90Carrier *s,double re,double im,double *out_re,double *out_im)
+{
+    if(!s->initialized || !isfinite(re) || !isfinite(im))return 0;
+    double magnitude=hypot(re,im);
+    if(!isfinite(magnitude))return 0;
+    double c=cos(s->phase),sn=sin(s->phase);
+    double a=(re*c+im*sn)/s->gain,b=(im*c-re*sn)/s->gain;
+    if(!isfinite(a) || !isfinite(b))return 0;
+    *out_re=a;*out_im=b;
+    double error=0;
+    /* Ignore fades and extreme amplitude outliers in the tracking loops.
+     * Keep predicting carrier phase during a fade. */
+    if(magnitude>s->gain*.25 && magnitude<s->gain*4) {
+        double rotation=atan2(b,a);
+        error=remainder(rotation,acos(-1.0)/2);
+        s->frequency+=0.00001*error;
+        if(s->frequency>.02)s->frequency=.02;
+        if(s->frequency<-.02)s->frequency=-.02;
+        s->gain+=.001*(magnitude-s->gain);
+    }
+    s->phase=remainder(s->phase+s->frequency+.005*error,2*acos(-1.0));
+    return 1;
+}

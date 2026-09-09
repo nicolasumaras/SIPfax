@@ -297,6 +297,13 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
             }
             if(s->phase4_active) {
                 out[i]=v90_phase4_next(&s->phase4,in[i]);
+                /* 9.4.1 permits a retrain at any point in Phase4. Rejected
+                   constellation parameters cannot produce training/data;
+                   start recovery instead of waiting indefinitely in silence. */
+                if(s->phase4.stage==3) {
+                    begin_retrain(s,"initiate after rejected Phase4 parameters;");
+                    out[i]=0;
+                }
             } else if(s->training_tx_active) {
                 if(s->training_tx.stage==1 && !s->training_tx.stop_dil) {
                     V90Training *monitor=&s->phase4.rx;

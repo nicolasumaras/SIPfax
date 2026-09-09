@@ -720,3 +720,12 @@ BackedupCTsrc/ppp.js/index.jsto/tmp/sipfax-before-mss.tgz, deployednewfiles,conf
 Deployed-ruleverificationwithordinaryunmodifiedHTTPfixture:4KBuploadPASS10.165s,32KiBdownloadPASS12.507s,bothexpectedhashes. CTppp0captureconfirmsXP SYN MSS1460/serverSYNACKrewrittento536,upstreampayloadmax536/downstreammax1460. Thusasymmetryverified; single12.507sdownloadisnotproofunchangedthroughput. Privatework/v90-mss-deployed-{up,down}.json/-metadata.txt. Testhelper29426terminal,fixturev90-upstream-checkSTOPPED,CTcapturepid12805stopped62412terminal85packets/0drops.
 
 Started100periodicrequestsonsame0xF80000,handle45640LIVE,work/v90-probes-0xF80000.json. FreePBXcapture17887LIVE/tmp/v90-mss-live.pcap,2400sboundstartedbeforecall. Preservebothandexistingcall. RuntimeCPs/48k/1500ms/60ms/MSS536. Goalactive:underlyingimpairment,intermittentstartup,hardwareCPs/fallback/higherupstreamstillnotcomplete.
+
+
+## Retrain immediately after unusable Phase 4 parameters (2026-09-09)
+
+The previous failed recovery on native PID 12605 rejected a CRC-valid CPt at Phase 4 +0.556250s. An independent decode of the training-only RX interval (raw seconds 1071–1075) recovered ten identical valid frames: drn 9, Sr 1, lookahead 1, gain 8192, six transmit masks of sizes 3/3/3/5/3/3. Their product is 1215, below the 4096 combinations required for K=12. Native rejection is correct; removing the capacity guard would produce invalid mapping. The cause of the caller's unusable constellation remains unknown. Private crop and decoded bits remain outside Git.
+
+The startup controller now initiates a full retrain immediately when Phase 4 rejects parameters, instead of remaining in failed-stage silence until the caller restarts or falls back. V.90 section 9.4.1 permits retrain at any point in Phase 4; the existing retrain path implements section 9.5.1.1 silence and Tone B. A regression uses the observed six transmit masks and verifies one restart, 70 ms mute, DTE clamp and law preservation. The complete startup test passes, including existing echo-watchdog and CPs deadline checks; the native build passes. This change is not yet deployed or hardware-validated.
+
+The existing MSS-enabled call 0xF80000 remains untouched: 25/25 periodic HTTP probes complete through Windows duration 649.865 s. Preserve live probe handle 45640 and capture handle 17887. The active native binary remains the prior CPs build. Goal remains active; recovery reliability and higher upstream rates are unfinished.

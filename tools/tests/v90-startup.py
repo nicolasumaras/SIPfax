@@ -43,6 +43,15 @@ void data_mode(V90Startup *s){
  dte_bits=0;
 }
 unsigned retrains(V90Startup *s){return s->retrains;}
+void invalid_cpt(V90Startup *s){
+ data_mode(s);s->phase4.stage=0;s->phase4.samples=192;s->phase4.have_cpt=1;
+ V90Cp *cp=&s->phase4.cpt;*cp=(V90Cp){0};
+ cp->drn=9;cp->sr=1;cp->lookahead=1;cp->count=6;cp->gain=8192;cp->filter[0]=63;
+ /* Hardware CPt: 1215 combinations cannot carry K=12 (4096). */
+ unsigned sizes[6]={3,3,3,5,3,3};
+ unsigned masks[6][5]={{0,96,116},{3,114,116},{0,96,116},{0,53,78,88,96},{3,114,116},{84,100,112}};
+ for(unsigned i=0;i<6;++i){cp->indices[i]=i;for(unsigned j=0;j<sizes[i];++j)cp->mask[0][i][masks[i][j]]=1;}
+}
 long mute_until(V90Startup *s){return s->retrain_mute_until;}
 void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
  data_mode(s);s->round_trip=rtd;s->phase4.reneg_start=active?1000:0;
@@ -74,6 +83,16 @@ void destroy(void *s) { free(s); }
     lib.v90_info0d.argtypes=[C.POINTER(C.c_ubyte),C.c_int]
     lib.echo_ready.argtypes=[C.c_void_p,C.c_int,C.c_int]
     lib.v90_startup_data_retrain.argtypes=[C.c_void_p]
+    lib.invalid_cpt.argtypes=[C.c_void_p]
+    for law in [0,1]:
+        state=lib.create(law);lib.invalid_cpt(state)
+        quiet=np.zeros(720,dtype=np.int16);out=quiet.copy()
+        lib.v90_startup_process(state,out,quiet,len(out))
+        assert lib.retrains(state)==1 and not lib.data_active(state)
+        assert np.all(out[:560]==0) and np.any(out[560:])
+        assert lib.consumed()==0 and lib.law(state)==law
+        lib.destroy(state)
+    print('PASS: unusable six-mask CPt initiates one retrain, 70ms mute and DTE clamp')
     for stage,received_e in [(4,1),(4,0),(2,1),(5,1),(6,1),(7,1),(8,1)]:
         state=lib.create(0);lib.echo_ready(state,stage,received_e)
         expected=stage==4 and received_e

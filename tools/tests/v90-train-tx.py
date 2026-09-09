@@ -2,7 +2,7 @@
 """Check digital training wire levels, scrambler and Jd CRC independently."""
 import ctypes as C
 from pathlib import Path
-import subprocess,tempfile
+import subprocess,tempfile,os
 root=Path(__file__).resolve().parents[2]
 class Dil(C.Structure):
     _fields_=[('n',C.c_uint),('lsp',C.c_uint),('ltp',C.c_uint),('sp',C.c_uint8*128),('tp',C.c_uint8*128),('h',C.c_uint8*8),('reference',C.c_uint8*8),('ucodes',C.c_uint8*255)]
@@ -53,3 +53,24 @@ with tempfile.TemporaryDirectory() as tmp:
     for _ in range(5):lib.v90_train_tx_next(C.byref(state))
     assert state.stage==2 and lib.v90_train_tx_next(C.byref(state))==0
     print('PASS: both PCM laws, Sd/Sbar lengths, TRN1d GPC, Jd differential encoding/CRC')
+
+    # Fixed Jd bit positions from the rate table, including its reserved gap.
+    all_rates=list(range(18,34))+list(range(35,41))
+    expected_masks={None:all_rates,'28000':[18],'32000':list(range(18,22)),
+                    '35000':list(range(18,24)),'48000':list(range(18,34)),
+                    '49333':list(range(18,34)),'49334':list(range(18,34))+[35],
+                    '56000':all_rates,'invalid':all_rates,'27999':all_rates,
+                    '56001':all_rates}
+    for setting,expected in expected_masks.items():
+        if setting is None:os.environ.pop('SIPFAX_V90_MAX_BPS',None)
+        else:os.environ['SIPFAX_V90_MAX_BPS']=setting
+        state=Tx();lib.v90_train_tx_init(C.byref(state),0,78)
+        assert [j for j in range(18,41) if state.jd[j]]==expected,setting
+        assert state.jd[34]==0 and state.jd[41]==0
+        crc=0xffff
+        for j in [*range(18,34),*range(35,51)]:
+            top=(crc>>15)^state.jd[j];crc=(crc<<1)&0xffff
+            if top:crc^=0x1021
+        assert list(state.jd[52:68])==[(crc>>(15-j))&1 for j in range(16)]
+    os.environ.pop('SIPFAX_V90_MAX_BPS',None)
+    print('PASS: exact V.90 rate ceilings, reserved framing bits, CRC, and invalid-setting fallback')

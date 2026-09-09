@@ -1,5 +1,6 @@
 /* V.90 digital training signals, clauses8.4.2/4/5. GPL-2.0. */
 #include <string.h>
+#include <stdlib.h>
 #include "v90train_tx.h"
 static int magnitude(int law,int ucode)
 {
@@ -13,8 +14,18 @@ void v90_train_tx_init(V90TrainTx *s,int alaw,int uinfo)
 {
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
     memset(s->jd,1,17);
-    for(int j=18;j<=33;++j)s->jd[j]=1;
-    for(int j=35;j<=40;++j)s->jd[j]=1;
+    /* Optional interoperability ceiling; retain all V.90 rates by default.
+       Compare exact rates in thirds of a bit/s, without rounding 1333 steps. */
+    long maximum=56000;
+    const char *setting=getenv("SIPFAX_V90_MAX_BPS");
+    if(setting && *setting) {
+        char *end;long parsed=strtol(setting,&end,10);
+        if(!*end && parsed>=28000 && parsed<=56000)maximum=parsed;
+    }
+    for(int rate=21;rate<=42;++rate) {
+        int bit=18+(rate-21)+(rate>=37);
+        s->jd[bit]=(4000L*rate<=3*maximum);
+    }
     s->jd[49]=1; /* mandatory lookahead1; four-point upstream training */
     unsigned crc=0xffff;
     for(int j=18;j<=50;++j) {

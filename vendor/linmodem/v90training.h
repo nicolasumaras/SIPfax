@@ -27,6 +27,7 @@ int v90_training_receive(V90Training *s,const int16_t *pcm,int count);
 typedef struct {
     unsigned samples,good,bad,latched,reversed;
     double re[3],im[3],energy,short_re,short_im,ref_re,ref_im;
+    double normalized_re[3],normalized_im[3],block_energy;
 } V90SDetect;
 int v90_s_detect(V90SDetect *s,int16_t sample);
 #endif

@@ -92,9 +92,20 @@ int v90_s_detect(V90SDetect *s,int16_t sample)
         s->re[k]+=sample*cos(angle);s->im[k]+=sample*sin(angle);
     }
     s->energy+=(double)sample*sample;
+    s->block_energy+=(double)sample*sample;
     ++s->samples;
     int event=0;
     if(s->samples%20==0) {
+        /* Hardware S ramps up from silence. Normalize each 2.5ms block
+           before the 12.5ms coherence test so the amplitude envelope does
+           not look like incoherent energy. Keep an absolute noise gate. */
+        double scale=sqrt(s->block_energy/20+1);
+        for(int k=0;k<3;++k) {
+            s->normalized_re[k]+=s->re[k]/scale;
+            s->normalized_im[k]+=s->im[k]/scale;
+        }
+        memset(s->re,0,sizeof(s->re));memset(s->im,0,sizeof(s->im));
+        s->block_energy=0;
         double dot=s->short_re*s->ref_re+s->short_im*s->ref_im;
         double p=s->short_re*s->short_re+s->short_im*s->short_im;
         double r=s->ref_re*s->ref_re+s->ref_im*s->ref_im;
@@ -106,21 +117,22 @@ int v90_s_detect(V90SDetect *s,int16_t sample)
     if(s->samples%100==0) {
         double power[3],total=0;
         for(int k=0;k<3;++k) {
-            power[k]=2*(s->re[k]*s->re[k]+s->im[k]*s->im[k])/(100*s->energy+1);
+            power[k]=2*(s->normalized_re[k]*s->normalized_re[k]+s->normalized_im[k]*s->normalized_im[k])/10000;
             total+=power[k];
         }
-        int good=s->energy>100*10000 && total>0.85 && power[0]>0.10 && power[1]>0.20 && power[2]>0.10;
+        int good=s->energy>100*900 && total>0.85 && power[0]>0.10 && power[1]>0.20 && power[2]>0.10;
         if(good) {
             s->bad=0;
             if(++s->good>=2 && !s->latched) {
                 s->latched=1;s->reversed=0;event=1;
-                s->ref_re=s->re[1];s->ref_im=s->im[1];
+                s->ref_re=s->normalized_re[1];s->ref_im=s->normalized_im[1];
             }
         } else {
             s->good=0;
             if(++s->bad>=3)s->latched=0;
         }
-        memset(s->re,0,sizeof(s->re));memset(s->im,0,sizeof(s->im));s->energy=0;
+        memset(s->normalized_re,0,sizeof(s->normalized_re));
+        memset(s->normalized_im,0,sizeof(s->normalized_im));s->energy=0;
     }
     return event;
 }

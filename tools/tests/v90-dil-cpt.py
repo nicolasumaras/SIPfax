@@ -35,7 +35,9 @@ void destroy(void *s){free(s);}
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
  ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
  lib.run.argtypes=[C.c_void_p,ptr,ptr,C.c_uint];lib.value.argtypes=[C.c_void_p,C.c_uint];lib.value.restype=C.c_long;lib.destroy.argtypes=[C.c_void_p]
- for law,path,start,end in [(0,sys.argv[1],17.5,18.7),(1,sys.argv[2],16,18)]:
+ # Start after the actual S/Sbar; a stronger detector now sees the transition
+ # that the original 17.5s test prefix inadvertently included.
+ for law,path,start,end in [(0,sys.argv[1],17.58,18.7),(1,sys.argv[2],16,18)]:
   for valid in [False,True]:
    x=np.fromfile(path,dtype='<i2')[int(start*8000):int(end*8000)] if valid else np.zeros(16000,dtype=np.int16)
    out=np.zeros_like(x);s=lib.create(law)

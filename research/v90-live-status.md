@@ -569,3 +569,12 @@ Previous turn was progress: hardware watchdog-triggered retrain restoredbulk/pub
 Started75periodicpublicprobes with20secondgaps andthree-failurestop on SAMEconnection, filework/v90-probes-0xF40000.json. This extends past the earlier20–27minute failure windows; it is not a completedtest yet. Existing2400secondcapture79248remainslive. Runtimecontinues60mspacing,48kceiling,1500msinitialTRN,fixedwatchdog. Goalactive.
 
 Read-only GitHub check found oneopenPR,20 LKMA-197 Phase3a HDLCframer/ptybridge, twoJunecommits. Its described scope is the olderV.21softmodem path, notV.90 or a higher-rate datapump. Its commits are not ancestors/patch-equivalent toHEAD, while currentbaseline already contains anHDLCptyimplementation through subsequentwork; no blindmerge orPRclosure performed. CurrentV.90developmentbranch has59commits beyond localorigin/main and remainsunpublished; release integration stillneedsreview. This branch check does not alter the live modemtest.
+
+
+## Native engine selection and continuing recovered-call verification (2026-09-09)
+
+Previous turn was progress via postrecoveryidlepass. Revalidated periodic19164 andcapture79248; both remainlive. Twelve periodic requests throughWindows994.209s have completed; all responsehashes checked. One took20.744s, laterrequests~1s. Same0xF40000/12191/12192 after priorwatchdogrecovery; no restart. Runtime60mspacing/48k/1500ms unchanged.
+
+Added explicit linmodem engine selection LOCALLY: new purecommandresolver chooses /opt/sipfax/bin/sipfax-linmodem or SIPFAX_LINMODEM_BINARY, preserving highest-priority storedcustomcommand and independent spandsp/slmodem overrides. index.js uses resolver pernewcall. Environmentseed SIPFAX_MODEM_ENGINE=linmodem defaultsmodulationv90; storedconfiguration remainsauthoritative. README/envexample documentselection andinitialtraining setting. Admin remainsexistingcredential/concurrencyUI; no unsupported claim of a newmodemselector. This removes the requirement to supply a customcommand for normalnative deployment while retaining privatecapturewrappercompatibility.
+
+Bundled localNode is available at /home/ncolasumaras/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node. Native-selection/configuration/multiline/admin/deploymentchecks:15tests pass; indexsyntax andwhitespacepass. No need to useCTfor these tests. Changes remain LOCAL ONLY pending idledeployment, so they cannot affectthislive modemtest. Goalactive.

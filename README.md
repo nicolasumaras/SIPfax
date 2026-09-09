@@ -37,9 +37,12 @@ Build on Linux with GCC and make:
 make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
 ```
 
-Set the persisted configuration's `modem.command` to the absolute path of
-`bin/sipfax-linmodem`, for example `/opt/sipfax/bin/sipfax-linmodem`.
-For a newly created configuration, `SIPFAX_MODEM_COMMAND` seeds this value.
+For a newly created configuration, set `SIPFAX_MODEM_ENGINE=linmodem`.
+For an existing configuration, set `modem.engine` to `linmodem`,
+`modem.modulation` to `v90`, and `modem.command` to `null` to select its launcher.
+The default launcher is `/opt/sipfax/bin/sipfax-linmodem`;
+`SIPFAX_LINMODEM_BINARY` can override that location. An explicit stored
+`modem.command` still takes precedence, including existing capture wrappers.
 The launcher uses the built `vendor/linmodem/lm` alongside the repository;
 it does not enable private audio capture. The normal SIPfax PPP configuration,
 G.711 codec negotiation and per-call backend lifecycle still apply.

@@ -28,6 +28,7 @@ with tempfile.TemporaryDirectory() as tmp:
 void *create(int law) { V90Startup *s=malloc(sizeof(*s)); v90_startup_init(s,law); return s; }
 int received(V90Startup *s) { return s->info0_received; }
 int phase2_complete(V90Startup *s) { return s->info1_received && s->upstream_rate==4 && s->downstream_rate==6 && s->uinfo==90; }
+long info1_at(V90Startup *s){return s->info1_received_at;}
 long tx_reversal(V90Startup *s) { return s->first_tx_reversal; }
 long rx_reversal(V90Startup *s) { return s->second_rx_reversal; }
 void phase3(V90Startup *s){s->samples=20000;s->info0_received=1;s->info0_at=0;s->ranging_state=9;}
@@ -57,6 +58,11 @@ void reneg_timeout(V90Startup *s,long rtd,int received_e,int active){
  data_mode(s);s->round_trip=rtd;s->phase4.reneg_start=active?1000:0;
  s->phase4.samples=1384;s->phase4.rx_e_logged=received_e;
 }
+void initial_timeout(V90Startup *s,long rtd,int received_e,int active,int reneg){
+ data_mode(s);s->round_trip=rtd;s->info1_received=1;s->info1_received_at=1234;
+ s->samples=1234+120000+5*(rtd>0?rtd:0)-1;
+ s->phase4_active=active;s->phase4.rx_e_logged=received_e;s->phase4.renegotiations=reneg;
+}
 void silence_timeout(V90Startup *s,long rtd){reneg_timeout(s,rtd,0,1);s->phase4.stage=7;s->phase4.alaw=s->alaw;s->phase4.cp.silence=1;}
 void echo_ready(V90Startup *s,int stage,int received_e){data_mode(s);s->phase4.stage=stage;s->phase4.rx_e_logged=received_e;}
 int law(V90Startup *s){return s->alaw;}
@@ -67,13 +73,14 @@ void destroy(void *s) { free(s); }
                     '-I'+str(root/'vendor/linmodem'), str(wrapper),
                     str(root/'vendor/linmodem/v90startup.c'),str(root/'vendor/linmodem/v90training.c'),str(root/'vendor/linmodem/v90dil.c'),str(root/'vendor/linmodem/v90cp.c'),str(root/'vendor/linmodem/v90phase4.c'),str(root/'vendor/linmodem/v90pcm.c'),str(root/'vendor/linmodem/v90upstream.c'),str(root/'vendor/linmodem/v90train_tx.c'),'-lm','-o',str(libpath)],check=True)
     lib=C.CDLL(str(libpath)); lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
-    for name in ['tx_reversal','rx_reversal']:
+    for name in ['tx_reversal','rx_reversal','info1_at']:
         getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_long
     lib.phase2_complete.argtypes=[C.c_void_p]
     lib.data_mode.argtypes=[C.c_void_p];lib.data_active.argtypes=[C.c_void_p]
     lib.phase3.argtypes=[C.c_void_p];lib.retrains.argtypes=[C.c_void_p]
     lib.mute_until.argtypes=[C.c_void_p];lib.mute_until.restype=C.c_long
     lib.reneg_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int]
+    lib.initial_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int,C.c_int]
     lib.silence_timeout.argtypes=[C.c_void_p,C.c_long]
     lib.law.argtypes=[C.c_void_p]
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
@@ -222,6 +229,26 @@ void destroy(void *s) { free(s); }
                 lib.destroy(state)
     print('PASS: renegotiation deadline, RTD/law preservation, E cancellation,70ms mute/Tone B and DTE clamp')
 
+    for law in [0,1]:
+        for rtd in [-20,0,420,1280]:
+            for received_e,active,reneg in [(0,1,0),(1,1,0),(0,0,0),(0,1,1)]:
+                state=lib.create(law);lib.initial_timeout(state,rtd,received_e,active,reneg)
+                quiet=np.zeros(1,dtype=np.int16);out=quiet.copy()
+                lib.v90_startup_process(state,out,quiet,1)
+                assert lib.retrains(state)==0,'initial timeout fired one sample early'
+                before=lib.consumed()
+                quiet=np.zeros(1000,dtype=np.int16);out=quiet.copy()
+                lib.v90_startup_process(state,out,quiet,len(quiet))
+                expected=active and not received_e and not reneg
+                assert lib.retrains(state)==int(expected)
+                if expected:
+                    assert lib.mute_until(state)==1234+120000+5*max(rtd,0)+560
+                    assert np.all(out[:560]==0) and np.any(out[560:])
+                    assert lib.consumed()==before and not lib.data_active(state)
+                    assert lib.law(state)==law
+                lib.destroy(state)
+    print('PASS: initial missing-E deadline uses INFO1a time, RTD, E/phase/renegotiation guards and 70ms mute')
+
     # Optional private hardware recording: normal data must not false-trigger,
     # but the caller's late real Tone A must clamp the data transmitter.
     if '--data-retrain' in sys.argv:
@@ -274,6 +301,7 @@ void destroy(void *s) { free(s); }
     for start in range(0,len(pcm),160):
         lib.v90_startup_process(state,out[start:start+160],pcm[start:start+160],len(pcm[start:start+160]))
     assert lib.phase2_complete(state), 'INFO1a parameters not received'
+    assert 13900<=lib.info1_at(state)<=14000,'INFO1a receipt timestamp not captured from waveform'
     # L1 and L2 have the same comb, with L1 power6dB higher.
     ratio=np.mean(out[7200:8480].astype(float)**2)/np.mean(out[8800:10080].astype(float)**2)
     assert 3.8<ratio<4.2,ratio

@@ -98,7 +98,7 @@ static void receive(V90Startup *s, int16_t input)
                 unsigned received=0;
                 for(int k=0;k<16;++k) received|=b[50+k]<<k;
                 if (!memcmp(b,prefix,12) && received==crc_bits(b+12,38)) {
-                    s->info1_received=1; s->upstream_rate=0; s->downstream_rate=0; s->uinfo=0;
+                    s->info1_received=1; s->info1_received_at=s->samples; s->upstream_rate=0; s->downstream_rate=0; s->uinfo=0;
                     for(int k=0;k<3;++k) { s->upstream_rate|=b[34+k]<<k; s->downstream_rate|=b[37+k]<<k; }
                     for(int k=0;k<7;++k) s->uinfo|=b[25+k]<<k;
                     s->ranging_state=9;
@@ -233,6 +233,16 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
             unsigned elapsed=s->phase4.samples-s->phase4.reneg_start;
             if(elapsed>=384 && (long)(elapsed-384)>=40000+2*rtd)
                 begin_retrain(s,"initiate after renegotiation E timeout;");
+        }
+        /* 9.4.1 bounds initial final training from receipt of INFO1a.
+           Without E, B1 cannot have been received. This guard covers the
+           missing-E case; it does not substitute for B1 validation after E.
+           Renegotiation has its separate, shorter deadline above. */
+        if(s->info1_received && s->phase4_active &&
+           !s->phase4.renegotiations && !s->phase4.rx_e_logged) {
+            long rtd=s->round_trip>0?s->round_trip:0;
+            if(s->samples-s->info1_received_at>=120000+5*rtd)
+                begin_retrain(s,"initiate after initial E timeout;");
         }
         int symbol = (s->samples * 3) / 40;
         if (!s->retrains && symbol < 63 && symbol != s->tx_symbol) {

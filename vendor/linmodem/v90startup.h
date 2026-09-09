@@ -20,7 +20,7 @@ typedef struct {
     double tone_re, tone_im, tone_energy, ref_re, ref_im;
     int16_t tone_history[80];
     long tone_history_count;
-    long probe_start, info1_start, probe_reply, round_trip;
+    long probe_start, info1_start, probe_reply, round_trip, info1_received_at;
     unsigned char info1d[109];
     V90Training training;
     int training_active,training_tx_active;

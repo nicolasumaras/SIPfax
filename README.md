@@ -53,10 +53,12 @@ Current hardware experiments use these service environment settings:
 | --- | --- | --- |
 | `SIPFAX_V90_MAX_BPS` | `56000` | `48000` downstream ceiling |
 | `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
+| `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `255` rate-renegotiation training interval |
 
 The initial training setting accepts 255–2000 ms, rounded down to a complete
-six-sample frame; invalid values use the default. Rate renegotiation retains
-its 255 ms training interval. Service environment changes require a restart
+six-sample frame; invalid values use the default. The independent renegotiation
+setting accepts 0–2000 ms with the same rounding; it defaults to 255 ms.
+Longer renegotiation training is an unverified interoperability experiment. Service environment changes require a restart
 when no call is active. A stored `modem.command` takes precedence over its
 environment seed. The native code retains its GPL-2.0 licensing.
 

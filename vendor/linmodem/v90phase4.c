@@ -35,18 +35,21 @@ static int data_bit(void *opaque)
     if(s->stage!=4)return 1; /* DTE clamped as soon as S is recognized. */
     return s->get_data_bit?s->get_data_bit(s->data_opaque):1;
 }
+static unsigned training_frames(const char *name,long minimum_ms)
+{
+    const char *setting=getenv(name);
+    if(setting && *setting) {
+        char *end;long ms=strtol(setting,&end,10);
+        if(!*end && ms>=minimum_ms && ms<=2000)return (unsigned)(ms*8/6);
+    }
+    return 340;
+}
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 {
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
-    s->trn_frames=340;
-    /* Optional initial-training interoperability experiment. 9.4.1.2/3:
-       at least 2040 PCM samples, MP begins within 2000ms. Round down to
-       whole six-sample frames so the upper limit cannot be exceeded. */
-    const char *setting=getenv("SIPFAX_V90_INITIAL_TRN2D_MS");
-    if(setting && *setting) {
-        char *end;long ms=strtol(setting,&end,10);
-        if(!*end && ms>=255 && ms<=2000)s->trn_frames=(unsigned)(ms*8/6);
-    }
+    /* 9.4.1.2/3: at least 2040 samples, MP begins within 2000ms.
+       Round down to complete six-sample frames. */
+    s->trn_frames=training_frames("SIPFAX_V90_INITIAL_TRN2D_MS",255);
     v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init(&s->upstream);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
 }
@@ -85,7 +88,8 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             v90_training_init(&s->rx);s->rx.cp_mode=1;
             s->have_cp=s->have_ack=s->mp_ack=s->rx_e_logged=0;
             s->generated=s->ed_frame=s->mp_announced=s->reneg_start=0;
-            s->trn_frames=340; /* Do not change the verified rate response. */
+            /* 9.6.1.2.2 permits optional TRN2d up to 2000ms. */
+            s->trn_frames=training_frames("SIPFAX_V90_RENEG_TRN2D_MS",0);
             ++s->renegotiations;
             fprintf(stderr,"[v90p4] rate renegotiation S; clamp DTE at %.6fs\n",s->samples/8000.0);
         }

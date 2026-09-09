@@ -774,3 +774,12 @@ DialUpLab Windows CI run 34403002758 completed successfully, including missing-s
 A direct authenticated HTTP health request from CT105 to `10.64.0.2:4782` succeeded. Bounded ppp0 capture `/tmp/v90-api-over-ppp.pcap` contains nine packets with zero drops: full TCP handshake, 158-byte request and 290-byte response followed by clean close. This verifies bidirectional IP/TCP through the newly deployed modem, independently of the stuck notebook-originated probe. It does not verify public internet egress. The earlier unanswered ping is therefore not evidence of a completely failed data channel.
 
 Started a bounded 30-request direct PPP health test, handle 90121, private helper `work/v90_health_over_ppp.py` and results `work/v90-health-over-ppp.json`, 20-second gaps and stop after three failures. This tests server-originated TCP over PPP only. Existing call 0xF90000/native13038/pppd13039 and FreePBX capture5144 remain in place; a native E-timeout retrain3 was observed at startup462.414125s before the successful direct health request. Goal active.
+
+
+## Prepare bounded renegotiation-training experiment (2026-09-09)
+
+The direct PPP health worker 90121 remains live, with ten successful requests so far. The active deployed modem remains the rejected-parameters recovery build; no restart or configuration change was made during this turn. Notebook-originated public probes remain unavailable pending the previously requested DialUpLab restart/update.
+
+Added optional `SIPFAX_V90_RENEG_TRN2D_MS`, default 255 ms, accepting 0–2000 ms rounded down to six-sample frames. V.90 9.6.1.2.2 explicitly permits optional TRN2d up to 2000 ms. This prepares a controlled comparison of longer training after independently validating emitted MP/MP-prime during failures; improvement is a hypothesis, not an observed result. Initial training retains its separate 255–2000 ms bounds and existing deployment value. CPs silence/Rt still resumes MP without new training.
+
+New CI regression drives actual S/Sbar through the detector, checks one aligned 384+24-sample Rd response, DTE clamping and independently inverse-maps/descrambles training and MP CRC at default, zero, short, 1500, 2000 and invalid settings. It passes. Existing startup/deadline and CPs structural/audio suites pass; native build passes. Candidate is not deployed. Goal active.

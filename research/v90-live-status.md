@@ -978,3 +978,10 @@ Previous turn validated buffered acquisition. Added experimental per-symbol carr
 Independent synthetic tests pass for signed0.1/1Hz offsets at3200baud, gain ramps0.3..2, phase evolution, fade handling and invalid initialization/nonfinite input rejection. Fixed-phase decisions fail these changing-carrier streams, while tracked decisions match the transmitter after the acquisition transient. Full trellis/synchronization/acquisition regressions still pass. Private hardware acquisition->tracking->Ctrellis replay preserves the exact two29/31-byte FCS-valid PPP frames from the earlier interval; metadata `work/v90-c-tracking-hardware-result.json`. This is bounded offline validation, not proof of long-call robustness or natural-error correction.
 
 No live modem call started and no deployment made this turn. Continuous timing selection and integration with the native UART/PPP path remain required. Goal active.
+
+
+## Post-update dial checks fail before PPP (2026-09-09)
+
+User reported Done after the DialUpLab update request. API health is reachable, version still1.1.0.0; this does not identify the installed build. Two fresh automated attempts2569dd0c-f9ee-4d92-81f9-85452eb99dd1 andf529067d-c6af-4b96-ae2a-7fa08ebf91d7 both terminated Failed/error678. No public probe could run because neither reached PPP. Final API connections list is empty; both dial workers terminal. No capture or hardware call remains active. Private reports remain in work/.
+
+Retry log shows CRC-valid INFO1a and Ja, an initial transition into DIL, then repeated caller-triggered retrains; later negotiations change INFO1a downstream6 to4. This is an earlier training failure than the previously observed missing-E case; no new root cause established. No runtime setting or binary changed. Experimental carrier/gain commitb00a89e is pushed and its exact CI34413833520 passed; local trellis regressions also passed. Update/probe-lock resolution remains unverified. Goal active.

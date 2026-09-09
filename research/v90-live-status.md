@@ -673,3 +673,10 @@ Backedupentire/opt/sipfax/vendor/linmodem toCT/tmp/sipfax-before-cps-native.tgz.
 Startedcapture16738beforefreshdial,FreePBX/tmp/v90-cps-live.pcap,2400sbound; remainsLIVEandcontainsbothattempts. Firstattempt3c2e7526-7bfe-4de9-b444-0dc1b1d165c7 failed678: Ja/S/DIL/CPt received,callerrenegretrainatstartup14.923625 thenV34fallback. NoCPsseen; failuremustremaininacceptanceresults. Privatework/v90-cps-first-startup-log.txt; helper67239terminal. Retryce96428f-f366-4c75-b24f-2150be272a64 connected19:58:54.333UTC,Windows0xF70000/native12605/pppd12606. FirstpublicHTTP200/559byte expectedhash in1.257s,allmodemerrors0. Helper14121terminalleavesconnected. Thisverifiesordinaryhardwaredataonnewbuild, notCPsinteroperabilityorabsenceofregression.
 
 Started100periodicprobeson0xF70000,handle35217LIVE,work/v90-probes-0xF70000.json. Preserve35217/capture16738andexistingcall; nooverlappingprobe/redial. Goalactive; intermittentstartup,underlyingimpairment,hardwareCPs/fallback/higherupstreamremainincomplete.
+
+
+## Failed startup replay excludes changed Phase4 waveform (2026-09-09)
+
+Previous turn progressed throughcompleted36minsoak,newnative deploymentandretryhardwaredata. Revalidated35217live. DownloadedprivateRX/TX12601forfailedfirstcall; copies40322/46879terminal. ExtractedpreCPs0add7d3sourceinto privatework/sipfax-pre-cps-source. Privatehelperwork/compare_v90_cps_startup.py compiledold/currentPhase4 librariesandfedidenticalRXraw16.876125s through20.163625s (26300samples), coveringRi/CPt/TRN2d/MP untilcallerretrain. BothdecodeCPt gain8175 at0.130125s,TRNstart0.1335s andMP1.6335s. ALL26300TXsamples identicaloldvsnewandidenticaltocapturedactualTX. This rulesouta changedPhase4transmitwaveform inthatinterval; it doesnotprove allregressionsabsent orresolveexistingstartupfailure. Fullprivatecapturesoutsidegit.
+
+Live0xF70000/native12605/pppd12606 has8successfulperiodicrequests throughWindows169.373s, CRC9/alignment1. Preserveprobe35217 andcapture16738, no restart/runtimechange. Goalactive.

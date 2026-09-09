@@ -7,7 +7,7 @@
 #define V90_RX_PHASES 10
 typedef struct {
     double previous_re,previous_im;
-    int have_previous,ones,count;
+    int have_previous,ones,count,have_data_cp;
     unsigned scrambler;
     uint8_t bits[V90_JA_MAX_BITS];
 } V90JaLane;

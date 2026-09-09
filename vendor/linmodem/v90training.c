@@ -31,6 +31,7 @@ static void bit(V90Training *s,V90JaLane *lane,unsigned b)
             int valid=s->cp_mode?v90_cp_parse(&s->cp,lane->bits,lane->count,&consumed):v90_dil_parse(&s->dil,lane->bits,lane->count,&consumed);
             if(valid==1) {
                 s->found++;
+                if(s->cp_mode)lane->have_data_cp=s->cp.type && !s->cp.silence;
                 if(!s->cp_mode)
                 fprintf(stderr,"[v90p3] CRC-valid live Ja at %.6fs: N=%u LSP=%u LTP=%u\n",
                         s->samples/8000.0,s->dil.n,s->dil.lsp,s->dil.ltp);
@@ -42,7 +43,10 @@ static void bit(V90Training *s,V90JaLane *lane,unsigned b)
         memset(lane->bits,1,17);lane->bits[17]=0;lane->count=18;
     }
     lane->ones=plain ? lane->ones+1 : 0;
-    if(s->cp_mode && s->cp.type && s->cp.ack && lane->ones==20)s->e_seen=1;
+    /* 9.4.1.4 permits E instead of CP-prime. Require a CRC-valid data CP
+       on this timing lane, but not its acknowledgement bit. Other timing
+       hypotheses must not mistake random bits or pre-CP SCR for E. */
+    if(s->cp_mode && lane->have_data_cp && lane->ones==20)s->e_seen=1;
     if(lane->ones>20)lane->ones=20;
 }
 static void symbol(V90Training *s,long time,double re,double im)

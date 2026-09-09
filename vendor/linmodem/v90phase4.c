@@ -21,7 +21,8 @@ static int training_bit(void *opaque)
     unsigned n=s->generated++,d=s->encoder.k+s->encoder.s;
     if(n<340*d)return 1;
     unsigned index=(n-340*d)%s->mp_length;
-    if(!s->ed_frame && !index && s->have_ack && s->mp_ack)s->ed_frame=n/d;
+    if(!s->ed_frame && !index && s->have_cp &&
+       (s->have_ack || s->rx.e_seen) && s->mp_ack)s->ed_frame=n/d;
     if(s->ed_frame && n>=s->ed_frame*d)return 0;
     if(!index && s->have_cp && !s->mp_ack){s->mp_ack=1;mp_build(s);}
     return s->mp[index];

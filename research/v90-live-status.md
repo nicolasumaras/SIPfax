@@ -348,3 +348,13 @@ The first three exchanges each contain 318 complete valid MP frames in the selec
 An independent Python receive frontend also finds only CP acknowledgement zero during the failed exchange: 28 CRC-valid messages in the inspected raw 845.8–847.7 second window, decoded timestamps 846.4589375–847.39525 across timing phases 3/4. A successful exchange's comparison window contains both acknowledgement values. This corroborates the native receiver's observation, rather than establishing a missed CP-prime as the explanation. It does not exclude a message outside the inspected window or a receive impairment shared by both decoders.
 
 No runtime configuration changed or new call placed for this audit. CT105 SIPfax service is active. Remaining work still includes reliable startup, repeated/idle recovery, CPs and local recovery timeouts; the earlier successful internet transfers do not satisfy those acceptance criteria.
+
+## E recovery when CP-prime is missed (2026-09-09)
+
+The preceding acknowledgement audit was progress; it eliminated a raw transmitted MP checksum/omission explanation. Reinspection against V.90 9.4.1.4, also referenced by ordinary renegotiation 9.6.1.2.3, found another concrete omission: Ed may follow a received CP-prime OR a 20-bit E, after sending MP-prime. Our training receiver required CP's acknowledgement before detecting E, and the transmitter separately required CP-prime to leave MP. Thus the allowed E alternative could never recover a missed CP-prime.
+
+Removed the CP acknowledgement prerequisite from E detection. Instead require a CRC-valid nonsilence data CP on the SAME receive timing lane; another lane's valid CP, pre-CP SCR, CPt or CPs cannot authorize E. The transmitter accepts E as the alternative to CP-prime, still requiring data CP and completing its first MP-prime before Ed. CPs remains unsupported. This fixes a standards omission, not a proven explanation for the failed fourth exchange.
+
+New tools/tests/v90-e-recovery.py sends independently GPA-scrambled valid/corrupt CP bitstreams followed by 19/20/30 ones, exercises wrong-lane and pre-CP guards, and verifies a complete MP-prime precedes Ed. The new regression, full hardware RX6711 Phase4 wire/Ed/B1 replay, RX10057 late renegotiation replay, startup/ranging/retrain suite, local/CT full builds, 100-frame audio framing and diff whitespace checks pass. The test's initial independent scrambler recurrence was corrected to GPA taps 5/23 before passing. This is bitstream/state-machine and recorded-waveform evidence, not a live E-only recovery result.
+
+CT105 had no pppd before deployment. Updated native sources built on CT successfully; unpaced48k configuration retained. Hardware attempt 881bcb02-a338-407f-b790-86d972b9432a started for verification.

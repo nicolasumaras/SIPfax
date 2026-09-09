@@ -16,8 +16,8 @@ with tempfile.TemporaryDirectory() as td:
     w.write_text('''#include <stdlib.h>
 #include "v90upstream.c"
 void *create(void){V90Upstream*s=malloc(sizeof(*s));v90_upstream_init(s);return s;}
-void feed(V90Upstream*s,long sample,const unsigned char*p,unsigned n){
- V90UpLane lane={0};lane.crc=0xffff;s->samples=sample;
+void feed(V90Upstream*s,long sample,long source,const unsigned char*p,unsigned n){
+ V90UpLane lane={0};lane.crc=0xffff;lane.source_sample=source;s->samples=sample;
  for(unsigned i=0;i<n;++i)byte(s,&lane,p[i]);
 }
 unsigned count(V90Upstream*s){return s->frames;}
@@ -25,13 +25,15 @@ void destroy(void*s){free(s);}
 ''')
     subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
-    lib.feed.argtypes=[C.c_void_p,C.c_long,C.c_char_p,C.c_uint];lib.count.argtypes=[C.c_void_p];lib.destroy.argtypes=[C.c_void_p]
+    lib.feed.argtypes=[C.c_void_p,C.c_long,C.c_long,C.c_char_p,C.c_uint];lib.count.argtypes=[C.c_void_p];lib.destroy.argtypes=[C.c_void_p]
     s=lib.create()
-    def feed(t,data):lib.feed(s,t,data,len(data))
+    def feed(t,data,source=None):lib.feed(s,t,t if source is None else source,data,len(data))
     burst=b''.join(wire(i) for i in range(123))
     feed(100,burst);assert lib.count(s)==123
     for phase in range(1,10):feed(100+phase,burst)
     assert lib.count(s)==123,'replayed frames duplicated across timing candidates'
+    # Later candidate acquisition replays the same original audio interval.
+    feed(10000,burst,source=100);assert lib.count(s)==123
     # Identical frames outside the five-millisecond suppression window are real repeats.
     feed(140,wire(0));assert lib.count(s)==124
     for i in range(300):feed(200+i*41,wire(i%256))

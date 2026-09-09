@@ -15,7 +15,7 @@ void v90_upstream_init(V90Upstream *s)
     const char *option=getenv("SIPFAX_V90_SOFT_RX");
     s->soft_enabled=option && !strcmp(option,"1");
     if(s->soft_enabled)for(unsigned i=0;i<V90_UP_PHASES;++i) {
-        V90UpSoftLane *l=&s->soft[i];l->up=s;l->lane.crc=0xffff;
+        V90UpSoftLane *l=&s->soft[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
         v90_trellis_stream_init(&l->stream);
         l->stream.opaque=l;l->stream.receive_pair=soft_pair;
     }
@@ -36,11 +36,11 @@ static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
         if(!l->overflow && !l->escape && l->length>=4 && l->crc==0xf0b8) {
             unsigned duplicate=0;
             for(unsigned i=0;i<s->recent_count;++i)
-                if(s->samples-s->recent[i].sample<40 && s->recent[i].length==l->length &&
+                if(labs(l->source_sample-s->recent[i].sample)<40 && s->recent[i].length==l->length &&
                    !memcmp(s->recent[i].frame,l->frame,l->length)){duplicate=1;break;}
             if(!duplicate) {
                 unsigned i=s->recent_next;
-                s->recent[i].sample=s->samples;s->recent[i].length=l->length;
+                s->recent[i].sample=l->source_sample;s->recent[i].length=l->length;
                 memcpy(s->recent[i].frame,l->frame,l->length);
                 s->recent_next=(i+1)%V90_UP_RECENT;
                 if(s->recent_count<V90_UP_RECENT)++s->recent_count;
@@ -70,6 +70,7 @@ static void bit(V90Upstream *s,V90UpLane *l,unsigned b)
 static void soft_pair(void *opaque,unsigned a,unsigned b)
 {
     V90UpSoftLane *l=opaque;
+    l->lane.source_sample=(long)((10*l->stream.output_symbol+l->phase)/4);
     if(l->have_previous) {
         unsigned d=(b-a)&3,q=(a-l->previous)&3;
         bit(l->up,&l->lane,d>>1);bit(l->up,&l->lane,q&1);bit(l->up,&l->lane,q>>1);
@@ -88,6 +89,7 @@ static void symbol(V90Upstream *s,long time,double re,double im)
     }
     for(unsigned pair=0;pair<2;++pair) {
         V90UpLane *l=&s->lanes[time%V90_UP_PHASES][pair];
+        l->source_sample=s->samples;
         if(((time/V90_UP_PHASES)&1)==pair){l->a_re=re;l->a_im=im;l->have_a=1;}
         else if(l->have_a) {
             if(l->have_previous) {

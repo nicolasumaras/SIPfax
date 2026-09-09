@@ -50,7 +50,9 @@ typedef struct {
     double re[V90_STREAM_BUFFER],im[V90_STREAM_BUFFER];
     unsigned count,locked,have_a;
     double a_re,a_im;
-    uint64_t pair_index;
+    uint64_t pair_index,symbols,pair_origin;
+    /* Original zero-based index of pair B, valid during receive_pair. */
+    uint64_t output_symbol;
     V90TrellisAcquisition acquisition;
     V90Carrier carrier;
     V90Trellis trellis;

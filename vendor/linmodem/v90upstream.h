@@ -10,6 +10,7 @@ typedef struct {
     double a_re,a_im,previous_re,previous_im;
     unsigned have_a,have_previous,scrambler,uart_count,uart_value;
     unsigned length,escape,overflow,crc;
+    long source_sample;
     uint8_t frame[V90_UP_FRAME];
 } V90UpLane;
 struct V90Upstream;
@@ -17,7 +18,7 @@ typedef struct {
     V90TrellisStream stream;
     V90UpLane lane;
     struct V90Upstream *up;
-    unsigned previous,have_previous;
+    unsigned previous,have_previous,phase;
 } V90UpSoftLane;
 typedef struct V90Upstream {
     double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];

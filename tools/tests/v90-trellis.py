@@ -19,6 +19,7 @@ void *stream_create(void (*cb)(void *,unsigned,unsigned)) {
  V90TrellisStream *s=malloc(sizeof(*s));v90_trellis_stream_init(s);s->receive_pair=cb;return s;
 }
 unsigned stream_locked(V90TrellisStream *s){return s->locked;}
+uint64_t stream_output(V90TrellisStream *s){return s->output_symbol;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
@@ -119,10 +120,13 @@ unsigned stream_locked(V90TrellisStream *s){return s->locked;}
     callback_type=C.CFUNCTYPE(None,C.c_void_p,C.c_uint,C.c_uint)
     lib.stream_create.argtypes=[callback_type];lib.stream_create.restype=C.c_void_p
     lib.stream_locked.argtypes=[C.c_void_p]
+    lib.stream_output.argtypes=[C.c_void_p];lib.stream_output.restype=C.c_uint64
     lib.v90_trellis_stream_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double]
     for prefix in [0,1]:
-        decoded=[]
-        cb=callback_type(lambda _,a,b:decoded.append([a,b]))
+        decoded=[];indices=[]
+        def receive(_,a,b):
+            decoded.append([a,b]);indices.append(lib.stream_output(stream))
+        cb=callback_type(receive)
         stream=lib.stream_create(cb)
         signal=np.exp(-1j*labels.flatten()*np.pi/2)*3*np.exp(.37j)
         if prefix:signal=np.r_[signal[0],signal]
@@ -131,17 +135,20 @@ unsigned stream_locked(V90TrellisStream *s){return s->locked;}
             if i<4095:assert not decoded
         expected_pairs=(len(signal)-prefix)//2-63
         assert len(decoded)==expected_pairs
+        assert indices==[prefix+1+2*i for i in range(expected_pairs)]
         assert np.array_equal(np.array(decoded)[64:],labels[64:expected_pairs])
         assert lib.stream_locked(stream)
         lib.v90_trellis_stream_symbol(stream,float('nan'),0)
         assert not lib.stream_locked(stream)
-        decoded.clear()
+        decoded.clear();indices.clear()
         # Noise/silence must not lock; the sliding window must later acquire.
         for i in range(4096):lib.v90_trellis_stream_symbol(stream,0,0)
         assert not lib.stream_locked(stream) and not decoded
         for value in signal:lib.v90_trellis_stream_symbol(stream,value.real,value.imag)
         assert lib.stream_locked(stream)
         assert len(decoded)==expected_pairs
+        origin=len(signal)+1+4096+prefix
+        assert indices==[origin+1+2*i for i in range(expected_pairs)]
         assert np.array_equal(np.array(decoded)[64:],labels[64:expected_pairs])
         lib.destroy(stream)
     assert total_hard>0

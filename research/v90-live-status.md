@@ -1633,3 +1633,16 @@ The capture contained 137,445 packets, zero kernel drops and no RTP sequence gap
 The reversible trial initially restored `36577ed`. After result verification, `117ae76` was installed for continued development with `SIPFAX_V90_UPSTREAM_RATE=26400` and `SIPFAX_V90_LINE_ECHO=1`. The active service, expected binary SHA-256 `badbecb9aff6f50c1201b9eacc69865273cb932e91ac5441da596b0f005142e2`, configuration and FreePBX availability were checked. The previous runtime remains saved as `lm.pre-26400-integrated`, with its configuration in `/tmp/v90-upstream-before-26400-integrated.conf`.
 
 Full V.90 scope remains incomplete: higher upstream rates and symbol-rate coverage, broader reliability, general echo-delay acquisition/tracking, V.34 fallback and future concurrent calls still require work. The known additional synthetic-seed losses remain documented. No completion claim follows from this single sustained run.
+
+
+## First automatic-delay hardware trial
+
+CI run 34543838739 passed both jobs. Committed revision `5151eb5` then passed hardware attempt `437ba691-e7aa-47a2-b9ad-4ba534ae530b` with upstream 26400 and echo mode `auto` independently verified in live process 11641. Its binary SHA-256 was `b612a0c47def22ebc07fcf30d52515af3ba7f852df1f6d1bc7665cdee581487b`.
+
+The detector acquired delay 1468 at sample 97760 (12.22 seconds). An independent correlation audit of the raw 12–14-second TX/RX recording found its strongest delay at the same 1468 samples, with correlation -0.60155. This differs by 40 samples from the earlier fixed 1428 setting. It demonstrates useful initial acquisition on one fresh call, not continuous delay tracking.
+
+PPP connected and the internet probe succeeded. All 18 response hashes were independently verified, covering the 32 KiB download, sixteen distinct 1 KiB upstream checks and final PASS response. Download took 7.477 seconds; median upstream check time was 1.409 seconds. The call disconnected after 37.053 seconds with zero Windows CRC/alignment errors. Native CP reported 49.333 kbit/s downstream and B1 correlation was 0.9704.
+
+The capture contained 13,297 packets with zero kernel drops and no RTP sequence gaps. All 3,296 downstream primary payloads matched through FreePBX/RED. All 3,298 forwarded upstream payloads matched after eleven ATA startup packets. The notebook is disconnected, SIPFAXRED registration is cleared, and the capture, fixture, trial, CI watcher and retrieval processes are terminal.
+
+The wrapper restored `117ae76` at 26.4 kbit/s with fixed echo mode `1`; service activity, binary hash and configuration were verified. `5151eb5` automatic mode still needs sustained hardware qualification before replacing that deployment. The previous version is backed up as `lm.pre-auto-5151eb5` with configuration `/tmp/v90-upstream-before-auto-5151eb5.conf`.

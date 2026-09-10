@@ -24,10 +24,17 @@ shell ordering to check all 16 initial states, controlled symbol errors, noise,
 and rejected-frame recovery. Ring decisions use the nearest point within each
 quadrant; this is not joint soft shell decoding.
 
+`v90_qam8_b1_init` generates the selected-rate B1 with zero encoder state and
+the final data frame's superframe inversions. Its bounded symbol-domain
+correlator reports the B1 end, carrier phase, and gain. Tests independently
+generate all 288 scrambled bits and 128 symbols, then check noisy acquisition,
+phase/gain changes, and negative/reset controls. This detector still needs
+matched-filter timing-lane integration and subsequent carrier tracking.
+
 Remaining integration work:
 
-- Eight-point carrier/gain acquisition and tracking.
-- Mapping-frame alignment, matching B1 acquisition, and live bit delivery.
+- Timing-lane integration of eight-point B1 acquisition and carrier tracking.
+- Mapping-frame alignment after B1 and live bit delivery.
 - Per-rate MP generation and capability masks, followed by hardware PPP tests.
 
 V.90 Table 16 defines upstream rate selection and its capability mask. Higher

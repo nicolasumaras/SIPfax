@@ -19,13 +19,13 @@ rings=sorted(itertools.product(range(2),repeat=8),key=lambda r:
 pattern=[int(x) for x in '01110111111110']
 rng=random.Random(907200)
 
-def transmit(frames,state,previous):
+def transmit(frames,state,previous,source_bits=None,pair_offset=0):
     labels=[];inversions=[];source=[]
     for frame in range(frames):
-        bits=[rng.randrange(2) for _ in range(18)];source.append(bits)
+        bits=([rng.randrange(2) for _ in range(18)] if source_bits is None else source_bits[18*frame:18*frame+18]);source.append(bits)
         shell=rings[sum(bits[i]<<i for i in range(6))]
         for j in range(4):
-            i=4*frame+j
+            i=4*frame+j+pair_offset
             inversion=pattern[(i//32)%14] if i%32==0 else 0
             a=(previous+bits[7+3*j]+2*bits[8+3*j])%4
             b=(a+2*bits[6+3*j]+((state&1)^inversion))%4
@@ -46,6 +46,8 @@ with tempfile.TemporaryDirectory() as directory:
 void *trellis(void){V90Trellis*s=malloc(sizeof(*s));v90_trellis_init(s);return s;}
 void *frames(unsigned previous){V90Qam8Frames*s=malloc(sizeof(*s));v90_qam8_frames_init(s,previous);return s;}
 void destroy(void*s){free(s);}
+void *b1(void){V90Qam8B1*s=malloc(sizeof(*s));v90_qam8_b1_init(s);return s;}
+unsigned b1_label(V90Qam8B1*s,unsigned i){return s->labels[i];}
 uint64_t count(V90Trellis*s){return s->pairs;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror',
@@ -99,4 +101,49 @@ uint64_t count(V90Trellis*s){return s->pairs;}
     invalid=(C.c_uint8*8)(255,0,0,0,0,0,0,0);out=(C.c_uint8*18)(*([99]*18))
     assert not lib.v90_qam8_frame(f,invalid,out) and list(out)==[99]*18
     lib.destroy(f)
-print('PASS: 8-QAM soft pairs, 18-bit frames, all 16 states, noise/corrected decisions, rejection recovery')
+    print('PASS: 8-QAM soft pairs, 18-bit frames, all 16 states, noise/corrected decisions, rejection recovery')
+
+# Independently encode one data frame using the final two V0 bits of J=7.
+# A shift-register GPA scrambler is deliberately different from the C recurrence.
+    register=0;ones=[]
+    for i in range(288):
+        b=1^((register>>22)&1)
+        register=(register<<1)&0x7fffff
+        if b:register^=1|(1<<18)
+        ones.append(b)
+    labels,_,_=transmit(16,0,0,ones,384)
+    reference=[point(x) for pair in labels for x in pair]
+    lib.b1.restype=C.c_void_p
+    lib.b1_label.argtypes=[C.c_void_p,C.c_uint]
+    lib.v90_qam8_b1_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double,*([C.POINTER(C.c_double)]*3)]
+    s=lib.b1()
+    assert [lib.b1_label(s,i) for i in range(128)]==[x for pair in labels for x in pair]
+    lib.destroy(s)
+    def matches(values):
+        s=lib.b1();found=[]
+        try:
+            for i,v in enumerate(values):
+                gain=C.c_double(-99);phase=C.c_double(-99);score=C.c_double(-99)
+                if lib.v90_qam8_b1_symbol(s,v.real,v.imag,C.byref(gain),C.byref(phase),C.byref(score)):
+                    found.append((i,gain.value,phase.value,score.value))
+                else:assert gain.value==phase.value==score.value==-99
+        finally:lib.destroy(s)
+        return found
+    for gain in [.001,1,3000]:
+        for phase in [-2.9,-.3,0,1.8]:
+            for noisy in [False,True]:
+                prefix=[complex(rng.gauss(0,1),rng.gauss(0,1)) for _ in range(211)]
+                signal=[gain*(cmath.exp(1j*phase)*v+(complex(rng.gauss(0,.03),rng.gauss(0,.03)) if noisy else 0)) for v in reference]
+                found=matches(prefix+signal)
+                assert len(found)==1 and found[0][0]==338,found
+                _,g,p,c=found[0]
+                assert abs(g/gain-1)<.01 and abs(cmath.phase(cmath.exp(1j*(p-phase))))<.01 and c>.999
+    assert not matches([complex(rng.gauss(0,1),rng.gauss(0,1)) for _ in range(4000)])
+    assert not matches([0j]*300)
+    assert not matches(reference[:-1])
+    assert not matches(reference[::-1])
+    assert not matches([cmath.exp(-1j*(x&3)*cmath.pi/2) for pair in labels for x in pair])
+    for bad in [complex(float('nan'),0),complex(0,float('inf')),complex(1e200,0)]:
+        found=matches(reference[:100]+[bad]+reference)
+        assert len(found)==1 and found[0][0]==228
+print('PASS: 7200 B1 reset/GPA, independent full-frame encoding, gain/phase/boundary acquisition and negative controls')

@@ -31,14 +31,29 @@ test('paces a 56ms arrival gap and catch-up burst without altering or losing pay
   h.pacer.reset(); assert.equal(h.timers.size, 0);
 });
 
-test('reports underrun, re-buffers and bounds the queue', () => {
+test('reports underrun, resumes promptly and bounds the queue', () => {
   const h = harness(); h.pacer.push('one', 20); h.advance(90);
   assert.deepEqual(h.issues, ['pacer-underrun']);
   h.pacer.push('two', 20); h.advance(150);
-  assert.equal(h.sent[1].time, 150);
+  assert.equal(h.sent[1].time, 90);
   h.pacer.reset();
   for (let i = 0; i < 200; i++) assert.equal(h.pacer.push(i, 20), true);
   assert.equal(h.pacer.push(201, 20), false);
   assert.equal(h.issues.at(-1), 'pacer-overflow');
   h.pacer.reset(); h.advance(1000); assert.equal(h.sent.length, 2);
+});
+
+test('a brief shortage does not add another startup delay or burst recovered packets', () => {
+  const h = harness();
+  h.pacer.push('first', 20); h.advance(80);
+  h.advance(86.8);
+  h.pacer.push('second', 20); h.pacer.push('third', 20);
+  h.advance(107);
+  assert.deepEqual(h.sent, [
+    { time: 60, packet: 'first' },
+    { time: 86.8, packet: 'second' },
+    { time: 106.8, packet: 'third' }
+  ]);
+  h.pacer.reset(); h.pacer.push('new session', 20); h.advance(167);
+  assert.equal(h.sent.at(-1).time, 167);
 });

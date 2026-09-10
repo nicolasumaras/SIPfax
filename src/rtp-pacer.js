@@ -1,5 +1,5 @@
 // Preserve PCM samples while absorbing short producer/network scheduling bursts.
-// No resampling or silence insertion: an underrun is reported and rebuffered.
+// No resampling or silence insertion: report underruns and resume on arrival.
 export class RtpPacer {
   constructor({ delayMs, send, issue = () => {}, now = () => performance.now(),
     schedule = (fn, ms) => setTimeout(fn, ms), cancel = clearTimeout }) {
@@ -16,7 +16,9 @@ export class RtpPacer {
     }
     this.queue.push({ packet, durationMs });
     if (this.timer === null) {
-      this.deadline = this.now() + this.delayMs;
+      // Only prebuffer at session start. Repeating that delay after a brief
+      // shortage unnecessarily extends the audio gap at the remote modem.
+      this.deadline = this.now() + (this.deadline === null ? this.delayMs : 0);
       this.arm();
     }
     return true;
@@ -31,7 +33,7 @@ export class RtpPacer {
     // Timers may wake slightly early; never send early and accumulate drift.
     if (this.now() < this.deadline) { this.arm(); return; }
     const item = this.queue.shift();
-    if (!item) { this.issue('pacer-underrun'); this.deadline = null; return; }
+    if (!item) { this.issue('pacer-underrun'); return; }
     this.send(item.packet);
     // Do not burst on a delayed event loop. Preserve all queued samples.
     if (this.now() - this.deadline >= item.durationMs) {

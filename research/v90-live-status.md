@@ -1292,3 +1292,11 @@ Previous turn verifiedactivatealonecannotestablishfixedliveplayout/restoreddefau
 Toavoidguessingaliases, inspectedlocalfirmwareonly. ExtractedELFsegmentat3771116..7340128into privatework/ata-mxp-library.elf. Readelfexportsnmm_dsp_cmd_procat0x464524. Localcapstoneinstalledonlyinexistingwork/ata-ssh-venv; disassemblednmm_createandresolvedGOT/stringargumentsregisteringcommands:set,commit,activate,show,dsp,flash. Noalias: dspmaps0x464524. Handlerwouldprintusageforargc<3,whileexposedshellreturnsUnknown; thereforedo notassumefirmwareroutineisreachablefromthisinterface. No firmwareexecution/patch/uploadorATAsettingchange.
 
 This closes repeatedstored-profile/activationguessing as a productive route. Next investigate packet reception/network topology using read-only external observations or supportedinterface; do notinvokeunverifiedDSPmutations. Serveridle4b3650a/42667,lastallcallsterminalandoriginalATAsettingsrestored.Goalactive.
+
+## Passive discovery identifies UniFi gateway; no current multicast flood (2026-09-10 UTC)
+
+Previous turn made progress ruling out callable runtime DSP alias. Read-only Proxmoxnic0link:1000Mb/sfull-duplex/autoneg,driver r8169/rtl8168h,TXerrors0/underruns0/aborts0; cumulativeRXmissed158/drop6880areunscopedandnotproofRTPcause. BridgeFDBlearnsATA5c:50:15:a8:db:abonnic0. Neighbor192.168.1.1MAC74:ac:b9:d9:b6:19.
+
+PassiveLLDP/CDP50sworker89118terminal(timeout124normalbound):2LLDPpacketsfrom74:ac:b9:d9:b6:15,systemUDM-ProApartamento,chassis74:ac:b9:d9:b6:11,1000BASE-Tfullduplex. ThisidentifiesProxmoxneighborasUniFiDreamMachinePro; ATAattachmenttopologystillunverified. SSHroot@.1reachablebutexistingkeydeniedpublickey/keyboard-interactive(afterfirst-usehostkeyacceptance); nopasswordguessing. Requestedread-onlyUniFiaccessasynchronouslytoinspectATAport/errors/dropcounters;answerpending.
+
+40smulticastcapture17637terminal391packets/0kerneldrops;max62packetsand18631wirebytesinone1sbucket. Noongoingmulticastflooddemonstratedinthissample;doesnotexcludeintermittentburstsortrafficelsewhere. Privatework/v90-lan-multicast.pcapandsummary.json. ATAHTTPcumulativemulticastcountsalonewerenotsufficientevidence. No modemcalls/settingschanges. Allworkersnowterminal,serveridle4b3650a/42667.Goalactive.NextuseUniFiaccessifprovided;physicalATApathcannotbeinferredsolelyfromProxmoxneighbor.

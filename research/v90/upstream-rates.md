@@ -79,7 +79,9 @@ compute Figure 9 subsets from coordinates and then apply Table 13, covering all
 16 initial encoder states and noise. Ring 2 repeats a subset class; its ring
 index must not be used directly as a Table 13 subset number. The companion `v90_qam12_frame` now recovers 24 scrambled bits; exhaustive
 tests cover all 4,096 shell indices, differential bits and rejection bounds.
-Rate-specific B1 acquisition and a live 9,600-bit/s mode remain unimplemented. It does not alter the deployed 7,200-bit/s receiver.
+Rate-specific B1 and continuous symbol decoding now pass independent 9,600-bit/s
+tests, including gain/carrier changes and reacquisition. The native audio/MP
+path does not yet enable 9,600-bit/s calls. It does not alter the deployed 7,200-bit/s receiver.
 
 A subsequent sustained 7,200-upstream call completed 62 alternating 32 KiB
 checksummed downloads and 1 KiB upstream requests. Download 63 timed out at the
@@ -91,3 +93,18 @@ captured; the only missing final downstream packet followed the caller BYE.
 Post-call ATA counters included one underflow and one FIFO drop, without event
 timing. This establishes partial sustained recovery, not sustained reliability.
 A controlled downstream-rate comparison is the next reliability experiment.
+
+## Clock recovery after the downstream-rate comparison
+
+A 49.333-downstream / 7.2-upstream comparison failed during its fifth upload,
+with zero Windows CRC/alignment errors. Recorded upstream audio exposed the
+fixed timing lanes drifting out of alignment: 196 valid frames were recovered,
+then reception stopped. Offline resampling by +1 ppm recovered 228 frames.
+
+The eight-point native receiver now uses a normalized Gardner timing loop,
+interpolating the quarter-sample matched-filter outputs and tracking phase and
+sample-clock offset separately. Actual symbol timestamps preserve duplicate
+filtering across timing lanes. The same recording yields 229 valid frames and
+continues decoding to the end. Synthetic PCM/PPP tests cover both signs of
+100 ppm clock error; the previous receiver fails that test. Live validation
+of this timing change remains required.

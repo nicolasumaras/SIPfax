@@ -31,6 +31,9 @@ typedef struct {
     V90UpLane lane;
     struct V90Upstream *up;
     unsigned phase;
+    double next_symbol,timing_frequency,previous_re,previous_im,previous_time;
+    double symbol_time[256];
+    unsigned have_timing_previous;
 } V90UpQamLane;
 typedef struct V90Upstream {
     double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];
@@ -46,6 +49,7 @@ typedef struct V90Upstream {
     V90UpSoftLane soft[V90_UP_PHASES];
     unsigned rate;
     V90UpQamLane qam[V90_UP_PHASES];
+    double filtered_re[32],filtered_im[32];
     /* Known 4800/3200 B1, observed independently of data acquisition. */
     unsigned b1_seen,require_b1;
     long b1_sample;

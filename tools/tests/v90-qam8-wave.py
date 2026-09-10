@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import numpy as np
 root=Path(__file__).resolve().parents[2]
@@ -28,6 +29,9 @@ for packet in [expected[0],bad,*expected[1:]]:
     for b in packet:
         wire.extend([0x7d,b^0x20] if b<32 or b in [0x7d,0x7e] else [b])
     wire.extend(b'\x7e'*8)
+clock_drift='--clock-drift' in sys.argv
+if clock_drift:
+    wire*=8;expected*=8
 plain=[1]*288+[1]*180
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 plain.extend([1]*360)
@@ -90,10 +94,10 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
     for name in ['rate','acquired','destroy','phase4_acquired']:getattr(lib,name).argtypes=[C.c_void_p]
     os.environ['SIPFAX_V90_UPSTREAM_RATE']='7200'
     rng=np.random.default_rng(9072)
-    for fraction in [0,.25,.5,.75]:
+    for fraction,ppm in ([(.25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]):
         base=np.zeros(int(len(symbols)*2.5)+250,dtype=complex)
         for i,z in enumerate(symbols):
-            center=100+fraction+2.5*i
+            center=100+fraction+2.5*i*(1+ppm/1e6)
             for n in range(math.ceil(center-40),math.floor(center+40)+1):base[n]+=z*pulse((n-center)/2.5)
         samples=np.arange(len(base));carrier=np.exp(1j*(.61+2*np.pi*1920.3*samples/8000))
         pcm=np.rint(1800*(base*carrier).real+rng.normal(0,1,len(base))).astype(np.int16)
@@ -114,4 +118,4 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
             assert received==expected, 'Pre-E replay changed PPP data'
         finally:lib.destroy(s)
-print('PASS: 7200 PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+print('PASS: clock drift '+str(clock_drift)+'; 7200 PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

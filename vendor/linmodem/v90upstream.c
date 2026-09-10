@@ -2,7 +2,8 @@
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
- * streaming trellis correction. Adaptive timing recovery remains unfinished. GPL-2.0. */
+ * streaming trellis correction. The eight-point path tracks symbol timing
+ * with a normalized Gardner loop over quarter-sample filter outputs. GPL-2.0. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@ void v90_upstream_init(V90Upstream *s)
     s->rate=rate && !strcmp(rate,"7200")?7200:4800;
     if(s->rate==7200)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
+        l->next_symbol=i;
         v90_qam8_stream_init(&l->stream);
         l->stream.opaque=l;l->stream.receive_bits=qam_bits;
     }
@@ -104,7 +106,7 @@ static void qam_bits(void *opaque,const uint8_t *bits)
         memset(&l->lane,0,sizeof(l->lane));l->lane.crc=0xffff;
     }
     if(!bits)return;
-    l->lane.source_sample=(long)((10*l->stream.output_symbol+l->phase)/4);
+    l->lane.source_sample=(long)(l->symbol_time[l->stream.output_symbol%256]/4);
     for(unsigned i=0;i<18;++i)bit(l->up,&l->lane,bits[i]);
 }
 static unsigned delta(double ar,double ai,double br,double bi)
@@ -139,13 +141,42 @@ static void b1_symbol(V90Upstream *s,unsigned phase,double re,double im)
         s->b1_score=sqrt(power/(V90_UP_B1_SYMBOLS*energy));
     }
 }
+static void filtered_at(V90Upstream *s,double time,double *re,double *im)
+{
+    long index=(long)floor(time);double fraction=time-index;
+    unsigned a=(unsigned)index%32,b=(a+1)%32;
+    *re=s->filtered_re[a]+fraction*(s->filtered_re[b]-s->filtered_re[a]);
+    *im=s->filtered_im[a]+fraction*(s->filtered_im[b]-s->filtered_im[a]);
+}
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
     if(s->rate==7200) {
-        V90Qam8Stream *q=&s->qam[time%V90_UP_PHASES].stream;
-        int locked=v90_qam8_stream_symbol(q,re,im);
-        if(locked==1 && !s->b1_seen) {
-            s->b1_seen=1;s->b1_sample=s->samples;s->b1_score=q->score;
+        s->filtered_re[time%32]=re;s->filtered_im[time%32]=im;
+        for(unsigned phase=0;phase<V90_UP_PHASES;++phase) {
+            V90UpQamLane *l=&s->qam[phase];V90Qam8Stream *q=&l->stream;
+            if(time<l->next_symbol)continue;
+            double ar,ai;filtered_at(s,l->next_symbol,&ar,&ai);
+            l->symbol_time[q->symbols%256]=l->next_symbol;
+            int locked=v90_qam8_stream_symbol(q,ar,ai);
+            double error=0;
+            if(locked==1 && l->have_timing_previous && l->next_symbol>=5) {
+                double mr,mi;filtered_at(s,(l->next_symbol+l->previous_time)/2,&mr,&mi);
+                double energy=ar*ar+ai*ai+l->previous_re*l->previous_re+
+                    l->previous_im*l->previous_im+2*(mr*mr+mi*mi);
+                /* Gardner detector, normalized to signal energy. Positive
+                 * error samples later. Keep phase and clock corrections
+                 * separate; the phase term must not become clock drift. */
+                if(energy>1e-12)error=((l->previous_re-ar)*mr+(l->previous_im-ai)*mi)/energy;
+                l->timing_frequency+=.00001*error;
+                if(l->timing_frequency>.002)l->timing_frequency=.002;
+                if(l->timing_frequency<-.002)l->timing_frequency=-.002;
+            }
+            l->previous_time=l->next_symbol;
+            l->next_symbol+=10+l->timing_frequency+.1*error;
+            l->previous_re=ar;l->previous_im=ai;l->have_timing_previous=locked>=0;
+            if(locked==1 && !s->b1_seen) {
+                s->b1_seen=1;s->b1_sample=s->samples;s->b1_score=q->score;
+            }
         }
         return;
     }

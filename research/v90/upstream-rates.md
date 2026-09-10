@@ -313,7 +313,7 @@ The first 21,600-bit/s hardware call authenticated PPP, fetched an external page
 
 Offline replay decodes 188 valid PPP frames. A slower clock-loop control decodes 193 and reduces the best timing lane's rejected shells from 23 to eight, but fails the independent combined clock-drift/distortion test. Reducing equalizer adaptation instead yields only 172 frames. The next step is to reconcile drift acquisition speed with timing-noise tolerance; neither control is a qualified replacement. Sustained 21,600 testing remains pending.
 
-CT105 retains the experimental 21,600 build `d87f907`, with the validated
+At that stage CT105 retained the experimental 21,600 build `d87f907`, with the validated
 19,200 carrier-fit binary saved as `lm.pre-21600`.
 
 
@@ -327,5 +327,7 @@ now decodes 193 valid PPP frames instead of 188; the best lane rejects eight
 shells instead of 23. This matches the slower-loop control without sacrificing
 the high-drift case. Independent PCM tests now extend both signs of 100 ppm
 clock error with distortion to roughly 15 seconds, recovering all 192 expected
-PPP frames per waveform, including after delayed-E replay. Hardware retry
-is pending.
+PPP frames per waveform, including after delayed-E replay. The staged-clock hardware retry passed authenticated PPP internet access, a verified 32 KiB download in 7.468 seconds and all sixteen 1 KiB upstream payload checks. It disconnected cleanly after 45.025 seconds, versus 73.776 seconds in the preceding call. Windows counted zero CRC or alignment errors. Upstream probe times ranged from 1.469 to 4.694 seconds (median 1.4835 seconds); two probes still took about 4.7 seconds. Native CP confirmed 49.333 kbit/s downstream. All 3,696 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX; the 14,897-packet capture had zero kernel drops and no RTP sequence gaps. All 18 response hashes were independently verified. Sustained 21,600 qualification remains pending.
+
+CT105 now runs `047d95e` at 21,600 bit/s; the prior build remains available
+as `lm.pre-staged-clock`, and the validated 19,200 binary as `lm.pre-21600`.

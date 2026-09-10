@@ -9,6 +9,8 @@ exten => 12345678,1,NoOp(SIPfax with ATA187 redundant audio)
  same => n,TrySystem(/usr/local/bin/sipfax-ata-prepare)
  same => n,GotoIf($["${SYSTEMSTATUS}" != "SUCCESS"]?unavailable)
  same => n,Progress()
+ ; Allow the ATA early-media codec UPDATE to settle before the answer.
+ same => n,Wait(0.3)
  same => n,Set(SIPFAX_RTP_DEST=${CHANNEL(rtp,dest)})
  same => n,GotoIf($["${SIPFAX_RTP_DEST}" = ""]?unavailable)
  same => n,Set(DB(SIPFAXRED/current)=${UNIQUEID}|${SIPFAX_RTP_DEST})

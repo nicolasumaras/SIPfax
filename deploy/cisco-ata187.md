@@ -154,7 +154,11 @@ Run `systemctl daemon-reload` and `systemctl start sipfax-red` before dialing.
 Enable the service at boot only after validating the installation.
 
 The route prepares and activates the ATA before `Progress()`, reads its actual
-RTP destination, and registers that call through a fixed local command. Database
+RTP destination, and registers that call through a fixed local command. A 300 ms
+wait after Progress separates the ATA early-media codec UPDATE from the answer.
+A captured immediate-hangup failure overlapped those exchanges; a successful
+delayed call completed the UPDATE first. This mitigates the observed timing
+pattern but does not establish universal startup reliability. Database
 access occurs in a separate control thread, never in the RTP loop. An absent
 service or invalid destination rejects setup. The hangup handler removes the
 registration. Unregistered traffic passes unchanged. A new call clears audio

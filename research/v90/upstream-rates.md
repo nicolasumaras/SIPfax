@@ -362,3 +362,22 @@ The phase-tracking build `816a07a` passed all 64 verified 32 KiB downloads (2 Mi
 An exploratory 24,000 profile implements the 256-point M=8/K=24/q=3 mapping,
 B1 and basic PCM path, but still loses frames in extended distorted-clock
 tests. That work remains outside the committed receiver until qualified.
+
+
+### 24,000 acquisition investigation (private prototype)
+
+The extended drift/distortion/PCMU test still rejects the 24,000 prototype.
+Symbol tracing identifies residual interference beyond the seven-tap
+receiver's span. A fifteen-tap equalizer reduces the good timing lane's RMS
+symbol error from 0.490 to 0.250 and passes both negative-clock-drift paths,
+but positive-drift startup still loses frames. Supplying the known generated
+clock passes all four direct/delayed-E signed-drift cases; this is a diagnostic,
+not a deployable timing solution. The real loop overshoots during startup,
+and residual near-neighbor interference remains while the equalizer adapts.
+
+Immediate adaptation/clock-gain controls and joint carrier/equalizer fitting
+do not pass the complete test. A private delayed trellis-decision feedback
+prototype improves the positive-drift result to 191/192 exact frames, but
+still fails and has not been qualified for deployment. No 24,000 prototype
+or longer-equalizer change is included in the committed runtime. Acquisition
+and timing/equalizer interaction remain the next receiver work.

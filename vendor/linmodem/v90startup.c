@@ -235,14 +235,13 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 begin_retrain(s,"initiate after renegotiation E timeout;");
         }
         /* 9.4.1 bounds initial final training from receipt of INFO1a.
-           Without E, B1 cannot have been received. This guard covers the
-           missing-E case; it does not substitute for B1 validation after E.
+           E alone is insufficient: require recognition of the complete B1.
            Renegotiation has its separate, shorter deadline above. */
         if(s->info1_received && s->phase4_active &&
-           !s->phase4.renegotiations && !s->phase4.rx_e_logged) {
+           !s->phase4.renegotiations && !s->phase4.upstream.b1_seen) {
             long rtd=s->round_trip>0?s->round_trip:0;
             if(s->samples-s->info1_received_at>=120000+5*rtd)
-                begin_retrain(s,"initiate after initial E timeout;");
+                begin_retrain(s,"initiate after initial B1 timeout;");
         }
         int symbol = (s->samples * 3) / 40;
         if (!s->retrains && symbol < 63 && symbol != s->tx_symbol) {

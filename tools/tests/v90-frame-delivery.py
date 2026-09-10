@@ -20,6 +20,7 @@ void feed(V90Upstream*s,long sample,long source,const unsigned char*p,unsigned n
  V90UpLane lane={0};lane.crc=0xffff;lane.source_sample=source;s->samples=sample;
  for(unsigned i=0;i<n;++i)byte(s,&lane,p[i]);
 }
+void gate(V90Upstream*s,int seen){s->require_b1=1;s->b1_seen=seen;}
 unsigned count(V90Upstream*s){return s->frames;}
 void destroy(void*s){free(s);}
 ''')
@@ -27,7 +28,11 @@ void destroy(void*s){free(s);}
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     lib.feed.argtypes=[C.c_void_p,C.c_long,C.c_long,C.c_char_p,C.c_uint];lib.count.argtypes=[C.c_void_p];lib.destroy.argtypes=[C.c_void_p]
     s=lib.create()
+    lib.gate.argtypes=[C.c_void_p,C.c_int]
     def feed(t,data,source=None):lib.feed(s,t,t if source is None else source,data,len(data))
+    lib.gate(s,0);feed(0,wire(1));assert lib.count(s)==0,'data passed before B1'
+    lib.gate(s,1);feed(0,wire(1));assert lib.count(s)==1,'B1 did not release gate'
+    lib.destroy(s);s=lib.create()
     burst=b''.join(wire(i) for i in range(123))
     feed(100,burst);assert lib.count(s)==123
     for phase in range(1,10):feed(100+phase,burst)

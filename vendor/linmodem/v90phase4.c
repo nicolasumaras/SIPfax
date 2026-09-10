@@ -117,7 +117,7 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             /* Keep callbacks but reset the upstream demapper for the new B1. */
             void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
             void *opaque=s->upstream.opaque;
-            v90_upstream_init(&s->upstream);s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
+            v90_upstream_init(&s->upstream);s->upstream.require_b1=1;s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
             fprintf(stderr,"[v90p4] Ed complete; transmit B1d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable data constellation\n");}
     }
@@ -164,7 +164,7 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         }
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
-        if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; bidirectional PPP data path enabled\n");
+        if(n==288)fprintf(stderr,"[v90p4] B1d transmitted\n");
     }
     if(s->stage==7 || s->stage==8) {
         out=v90_pcm_level(s->alaw,0);

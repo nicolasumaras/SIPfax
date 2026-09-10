@@ -38,7 +38,7 @@ typedef struct V90Upstream {
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];
     /* Known 4800/3200 B1, observed independently of data acquisition. */
-    unsigned b1_seen;
+    unsigned b1_seen,require_b1;
     long b1_sample;
     double b1_score;
     uint8_t b1_labels[V90_UP_B1_SYMBOLS];

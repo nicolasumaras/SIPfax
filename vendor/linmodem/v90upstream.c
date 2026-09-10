@@ -45,7 +45,7 @@ void v90_upstream_init(V90Upstream *s)
 static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 {
     if(value==0x7e) {
-        if(!l->overflow && !l->escape && l->length>=4 && l->crc==0xf0b8) {
+        if((!s->require_b1 || s->b1_seen) && !l->overflow && !l->escape && l->length>=4 && l->crc==0xf0b8) {
             unsigned duplicate=0;
             for(unsigned i=0;i<s->recent_count;++i)
                 if(labs(l->source_sample-s->recent[i].sample)<40 && s->recent[i].length==l->length &&

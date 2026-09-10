@@ -1284,3 +1284,11 @@ Previous turn completedprofiletrialandrestoreddefaults. Firmwarestringsidentifie
 A singlecompactlive`show vpstat 0`(16432terminal)stillreportedVPtype1adjustduringsilence,avgdelay20ms,adaptive-decreases3,underflows5,FIFOdrops5. Thereforeevenexplicitactivationdidnotestablishfixedplayoutduringcall; runtimeapplication/overrideiselsewhere. No longtransferstarted. Privatework/ata-fixed80-activate.txt andata-fixed80-activated-live-vp.txt. Thisdisprovestheassumptionthatmissingactivatealoneexplainedpriorresult; notproofwhichcomponentoverridessetting.
 
 Disconnected92520successfully,restorednom40/adaptiveadj_silenceANDactivated,channelSUCCESSandshowcodingreadbackverified(38918terminal),filework/ata-fixed80-activation-restored.txt. No temporarysettingsremain. `dsp`noargswasunknown; no otherdebugmutation. Verifiedno lm/pppdandsipfaxactive. Allcalls/workersterminal.Runtime4b3650a/42667.Goalactive;nextidentifycall-timeprofileoverrideoractualruntimeplayoutcontrolbeforeanotherbuffertrial.
+
+## Runtime DSP command is present in firmware but unavailable in exposed shell (2026-09-10 UTC)
+
+Previous turn verifiedactivatealonecannotestablishfixedliveplayout/restoreddefaults. Read-onlyattempt`dsp 0 vpdelay`returnedUnknowncommanddsp (34121terminal). Firmwareusagecontainsruntimevpdelay(frameconceal,adaptive0/1/2,nom/max/min),butcallabilitynotestablished.
+
+Toavoidguessingaliases, inspectedlocalfirmwareonly. ExtractedELFsegmentat3771116..7340128into privatework/ata-mxp-library.elf. Readelfexportsnmm_dsp_cmd_procat0x464524. Localcapstoneinstalledonlyinexistingwork/ata-ssh-venv; disassemblednmm_createandresolvedGOT/stringargumentsregisteringcommands:set,commit,activate,show,dsp,flash. Noalias: dspmaps0x464524. Handlerwouldprintusageforargc<3,whileexposedshellreturnsUnknown; thereforedo notassumefirmwareroutineisreachablefromthisinterface. No firmwareexecution/patch/uploadorATAsettingchange.
+
+This closes repeatedstored-profile/activationguessing as a productive route. Next investigate packet reception/network topology using read-only external observations or supportedinterface; do notinvokeunverifiedDSPmutations. Serveridle4b3650a/42667,lastallcallsterminalandoriginalATAsettingsrestored.Goalactive.

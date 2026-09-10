@@ -2,7 +2,8 @@
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
-the twelve-point receiver. MP advertises only the configured rate. Unset or
+the twelve-point receiver; `12000` selects the experimental twenty-point receiver.
+MP advertises only the configured rate. Unset or
 unsupported values select 4,800. The 9,600 mode has synthetic validation only.
 The lab server now explicitly selects 7,200 after the short hardware trials
 below; broader qualification is required before changing the code default.
@@ -136,4 +137,8 @@ differential-history recovery and smaller-output cross-rate rejection. Rate-spec
 B1 and continuous 30-bit frame decoding also pass independent carrier/gain/noise
 and reacquisition tests. Carrier slope is estimated from the known B1 before
 replay, avoiding a transient that corrupted outer-point decisions at 12,000.
-Native audio/MP negotiation at that rate remains to be integrated.
+Native audio/MP negotiation now supports experimental 12,000 bit/s. Independent
+PCM tests recover exact PPP frames through fractional timing, delayed E, carrier
+offset/noise, CRC rejection and both signs of 100 ppm clock drift. Negotiation
+tests verify its rate, capability mask and CRC. Hardware validation is pending;
+the deployed server remains at 9,600 bit/s.

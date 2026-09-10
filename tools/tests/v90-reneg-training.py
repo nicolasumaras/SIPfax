@@ -41,7 +41,7 @@ void destroy(void *s){free(s);}
     x[n>=1200]*=-1;x=x.astype(np.int16)
     levels=[((u%16*8+132)<<(u//16))-132 for u in [96,88,78,53]]
     os.environ['SIPFAX_V90_INITIAL_TRN2D_MS']='1500'
-    for setting,frames,rate in [(setting,frames,rate) for setting,frames in [(None,340),('0',0),('1',1),('255',340),('1500',2000),('2000',2666),('-1',340),('2001',340),('junk',340),('999999999999999999999',340)] for rate in [None,'7200','9600','invalid']]:
+    for setting,frames,rate in [(setting,frames,rate) for setting,frames in [(None,340),('0',0),('1',1),('255',340),('1500',2000),('2000',2666),('-1',340),('2001',340),('junk',340),('999999999999999999999',340)] for rate in [None,'7200','9600','12000','invalid']]:
         if rate is None:os.environ.pop('SIPFAX_V90_UPSTREAM_RATE',None)
         else:os.environ['SIPFAX_V90_UPSTREAM_RATE']=rate
         if setting is None:os.environ.pop('SIPFAX_V90_RENEG_TRN2D_MS',None)
@@ -67,8 +67,8 @@ void destroy(void *s){free(s);}
             assert plain[:frames*17]==[1]*(frames*17)
             mp=plain[frames*17:frames*17+102]
             assert mp[:17]==[1]*17 and all(mp[k]==0 for k in [17,34,51,68,*range(85,102)])
-            assert sum(mp[24+k]<<k for k in range(4))==(4 if rate=='9600' else 3 if rate=='7200' else 2)
-            assert mp[36:50]==[int(k==(2 if rate=='9600' else 1 if rate=='7200' else 0)) for k in range(14)]
+            assert sum(mp[24+k]<<k for k in range(4))==(5 if rate=='12000' else 4 if rate=='9600' else 3 if rate=='7200' else 2)
+            assert mp[36:50]==[int(k==(3 if rate=='12000' else 2 if rate=='9600' else 1 if rate=='7200' else 0)) for k in range(14)]
             crc=0xffff
             for k in range(18,69):
                 if k%17==0:continue

@@ -45,6 +45,11 @@ int v90_trellis_qam20_pair(V90Trellis *s,double ar,double ai,double br,double bi
  * Same contract as qam20_pair; live acquisition is separate. */
 int v90_trellis_qam32_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                           unsigned inversion,unsigned *a,unsigned *b);
+/* Fifty-six-point minimum constellation for 16800/3200, q=0, M=14.
+ * Labels occupy six bits; packed history retains all twelve pair bits.
+ * Same contract as qam32_pair. Live acquisition is separate. */
+int v90_trellis_qam56_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *a,unsigned *b);
 /* Acquire the 448-pair J=7 superframe phase from 896..16384 hard pairs.
  * Labels are a|(b<<2). offset is relative to labels[0]. Returns 0 if
  * confidence is insufficient; errors reports the best syndrome score. */

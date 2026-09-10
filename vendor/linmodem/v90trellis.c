@@ -66,8 +66,8 @@ static int qam_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                     unsigned inversion,unsigned rings,unsigned label_bits,
                     unsigned *out_a,unsigned *out_b)
 {
-    static const double re[32]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3};
-    static const double im[32]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5};
+    static const double re[56]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3,5,5,-5,-5,-7,1,7,-1,1,-7,-1,7,-7,-3,7,3,-3,-7,3,7,-7,5,7,-5};
+    static const double im[56]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5,5,-5,-5,5,1,7,-1,-7,-7,-1,7,1,-3,7,3,-7,-7,3,7,-3,5,7,-5,-7};
     if(!isfinite(ar)||!isfinite(ai)||!isfinite(br)||!isfinite(bi)||
        fabs(ar)>1e100||fabs(ai)>1e100||fabs(br)>1e100||fabs(bi)>1e100)return -1;
     double ca[4],cb[4];unsigned la[4],lb[4];
@@ -104,6 +104,12 @@ int v90_trellis_qam32_pair(V90Trellis *s,double ar,double ai,double br,double bi
                           unsigned inversion,unsigned *out_a,unsigned *out_b)
 {
     return qam_pair(s,ar,ai,br,bi,inversion,8,5,out_a,out_b);
+}
+
+int v90_trellis_qam56_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *out_a,unsigned *out_b)
+{
+    return qam_pair(s,ar,ai,br,bi,inversion,14,6,out_a,out_b);
 }
 
 unsigned v90_trellis_inversion(unsigned pair,unsigned offset)

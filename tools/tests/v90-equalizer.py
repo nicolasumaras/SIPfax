@@ -12,6 +12,8 @@ with tempfile.TemporaryDirectory() as td:
 #include <string.h>
 #include "v90equalizer.h"
 void*create(void){V90Equalizer*s=malloc(sizeof(*s));v90_equalizer_init(s);return s;}
+void*clone(void*s){void*t=malloc(sizeof(V90Equalizer));memcpy(t,s,sizeof(V90Equalizer));return t;}
+int same(void*a,void*b){return !memcmp(a,b,sizeof(V90Equalizer));}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Equalizer*s){return s->samples;}
 ''')
@@ -20,6 +22,9 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     array=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
     lib.v90_equalizer_train.argtypes=[C.c_void_p,array,array,array,array]
     lib.v90_equalizer_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double,C.POINTER(C.c_double),C.POINTER(C.c_double)]
+    lib.v90_equalizer_adapt.argtypes=[C.c_void_p,C.c_double,C.c_double,C.c_double]
+    lib.clone.argtypes=[C.c_void_p];lib.clone.restype=C.c_void_p
+    lib.same.argtypes=[C.c_void_p,C.c_void_p]
     lib.count.argtypes=[C.c_void_p];lib.count.restype=C.c_ulonglong
     def train(s,x,y):
         return lib.v90_equalizer_train(s,*[np.ascontiguousarray(z) for z in [x.real,x.imag,y.real,y.imag]])
@@ -57,6 +62,29 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
         count=lib.count(s);bad=desired[:128].copy();bad[83:]*=-1
         assert not train(s,noisy[:128],bad) and lib.count(s)==count
         lib.destroy(s)
+    # A changing complex channel: train once, then adapt only confident
+    # nearest-point decisions. Unseen late symbols must improve over fixed FIR.
+    variation=np.linspace(0,1,len(desired))
+    varying=desired+(.13-.08j+.12*variation)*np.roll(desired,1)+(-.12-.04j-.08*variation)*np.roll(desired,-1)
+    results=[]
+    for adaptive in [False,True]:
+        s=lib.create();assert train(s,varying[:128],desired[:128]);output=[]
+        for z in varying:
+            r=C.c_double();i=C.c_double()
+            if lib.v90_equalizer_symbol(s,z.real,z.imag,C.byref(r),C.byref(i)):
+                value=r.value+1j*i.value;output.append(value)
+                target=points[np.argmin(abs(points-value))]
+                if adaptive and abs(target-value)**2<.25:
+                    assert lib.v90_equalizer_adapt(s,target.real,target.imag,.01)
+        results.append(np.mean(abs(np.array(output)[-1000:]-desired[:-3][-1000:])**2))
+        old=lib.clone(s)
+        for step in [0,-1,.1001,float('nan'),float('inf')]:
+            assert not lib.v90_equalizer_adapt(s,1,1,step) and lib.same(s,old)
+        for bad in [float('nan'),float('inf'),1e100]:
+            assert not lib.v90_equalizer_adapt(s,bad,1,.01) and lib.same(s,old)
+        lib.destroy(old);lib.destroy(s)
+    assert results[1]<.1*results[0],results
+    print('PASS: guarded normalized LMS tracks a changing channel; invalid updates preserve state')
     s=lib.create();zeros=np.zeros(128,dtype=complex)
     assert not train(s,zeros,desired[:128])
     assert not train(s,desired[:128],desired[:128])

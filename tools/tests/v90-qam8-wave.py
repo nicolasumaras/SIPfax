@@ -14,11 +14,11 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rate=14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
-k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8)}[rate]
+rate=16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
+k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14)}[rate]
 frame_bits=k+12
 from v90_shell_reference import ShellReference
-if rate==14400:rings=ShellReference(m)
+if rate>=14400:rings=ShellReference(m)
 else:
     rings=sorted(itertools.product(range(m),repeat=8),key=lambda r:
      (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:1<<k]
@@ -40,7 +40,8 @@ if clock_drift:
     wire*=8;expected*=8
 plain=[1]*(16*frame_bits)+[1]*180
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
-plain.extend([1]*360)
+# Flush the rate-dependent trellis lookahead with real idle symbols.
+plain.extend([1]*(20*frame_bits))
 plain.extend([1]*((-len(plain))%frame_bits))
 # GPA encoder, continuous from reset B1 into data.
 register=0;bits=[]
@@ -60,7 +61,7 @@ for f in range(len(bits)//frame_bits):
         a=(previous+v[k+1+3*p]+2*v[k+2+3*p])%4
         b=(a+2*v[k+3*p]+((state&1)^inv))%4;previous=a
         x=a+4*shell[2*p];y=b+4*shell[2*p+1]
-        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j][q>>2])*(-1j)**(q&3) for q in [x,y]]
+        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j][q>>2])*(-1j)**(q&3) for q in [x,y]]
         symbols.extend(points)
         t=converter[subset(points[0])][subset(points[1])];u=state&1
         state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)
@@ -114,7 +115,9 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             center=100+fraction+2.5*i*(1+ppm/1e6)
             for n in range(math.ceil(center-40),math.floor(center+40)+1):base[n]+=z*pulse((n-center)/2.5)
         samples=np.arange(len(base));carrier=np.exp(1j*(.61+2*np.pi*1920.3*samples/8000))
-        pcm=np.rint(1800*(base*carrier).real+rng.normal(0,1,len(base))).astype(np.int16)
+        wave=np.rint((900 if rate==16800 else 1800)*(base*carrier).real+rng.normal(0,1,len(base)))
+        assert np.max(abs(wave))<32768,'synthetic PCM clipping'
+        pcm=wave.astype(np.int16)
         received=[]
         cb=cbtype(lambda _,p,n:received.append(bytes(p[:n])))
         s=lib.create(cb)

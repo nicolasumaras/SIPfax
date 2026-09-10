@@ -70,3 +70,24 @@ int v90_equalizer_symbol(V90Equalizer *s,double re,double im,double *orr,double 
     }
     *orr=r;*oi=i;return 1;
 }
+int v90_equalizer_adapt(V90Equalizer *s,double tr,double ti,double step)
+{
+    if(s->samples<=3||!bounded(tr)||!bounded(ti)||!isfinite(step)||step<=0||step>.1)return 0;
+    double r=0,i=0,energy=0,cr[7],ci[7],norm=0;
+    for(unsigned j=0;j<7;++j) {
+        unsigned k=(s->position+j)%7;
+        r+=s->cr[j]*s->re[k]-s->ci[j]*s->im[k];
+        i+=s->cr[j]*s->im[k]+s->ci[j]*s->re[k];
+        energy+=s->re[k]*s->re[k]+s->im[k]*s->im[k];
+    }
+    if(!(energy>1e-12))return 0;
+    double er=tr-r,ei=ti-i,mu=step/energy;
+    for(unsigned j=0;j<7;++j) {
+        unsigned k=(s->position+j)%7;
+        cr[j]=s->cr[j]+mu*(er*s->re[k]+ei*s->im[k]);
+        ci[j]=s->ci[j]+mu*(ei*s->re[k]-er*s->im[k]);
+        norm+=cr[j]*cr[j]+ci[j]*ci[j];
+    }
+    if(!isfinite(norm)||norm>4)return 0;
+    memcpy(s->cr,cr,sizeof(cr));memcpy(s->ci,ci,sizeof(ci));return 1;
+}

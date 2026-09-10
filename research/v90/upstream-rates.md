@@ -3,7 +3,8 @@
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver; `14400` selects
-the experimental thirty-two-point receiver.
+the experimental thirty-two-point receiver; `16800` selects the experimental
+fifty-six-point receiver.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
@@ -209,3 +210,19 @@ All 3,657 downstream primary audio payloads and the forwarded upstream suffix
 matched across FreePBX. The 14,739-packet capture had no sequence gaps or kernel
 drops. CT105 retains the 14,400 build, with the validated equalized 12,000 binary
 saved for rollback. Sustained 14,400 testing remains outstanding.
+
+## 16,800-bit/s path and equalizer adaptation
+
+The fifty-six-point minimum constellation (M=14/K=30 at 3200 symbols/s) has
+a six-bit-label soft trellis, 42-bit mapping frames, B1 acquisition and native
+PCM/MP integration. Independent tests cover all states/labels, energy-bucket
+boundaries, unused-shell rejection, carrier/gain changes, clock drift and
+intersymbol interference. A rate-dependent idle suffix in the PCM test fully
+flushes trellis lookahead without relying on zero-filled audio.
+
+The fixed trained equalizer lost an interior PPP frame under 100 ppm clock
+drift at this rate. Guarded normalized LMS updates now track confident symbol
+decisions for the 16,800 receiver, with bounded step and coefficient norm;
+the same test recovers every frame. Lower rates retain training-only filtering.
+An independent changing-channel test checks improvement over a fixed filter
+and invalid-update state preservation. Hardware validation remains pending.

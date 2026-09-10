@@ -21,4 +21,8 @@ int v90_equalizer_train(V90Equalizer *s,const double *re,const double *im,
  * The first output represents input symbol 0, with zero-padded prehistory. */
 int v90_equalizer_symbol(V90Equalizer *s,double re,double im,
                         double *out_re,double *out_im);
+/* Normalized LMS update for the most recent output. Caller supplies a known
+ * training symbol or a sufficiently confident decision. step is in (0,.1].
+ * Returns 0 without changing state for invalid input or excessive tap norm. */
+int v90_equalizer_adapt(V90Equalizer *s,double target_re,double target_im,double step);
 #endif

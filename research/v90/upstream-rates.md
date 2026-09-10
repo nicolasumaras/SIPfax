@@ -381,3 +381,26 @@ prototype improves the positive-drift result to 191/192 exact frames, but
 still fails and has not been qualified for deployment. No 24,000 prototype
 or longer-equalizer change is included in the committed runtime. Acquisition
 and timing/equalizer interaction remain the next receiver work.
+
+
+### First 24,000 hardware trial (reverted after measurement)
+
+Combining the private fifteen-tap trellis-feedback receiver with slower clock
+integration passes the original extended signed-drift/distortion/PCMU test
+in all four direct/delayed-E paths. A separate random-payload/timing-offset
+case still loses a startup frame, so this is not a qualified implementation.
+The independent 24,000 symbol and mapping test passes.
+
+A controlled, reversible hardware trial authenticated PPP at 24,000 upstream
+and native CP 49.333 kbit/s downstream. The 32 KiB download took 7.457 seconds;
+sixteen distinct 1 KiB upstream checks took 1.415–1.469 seconds (median 1.444).
+All 18 response hashes were independently verified. The call disconnected
+after 36.943 seconds with zero Windows CRC/alignment errors. All 3,284
+downstream primary RTP payloads and the forwarded upstream suffix matched.
+The 13,248-packet capture had zero kernel drops and no RTP sequence gaps.
+This is one short successful call; sustained qualification remains undone.
+
+The server automatically returned to `816a07a` at 21,600 upstream after the
+trial. Incoming PCM was saved privately for replay. The experimental receiver
+remains outside the committed runtime pending broader startup qualification
+and preservation of lower-rate behavior.

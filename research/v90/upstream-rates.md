@@ -4,9 +4,9 @@ The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver.
 MP advertises only the configured rate. Unset or
-unsupported values select 4,800. The 9,600 mode has synthetic validation only.
-The lab server now explicitly selects 7,200 after the short hardware trials
-below; broader qualification is required before changing the code default.
+unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
+12,000 passes synthetic tests but its first hardware upload failed. The lab currently
+selects 9,600. Broader qualification is required before changing the code default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -28,19 +28,19 @@ shell ordering to check all 16 initial states, controlled symbol errors, noise,
 and rejected-frame recovery. Ring decisions use the nearest point within each
 quadrant; this is not joint soft shell decoding.
 
-`v90_qam8_b1_init` generates the selected-rate B1 with zero encoder state and
+`v90_qam_b1_init_rate` generates the selected-rate B1 with zero encoder state and
 the final data frame's superframe inversions. Its bounded symbol-domain
 correlator reports the B1 end, carrier phase, and gain. Tests independently
 generate all 288 scrambled bits and 128 symbols, then check noisy acquisition,
 phase/gain changes, and negative/reset controls. The continuous stream replays B1 through the trellis and descrambler, tracks
-carrier/gain against eight-point decisions, and aligns mapping frames. Ten
+carrier/gain against the selected constellation decisions, and aligns mapping frames. Ten
 matched-filter timing lanes feed this receiver in `v90upstream.c`. Invalid
 symbols drop lock; reacquisition requires another B1. A rejected shell resets
 the affected lane’s PPP framing/descrambler, which then self-synchronizes.
 
 Remaining integration work:
 
-- Sustained hardware qualification of timing recovery and 9,600-bit/s calls.
+- Broader sustained qualification and reduction of residual link errors.
 - Adaptive equalization and loss-of-lock detection beyond invalid inputs.
 - Higher rates and fallback after this first eight-point path is qualified.
 
@@ -89,8 +89,13 @@ fractional timing and CRC rejection. The first hardware trial at 9,600 bit/s aut
 page, verified a 32 KiB download and 16 distinct 1 KiB upstream request payloads,
 then disconnected cleanly. Windows reported 54.218 seconds of connected time
 and zero CRC/alignment errors. Native CP confirmed 49.333 kbit/s downstream.
-The development server now runs this experimental rate; sustained 9,600-bit/s
-qualification remains outstanding. The adaptive 7,200-bit/s binary is retained
+The development server now runs this experimental rate; a subsequent 725.774-second bidirectional test
+completed all 64 checksummed 32 KiB downloads and 64 verified 1 KiB upstream
+requests, then disconnected cleanly. Native downstream CP remained at 49.333
+kbit/s. Windows counted 32 CRC and five alignment errors. All 37,733 downstream
+RTP primary payloads matched across FreePBX, as did all forwarded upstream
+payloads after the 11-packet early-media prefix. The 151,534-packet capture
+had no sequence gaps or kernel drops. Residual errors remain unexplained. The adaptive 7,200-bit/s binary is retained
 as a rollback.
 
 A subsequent sustained 7,200-upstream call completed 62 alternating 32 KiB
@@ -102,7 +107,7 @@ B1 reacquisition before further verified transfers. No RTP sequence gaps were
 captured; the only missing final downstream packet followed the caller BYE.
 Post-call ATA counters included one underflow and one FIFO drop, without event
 timing. This establishes partial sustained recovery, not sustained reliability.
-A controlled downstream-rate comparison is the next reliability experiment.
+This prompted the controlled downstream-rate comparison described below.
 
 ## Clock recovery after the downstream-rate comparison
 
@@ -140,5 +145,13 @@ replay, avoiding a transient that corrupted outer-point decisions at 12,000.
 Native audio/MP negotiation now supports experimental 12,000 bit/s. Independent
 PCM tests recover exact PPP frames through fractional timing, delayed E, carrier
 offset/noise, CRC rejection and both signs of 100 ppm clock drift. Negotiation
-tests verify its rate, capability mask and CRC. Hardware validation is pending;
-the deployed server remains at 9,600 bit/s.
+tests verify its rate, capability mask and CRC. The first 12,000-bit/s hardware call authenticated PPP and verified a 32 KiB
+download (19.105 seconds), but its first 1 KiB upstream request timed out after
+30.028 seconds. Windows counted zero CRC/alignment errors. The call disconnected
+cleanly and the server was restored to the validated 9,600-bit/s binary/settings.
+The passive capture had 17,993 packets, zero kernel drops and no RTP sequence
+gaps. All 4,467 downstream primary payloads and the forwarded upstream suffix
+matched across FreePBX. Replaying the recorded upstream audio reproduces shell
+rejections from acquisition onward (297–329 per locked lane by second 85), with
+55 valid PPP frames recovered. This is not the earlier late-onset clock stall;
+receiver distortion/equalization and tracking need investigation before retrying.

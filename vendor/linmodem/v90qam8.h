@@ -3,6 +3,7 @@
 #define V90QAM8_H
 #include "v90shell.h"
 #include "v90trellis.h"
+#include "v90equalizer.h"
 typedef struct { V90Shell shell; unsigned previous; } V90Qam8Frames;
 void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous_quadrant);
 /* Eight time-ordered quadrant|(ring<<2) labels -> 18 scrambled bits.
@@ -42,6 +43,7 @@ typedef struct {
     V90Trellis trellis;
     V90Qam8Frames frames;
     V90Carrier carrier;
+    V90Equalizer equalizer;
     uint64_t symbols,origin,pairs,output_symbol,output_frames,rejected_frames;
     double score,a_re,a_im;
     uint8_t labels[8];

@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-shell v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo linmodem-framing; do
+          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-shell v90-equalizer v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
       - name: Test upstream clock recovery
@@ -46,6 +46,7 @@ jobs:
           /usr/bin/python3 tools/tests/v90-qam8-wave.py --9600 --clock-drift
           python3 tools/tests/v90-qam8-wave.py --12000
           python3 tools/tests/v90-qam8-wave.py --12000 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --12000 --isi
       - name: Sanitize upstream shell mapping
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize

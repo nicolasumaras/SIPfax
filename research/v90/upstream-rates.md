@@ -155,3 +155,21 @@ matched across FreePBX. Replaying the recorded upstream audio reproduces shell
 rejections from acquisition onward (297–329 per locked lane by second 85), with
 55 valid PPP frames recovered. This is not the earlier late-onset clock stall;
 receiver distortion/equalization and tracking need investigation before retrying.
+
+## B1-trained equalization for 12,000
+
+Recorded B1 exposed intersymbol distortion: a seven-tap complex FIR reduced
+held-out symbol MSE from approximately 0.410 to 0.039. The native 12,000 path
+now fits this filter on 80 B1 interior symbols and accepts it only if remaining
+interior symbols improve by at least 20%, with bounded coefficient norm. Fits
+are regularized toward identity; rejected fits retain the identity filter.
+Carrier-aligned symbols pass through three symbols of lookahead before trellis
+decoding, preserving original source timestamps and the B1-to-data boundary.
+This is training-based equalization, not decision-directed adaptive equalization.
+
+The failed hardware recording now yields 85 valid PPP frames versus 55 before,
+with zero rejected shells in one timing lane. Other lanes still reject shells.
+Independent distorted-PCM tests recover exact PPP frames; the pre-equalizer
+receiver recovers only the first frame in the same regression. Separate tests
+cover held-out validation, unseen symbol recovery, delay and invalid-input
+state preservation. Hardware validation of this change remains required.

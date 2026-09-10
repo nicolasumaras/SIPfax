@@ -61,6 +61,10 @@ for f in range(len(bits)//frame_bits):
         symbols.extend(points)
         t=converter[subset(points[0])][subset(points[1])];u=state&1
         state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)
+# A complex symbol-spaced channel models precursor/postcursor interference.
+# The expected PPP bytes remain independent of this received-signal distortion.
+if '--isi' in sys.argv:
+    symbols=np.convolve(symbols,np.array([.2-.09j,1,-.17-.05j]),'same')
 def pulse(t):
     beta=.1
     if abs(t)<1e-9:return 1-beta+4*beta/math.pi
@@ -92,7 +96,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
 
 ''')
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
-        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
+        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)
     lib.create.argtypes=[cbtype];lib.create.restype=C.c_void_p
     lib.run.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint]

@@ -62,7 +62,7 @@ long detected(void*p){return ((V90Upstream*)p)->b1_sample;}
 ''')
     subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC',
                     '-I'+str(root/'vendor/linmodem'),str(d/'wrap.c'),
-                    str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90shell.c'),'-lm','-o',str(d/'b1.so')],check=True)
+                    str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90equalizer.c'),str(root/'vendor/linmodem/v90shell.c'),'-lm','-o',str(d/'b1.so')],check=True)
     lib=C.CDLL(str(d/'b1.so'));lib.create.restype=C.c_void_p
     lib.destroy.argtypes=[C.c_void_p]
     lib.feed.argtypes=[C.c_void_p,C.c_double,C.c_double]

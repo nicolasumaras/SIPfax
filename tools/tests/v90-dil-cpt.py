@@ -30,7 +30,7 @@ void run(V90Startup *s,const int16_t *in,int16_t *out,unsigned n){
 long value(V90Startup *s,unsigned i){return i==0?s->phase4_active:i==1?s->s_transitions:i==2?stop_at:i==3?phase4_at:i==4?s->training_tx.dil_position:s->phase4.have_cpt;}
 void destroy(void *s){free(s);}
 ''')
- sources=['v90startup.c','v90training.c','v90dil.c','v90cp.c','v90phase4.c','v90pcm.c','v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c','v90train_tx.c']
+ sources=['v90startup.c','v90training.c','v90dil.c','v90cp.c','v90phase4.c','v90pcm.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90train_tx.c']
  subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in sources],'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_int];lib.create.restype=C.c_void_p
  ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')

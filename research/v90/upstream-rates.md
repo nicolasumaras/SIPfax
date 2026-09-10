@@ -500,3 +500,31 @@ The capture contained 137,445 packets, zero kernel drops and no RTP sequence gap
 The reversible trial initially restored `36577ed`. After result verification, `117ae76` was installed for continued development with `SIPFAX_V90_UPSTREAM_RATE=26400` and `SIPFAX_V90_LINE_ECHO=1`. The active service, expected binary SHA-256 `badbecb9aff6f50c1201b9eacc69865273cb932e91ac5441da596b0f005142e2`, configuration and FreePBX availability were checked. The previous runtime remains saved as `lm.pre-26400-integrated`, with its configuration in `/tmp/v90-upstream-before-26400-integrated.conf`.
 
 Full V.90 scope remains incomplete: higher upstream rates and symbol-rate coverage, broader reliability, general echo-delay acquisition/tracking, V.34 fallback and future concurrent calls still require work. The known additional synthetic-seed losses remain documented. No completion claim follows from this single sustained run.
+
+
+### Automatic initial echo-delay acquisition
+
+`SIPFAX_V90_LINE_ECHO=auto` starts with cancellation disabled and detects an
+initial delay from past TX and raw RX audio. It evaluates at most 256 lags per
+audio block, requires a quiet upstream window, rejects ambiguous correlation
+peaks, and requires two qualifying searches to agree. Cancellation then starts
+with zero coefficients while retaining reference history. The existing `1`
+mode retains its measured 1428-sample delay; absent/other values keep echo
+cancellation disabled.
+
+The search uses 1024-sample windows and delays up to 7000 samples. It excludes
+references not yet available under the bridge's RX-before-TX block ordering,
+rejects stale/unsynchronized history, and rejects search ranges too narrow to
+compare alternative peaks. It is an initial acquisition mechanism: it does not
+yet reacquire a changing delay after lock. A call without an unambiguous quiet
+window may remain uncancelled.
+
+Local tests cover four independently generated delays, silence/noise/tone
+rejection with unchanged output, echo reduction, fixed-mode regression and
+bridge framing in automatic mode. CT105 ASan/UBSan checks pass across history
+wraps, repeated bounded searches and mismatched RX state. Three recorded calls
+select 1428 samples at 12.08 seconds; two formerly failing recordings each yield
+ten valid PPP frames after correction. The standalone CT105 benchmark peaked
+at 0.450 ms per search step; this is an observed timing, not a deadline guarantee.
+Live automatic-mode hardware qualification is still pending. The deployed
+`117ae76` remains in fixed-delay mode until that qualification.

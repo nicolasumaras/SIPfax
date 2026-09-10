@@ -8,7 +8,7 @@ fifty-six-point receiver.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental equalized 14,400 receiver after its
+The lab currently selects the experimental adaptive 16,800 receiver after its
 first successful hardware test. Broader qualification is required before changing
 the code default.
 
@@ -209,7 +209,15 @@ reported zero CRC/alignment errors; native CP confirmed 49.333 kbit/s downstream
 All 3,657 downstream primary audio payloads and the forwarded upstream suffix
 matched across FreePBX. The 14,739-packet capture had no sequence gaps or kernel
 drops. CT105 retains the 14,400 build, with the validated equalized 12,000 binary
-saved for rollback. Sustained 14,400 testing remains outstanding.
+saved for rollback. A subsequent 617.839-second bidirectional soak completed
+all 64 verified 32 KiB downloads (2 MiB) and 64 verified 1 KiB upstream requests,
+then disconnected cleanly. Windows reported one CRC error and zero alignment
+errors. Native downstream CP remained 49.333 kbit/s. All 32,331 downstream
+primary RTP payloads and the forwarded upstream suffix matched across FreePBX;
+the 129,862-packet capture had no sequence gaps or kernel drops. Post-call ATA
+counters showed zero network packet loss, 80 ms average playout, one underflow,
+one FIFO drop and two starvation events. These aggregate counters do not locate
+events within the call or establish the cause of the CRC error.
 
 ## 16,800-bit/s path and equalizer adaptation
 
@@ -225,4 +233,13 @@ drift at this rate. Guarded normalized LMS updates now track confident symbol
 decisions for the 16,800 receiver, with bounded step and coefficient norm;
 the same test recovers every frame. Lower rates retain training-only filtering.
 An independent changing-channel test checks improvement over a fixed filter
-and invalid-update state preservation. Hardware validation remains pending.
+and invalid-update state preservation. The first 16,800 hardware call
+authenticated PPP, fetched an external page, verified a 32 KiB download in
+7.500 seconds and all sixteen 1 KiB upstream request payloads. It disconnected
+cleanly after 44.494 seconds with zero Windows CRC/alignment errors. Native CP
+confirmed 49.333 kbit/s downstream. All 3,663 forwarded downstream primary
+payloads matched; the final unforwarded server packet followed the caller BYE
+by 1.614 ms. The forwarded upstream suffix also matched. The 14,769-packet
+capture had no RTP sequence gaps or kernel drops. CT105 retains 16,800, with
+the validated 14,400 binary saved for rollback. Sustained 16,800 qualification
+remains outstanding.

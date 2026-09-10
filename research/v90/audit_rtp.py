@@ -1,19 +1,38 @@
-"""Audit Ethernet IPv4 G.711 RTP continuity and PBX payload preservation.
+"""Audit Ethernet/Linux-cooked IPv4 G.711 RTP continuity and PBX payload preservation.
 
 Read-only; emits transport metadata, never audio or authentication payloads.
 """
+import argparse
 import collections
 import hashlib
 import json
 import struct
-import sys
 
 
-def read_flows(path):
-    data = open(path, 'rb').read()
+def red_primary(payload):
+    """Extract a G.711 primary block from an RFC 2198 payload, or reject it."""
+    pos = 0
+    redundant_bytes = 0
+    while pos < len(payload) and payload[pos] & 128:
+        if pos + 4 > len(payload):
+            return None
+        redundant_bytes += int.from_bytes(payload[pos + 1:pos + 4], 'big') & 1023
+        pos += 4
+    if pos >= len(payload) or payload[pos] not in (0, 8):
+        return None
+    start = pos + 1 + redundant_bytes
+    if start >= len(payload):
+        return None
+    return payload[start:]
+
+
+def read_flows(path, red_payload_type=None):
+    with open(path, 'rb') as capture:
+        data = capture.read()
     endian = {'d4c3b2a1': '<', 'a1b2c3d4': '>'}[data[:4].hex()]
-    if struct.unpack_from(endian + 'I', data, 20)[0] != 1:
-        raise ValueError('Ethernet pcap required')
+    link_type = struct.unpack_from(endian + 'I', data, 20)[0]
+    if link_type not in (1, 113, 276):
+        raise ValueError('Ethernet or Linux cooked pcap required')
     flows = collections.defaultdict(list)
     pos = 24
     while pos + 16 <= len(data):
@@ -23,17 +42,21 @@ def read_flows(path):
             break  # A capture copied while running may end mid-record.
         packet = data[pos:pos + size]
         pos += size
-        if len(packet) < 34 or packet[12:14] != b'\x08\x00':
+        offset, protocol = {1: (14, 12), 113: (16, 14), 276: (20, 0)}[link_type]
+        if len(packet) < offset + 20 or packet[protocol:protocol + 2] != b'\x08\x00':
             continue
-        ip = packet[14:]
-        if ip[9] != 17 or int.from_bytes(ip[6:8], 'big') & 0x3fff:
+        ip = packet[offset:]
+        if ip[0] >> 4 != 4 or (ip[0] & 15) < 5 or ip[9] != 17 or int.from_bytes(ip[6:8], 'big') & 0x3fff:
             continue
         udp = ip[(ip[0] & 15) * 4:int.from_bytes(ip[2:4], 'big')]
         if len(udp) < 20:
             continue
         sport, dport, length = struct.unpack_from('>HHH', udp)
         rtp = udp[8:length]
-        if rtp[0] >> 6 != 2 or rtp[1] & 127 not in (0, 8):
+        if len(rtp) < 12:
+            continue
+        payload_type = rtp[1] & 127
+        if rtp[0] >> 6 != 2 or payload_type not in (0, 8, red_payload_type):
             continue
         start = 12 + 4 * (rtp[0] & 15)
         if rtp[0] & 16:
@@ -47,10 +70,15 @@ def read_flows(path):
             end -= rtp[-1]
         if start > end:
             continue
+        payload = rtp[start:end]
+        if payload_type == red_payload_type:
+            payload = red_primary(payload)
+            if payload is None:
+                continue
         seq, stamp, ssrc = struct.unpack_from('>HII', rtp, 2)
         key = ('.'.join(map(str, ip[12:16])), sport,
                '.'.join(map(str, ip[16:20])), dport, ssrc, rtp[1] & 127)
-        flows[key].append((sec + usec / 1e6, seq, stamp, rtp[start:end]))
+        flows[key].append((sec + usec / 1e6, seq, stamp, payload))
     return flows
 
 
@@ -106,4 +134,8 @@ def report(flows):
 
 
 if __name__ == '__main__':
-    report(read_flows(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('capture')
+    parser.add_argument('--red-payload-type', type=int, choices=range(96, 128))
+    args = parser.parse_args()
+    report(read_flows(args.capture, args.red_payload_type))

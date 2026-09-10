@@ -194,3 +194,12 @@ For rollback, set `redundantAudio` to `false`, restore the ordinary route exampl
 and invoke the normal preparation wrapper while idle to disable RED/FEC and
 activate the basic profile. Stop/disable `sipfax-red` after the call ends. With
 the new helper, omitted `redundantAudio` also means explicitly disabled.
+
+For passive transport verification, capture both PBX legs and run
+`python3 research/v90/audit_rtp.py capture.pcap --red-payload-type 96`.
+The auditor accepts Ethernet, Linux cooked v1 and v2 captures. It extracts the
+G.711 primary block before checking RTP timestamp steps and comparing forwarded
+payloads; redundant bytes do not count as new samples. This checks primary
+continuity and packet timing, not the ATA's actual analog playout or recovery
+of a missing redundant block. Keep captures private because they contain audio
+and SIP/PPP data.

@@ -80,3 +80,14 @@ compute Figure 9 subsets from coordinates and then apply Table 13, covering all
 index must not be used directly as a Table 13 subset number. The companion `v90_qam12_frame` now recovers 24 scrambled bits; exhaustive
 tests cover all 4,096 shell indices, differential bits and rejection bounds.
 Rate-specific B1 acquisition and a live 9,600-bit/s mode remain unimplemented. It does not alter the deployed 7,200-bit/s receiver.
+
+A subsequent sustained 7,200-upstream call completed 62 alternating 32 KiB
+checksummed downloads and 1 KiB upstream requests. Download 63 timed out at the
+probe's 30-second deadline after 21,417 bytes. The final Windows statistics
+reported 822.392 seconds, 54 CRC errors and six alignment errors. Native logs
+showed successful 53.333-to-49.333 kbit/s downstream renegotiation and upstream
+B1 reacquisition before further verified transfers. No RTP sequence gaps were
+captured; the only missing final downstream packet followed the caller BYE.
+Post-call ATA counters included one underflow and one FIFO drop, without event
+timing. This establishes partial sustained recovery, not sustained reliability.
+A controlled downstream-rate comparison is the next reliability experiment.

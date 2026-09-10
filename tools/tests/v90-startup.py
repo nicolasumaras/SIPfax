@@ -64,6 +64,12 @@ void initial_timeout(V90Startup *s,long rtd,int received_e,int received_b1,int a
  s->phase4_active=active;s->phase4.rx_e_logged=received_e;s->phase4.upstream.b1_seen=received_b1;s->phase4.renegotiations=reneg;
 }
 void silence_timeout(V90Startup *s,long rtd){reneg_timeout(s,rtd,0,1);s->phase4.stage=7;s->phase4.alaw=s->alaw;s->phase4.cp.silence=1;}
+void reneg_b1_timeout(V90Startup *s,long rtd,int received_b1,int silence,int reneg){
+ data_mode(s);s->round_trip=rtd;s->phase4.renegotiations=reneg;
+ s->phase4.rx_e_logged=1;s->phase4.cp.silence=silence;
+ s->phase4.upstream.b1_seen=received_b1;
+ s->phase4.upstream.samples=40000+2*(rtd>0?rtd:0)-1;
+}
 void echo_ready(V90Startup *s,int stage,int received_e){data_mode(s);s->phase4.stage=stage;s->phase4.rx_e_logged=received_e;}
 int law(V90Startup *s){return s->alaw;}
 void destroy(void *s) { free(s); }
@@ -82,6 +88,7 @@ void destroy(void *s) { free(s); }
     lib.reneg_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int]
     lib.initial_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int,C.c_int,C.c_int]
     lib.silence_timeout.argtypes=[C.c_void_p,C.c_long]
+    lib.reneg_b1_timeout.argtypes=[C.c_void_p,C.c_long,C.c_int,C.c_int,C.c_int]
     lib.law.argtypes=[C.c_void_p]
     lib.destroy.argtypes=[C.c_void_p];lib.received.argtypes=[C.c_void_p]
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
@@ -248,6 +255,25 @@ void destroy(void *s) { free(s); }
                     assert lib.law(state)==law
                 lib.destroy(state)
     print('PASS: initial missing-B1 deadline uses INFO1a time, RTD, B1/phase/renegotiation guards and 70ms mute')
+
+    for law in [0,1]:
+        for rtd in [-20,0,420,1280]:
+            for b1,silence,reneg in [(0,0,1),(1,0,1),(0,1,1),(0,0,0)]:
+                state=lib.create(law);lib.reneg_b1_timeout(state,rtd,b1,silence,reneg)
+                quiet=np.zeros(1,dtype=np.int16);out=quiet.copy()
+                lib.v90_startup_process(state,out,quiet,1)
+                assert lib.retrains(state)==0,'post-E B1 timeout fired early'
+                before=lib.consumed()
+                quiet=np.zeros(1000,dtype=np.int16);out=quiet.copy()
+                lib.v90_startup_process(state,out,quiet,len(quiet))
+                expected=reneg and not b1 and not silence
+                assert lib.retrains(state)==int(expected)
+                if expected:
+                    assert np.all(out[:560]==0) and np.any(out[560:])
+                    assert lib.consumed()==before and not lib.data_active(state)
+                    assert lib.law(state)==law
+                lib.destroy(state)
+    print('PASS: post-E missing-B1 recovery, deadline boundary, B1/silence/initial guards, mute and DTE clamp')
 
     # Optional private hardware recording: normal data must not false-trigger,
     # but the caller's late real Tone A must clamp the data transmitter.

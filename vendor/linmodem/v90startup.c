@@ -234,6 +234,18 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
             if(elapsed>=384 && (long)(elapsed-384)>=40000+2*rtd)
                 begin_retrain(s,"initiate after renegotiation E timeout;");
         }
+        /* Local recovery policy, not the 9.6.1 E deadline: after E, a
+           missing B1 must not leave the receive gate closed indefinitely.
+           Count only samples actually fed to the post-E receiver; this
+           also excludes CPs echo-training silence. Allow 5s + 2 RTDs,
+           well beyond the 40ms B1 at our supported 4800-bit/s rate. */
+        if(s->phase4_active && s->phase4.renegotiations &&
+           s->phase4.rx_e_logged && !s->phase4.cp.silence &&
+           !s->phase4.upstream.b1_seen) {
+            long rtd=s->round_trip>0?s->round_trip:0;
+            if((long)s->phase4.upstream.samples>=40000+2*rtd)
+                begin_retrain(s,"initiate after renegotiation B1 timeout;");
+        }
         /* 9.4.1 bounds initial final training from receipt of INFO1a.
            E alone is insufficient: require recognition of the complete B1.
            Renegotiation has its separate, shorter deadline above. */

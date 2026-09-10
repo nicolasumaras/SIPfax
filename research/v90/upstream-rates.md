@@ -84,7 +84,13 @@ Rate-specific B1 and continuous symbol decoding now pass independent 9,600-bit/s
 tests, including gain/carrier changes and reacquisition. The native audio/MP
 path now enables experimental 9,600-bit/s calls. Independent PCM tests recover
 exact PPP frames, including delayed E, both signs of 100 ppm clock error,
-fractional timing and CRC rejection. Hardware interoperability is untested. It does not alter the deployed 7,200-bit/s receiver.
+fractional timing and CRC rejection. The first hardware trial at 9,600 bit/s authenticated PPP, fetched an external
+page, verified a 32 KiB download and 16 distinct 1 KiB upstream request payloads,
+then disconnected cleanly. Windows reported 54.218 seconds of connected time
+and zero CRC/alignment errors. Native CP confirmed 49.333 kbit/s downstream.
+The development server now runs this experimental rate; sustained 9,600-bit/s
+qualification remains outstanding. The adaptive 7,200-bit/s binary is retained
+as a rollback.
 
 A subsequent sustained 7,200-upstream call completed 62 alternating 32 KiB
 checksummed downloads and 1 KiB upstream requests. Download 63 timed out at the

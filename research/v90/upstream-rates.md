@@ -109,5 +109,12 @@ interpolating the quarter-sample matched-filter outputs and tracking phase and
 sample-clock offset separately. Actual symbol timestamps preserve duplicate
 filtering across timing lanes. The same recording yields 229 valid frames and
 continues decoding to the end. Synthetic PCM/PPP tests cover both signs of
-100 ppm clock error; the previous receiver fails that test. Live validation
-of this timing change remains required.
+100 ppm clock error; the previous receiver fails that test. Hardware validation of this timing change completed 64 alternating 32 KiB
+checksummed downloads (2 MiB) and 64 verified 1 KiB upstream requests over
+784.478 seconds of connected time, followed by a clean disconnect. Windows
+reported 32 CRC and four alignment errors. Native CP messages show downstream
+49.333 kbit/s initially and 48 kbit/s after renegotiation; transfers continued.
+All 40,667 downstream RTP primary payloads matched across the PBX; upstream
+payloads matched after the 11-packet early-media prefix. No RTP sequence gaps
+or kernel capture drops were recorded. This is a successful sustained test,
+not an error-free or full-conformance result.

@@ -2,6 +2,7 @@
 #define V90UPSTREAM_H
 #include <stdint.h>
 #include "v90trellis.h"
+#include "v90qam8.h"
 #define V90_UP_TAPS 81
 #define V90_UP_PHASES 10
 #define V90_UP_FRAME 4096
@@ -25,6 +26,12 @@ typedef struct {
     struct V90Upstream *up;
     unsigned previous,have_previous,phase;
 } V90UpSoftLane;
+typedef struct {
+    V90Qam8Stream stream;
+    V90UpLane lane;
+    struct V90Upstream *up;
+    unsigned phase;
+} V90UpQamLane;
 typedef struct V90Upstream {
     double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];
     unsigned position,frames;
@@ -37,6 +44,8 @@ typedef struct V90Upstream {
     V90UpLane lanes[V90_UP_PHASES][2];
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];
+    unsigned rate;
+    V90UpQamLane qam[V90_UP_PHASES];
     /* Known 4800/3200 B1, observed independently of data acquisition. */
     unsigned b1_seen,require_b1;
     long b1_sample;

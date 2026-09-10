@@ -48,6 +48,11 @@ void *frames(unsigned previous){V90Qam8Frames*s=malloc(sizeof(*s));v90_qam8_fram
 void destroy(void*s){free(s);}
 void *b1(void){V90Qam8B1*s=malloc(sizeof(*s));v90_qam8_b1_init(s);return s;}
 unsigned b1_label(V90Qam8B1*s,unsigned i){return s->labels[i];}
+void *stream(void (*cb)(void*,const uint8_t*)) {
+ V90Qam8Stream*s=malloc(sizeof(*s));v90_qam8_stream_init(s);s->receive_bits=cb;return s;
+}
+uint64_t output_symbol(V90Qam8Stream*s){return s->output_symbol;}
+uint64_t rejected(V90Qam8Stream*s){return s->rejected_frames;}
 uint64_t count(V90Trellis*s){return s->pairs;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror',
@@ -146,4 +151,39 @@ uint64_t count(V90Trellis*s){return s->pairs;}
     for bad in [complex(float('nan'),0),complex(0,float('inf')),complex(1e200,0)]:
         found=matches(reference[:100]+[bad]+reference)
         assert len(found)==1 and found[0][0]==228
-print('PASS: 7200 B1 reset/GPA, independent full-frame encoding, gain/phase/boundary acquisition and negative controls')
+    print('PASS: 7200 B1 reset/GPA, independent full-frame encoding, gain/phase/boundary acquisition and negative controls')
+
+    callback_type=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8))
+    lib.stream.argtypes=[callback_type];lib.stream.restype=C.c_void_p
+    lib.v90_qam8_stream_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double]
+    lib.output_symbol.argtypes=lib.rejected.argtypes=[C.c_void_p]
+    lib.output_symbol.restype=lib.rejected.restype=C.c_uint64
+    source_bits=ones+[rng.randrange(2) for _ in range(18*700)]
+    labels,_,source=transmit(716,0,0,source_bits,384)
+    clean=[point(x) for pair in labels for x in pair]
+    for frequency in [-1.,0.,1.]:
+        for gain in [.02,2000]:
+            received=[];positions=[]
+            def callback(_,bits):
+                received.append(list(bits[:18]) if bits else None)
+                positions.append(lib.output_symbol(stream))
+            cb=callback_type(callback);stream=lib.stream(cb)
+            prefix=37
+            for i in range(prefix):assert lib.v90_qam8_stream_symbol(stream,0,0)==0
+            for i,v in enumerate(clean):
+                signal=gain*(1+.08*i/len(clean))*v*cmath.exp(1j*(.43+2*cmath.pi*frequency*i/3200))
+                signal+=gain*complex(rng.gauss(0,.015),rng.gauss(0,.015))
+                status=lib.v90_qam8_stream_symbol(stream,signal.real,signal.imag)
+                assert status==int(i>=127),(i,status)
+            assert len(received)==(len(clean)-126)//8
+            assert received==source[:len(received)],(frequency,gain,next((i for i,(a,b) in enumerate(zip(received,source)) if a!=b),None))
+            assert positions==[prefix+8*(i+1)-1 for i in range(len(received))]
+            assert lib.rejected(stream)==0
+            # A discontinuity must drop lock, then another B1 starts a fresh epoch.
+            assert lib.v90_qam8_stream_symbol(stream,float('nan'),0)==-1
+            received.clear();positions.clear()
+            for v in clean[:400]:lib.v90_qam8_stream_symbol(stream,v.real,v.imag)
+            assert received==source[:len(received)] and len(received)==34
+            assert positions[0]==prefix+len(clean)+1+7
+            lib.destroy(stream)
+print('PASS: continuous B1/data decoding, carrier offset/gain drift/noise, source positions and reacquisition')

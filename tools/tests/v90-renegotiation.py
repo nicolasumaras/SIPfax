@@ -23,7 +23,7 @@ unsigned value(V90Phase4 *s,unsigned i){return i==0?s->stage:i==1?s->renegotiati
 int peak(V90Phase4 *s,unsigned i){for(int u=127;u>=0;--u)if(s->preceding_cp.mask[0][s->preceding_cp.indices[i]][u])return v90_pcm_level(0,u);return 0;}
 void destroy(void *p){free(p);}
 ''')
- sources=['v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c','v90upstream.c','v90trellis.c']
+ sources=['v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c','v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c']
  subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in sources],'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
  ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')

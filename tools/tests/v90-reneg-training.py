@@ -32,7 +32,7 @@ unsigned get(V90Phase4 *s,unsigned field){return field==0?s->trn_start:field==1?
 void destroy(void *s){free(s);}
 ''')
     src=root/'vendor/linmodem';so=Path(tmp)/'test.so'
-    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(src),str(wrapper),*[str(src/f) for f in ['v90pcm.c','v90training.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(src),str(wrapper),*[str(src/f) for f in ['v90pcm.c','v90training.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.run.argtypes=[C.c_void_p,ptr,ptr,C.c_uint];lib.get.argtypes=[C.c_void_p,C.c_uint];lib.destroy.argtypes=[C.c_void_p]
@@ -41,7 +41,9 @@ void destroy(void *s){free(s);}
     x[n>=1200]*=-1;x=x.astype(np.int16)
     levels=[((u%16*8+132)<<(u//16))-132 for u in [96,88,78,53]]
     os.environ['SIPFAX_V90_INITIAL_TRN2D_MS']='1500'
-    for setting,frames in [(None,340),('0',0),('1',1),('255',340),('1500',2000),('2000',2666),('-1',340),('2001',340),('junk',340),('999999999999999999999',340)]:
+    for setting,frames,rate in [(setting,frames,rate) for setting,frames in [(None,340),('0',0),('1',1),('255',340),('1500',2000),('2000',2666),('-1',340),('2001',340),('junk',340),('999999999999999999999',340)] for rate in [None,'7200','invalid']]:
+        if rate is None:os.environ.pop('SIPFAX_V90_UPSTREAM_RATE',None)
+        else:os.environ['SIPFAX_V90_UPSTREAM_RATE']=rate
         if setting is None:os.environ.pop('SIPFAX_V90_RENEG_TRN2D_MS',None)
         else:os.environ['SIPFAX_V90_RENEG_TRN2D_MS']=setting
         s=lib.create();out=np.zeros_like(x)
@@ -65,7 +67,8 @@ void destroy(void *s){free(s);}
             assert plain[:frames*17]==[1]*(frames*17)
             mp=plain[frames*17:frames*17+102]
             assert mp[:17]==[1]*17 and all(mp[k]==0 for k in [17,34,51,68,*range(85,102)])
-            assert sum(mp[24+k]<<k for k in range(4))==2 and mp[36]==1
+            assert sum(mp[24+k]<<k for k in range(4))==(3 if rate=='7200' else 2)
+            assert mp[36:50]==[int(k==(1 if rate=='7200' else 0)) for k in range(14)]
             crc=0xffff
             for k in range(18,69):
                 if k%17==0:continue
@@ -74,4 +77,4 @@ void destroy(void *s){free(s);}
             assert mp[69:85]==[(crc>>(15-k))&1 for k in range(16)]
             assert plain[frames*17+102:frames*17+204]==mp
         finally:lib.destroy(s)
-    print('PASS: S/Sbar, aligned Rd/Rbar, independent training/MP decode, zero/long/default/invalid durations and DTE clamp')
+    print('PASS: S/Sbar, aligned Rd/Rbar, independent training/MP decode, zero/long/default/invalid durations, configured upstream rate/capability/CRC and DTE clamp')

@@ -79,3 +79,71 @@ int v90_qam8_b1_symbol(V90Qam8B1 *s,double re,double im,
     *gain=magnitude/s->reference_energy;*phase=atan2(ci,cr);
     *score=magnitude/denominator;return 1;
 }
+
+void v90_qam8_stream_init(V90Qam8Stream *s)
+{
+    memset(s,0,sizeof(*s));v90_qam8_b1_init(&s->b1);
+}
+static void normalized(V90Qam8Stream *s,double re,double im,double *ar,double *ai)
+{
+    V90Carrier *c=&s->carrier;
+    double cs=cos(c->phase),sn=sin(c->phase);
+    *ar=(re*cs+im*sn)/c->gain;*ai=(im*cs-re*sn)/c->gain;
+    double best=1e300,rr=1,ri=1;
+    for(unsigned i=0;i<8;++i) {
+        double r,j;point(i,&r,&j);
+        double distance=(*ar-r)*(*ar-r)+(*ai-j)*(*ai-j);
+        if(distance<best){best=distance;rr=r;ri=j;}
+    }
+    double error=0;
+    /* Track against the decided point, not average magnitude: ring energy
+     * carries shell bits. Ignore fades/outliers while predicting phase. */
+    double ratio=hypot(*ar,*ai)/hypot(rr,ri);
+    if(ratio>.5 && ratio<1.5 && best<1) {
+        error=atan2(*ai*rr-*ar*ri,*ar*rr+*ai*ri);
+        c->frequency+=.00001*error;
+        if(c->frequency>.02)c->frequency=.02;
+        if(c->frequency<-.02)c->frequency=-.02;
+        c->gain*=1+.001*(ratio-1);
+    }
+    c->phase=remainder(c->phase+c->frequency+.005*error,2*acos(-1.0));
+}
+static void qam8_locked(V90Qam8Stream *s,double re,double im)
+{
+    double ar,ai;normalized(s,re,im,&ar,&ai);
+    if(!s->have_a){s->a_re=ar;s->a_im=ai;s->have_a=1;return;}
+    unsigned a,b;
+    /* B1 is the last 64 pairs of J=7. The following data starts at V0[0]. */
+    unsigned inv=v90_trellis_inversion((unsigned)((s->pairs+384)%448),0);
+    int ready=v90_trellis_qam8_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b);
+    ++s->pairs;s->have_a=0;
+    if(ready!=1)return;
+    s->labels[s->count++]=(uint8_t)a;s->labels[s->count++]=(uint8_t)b;
+    if(s->count==8) {
+        uint8_t bits[18];int valid=v90_qam8_frame(&s->frames,s->labels,bits);
+        s->count=0;++s->output_frames;
+        s->output_symbol=s->origin+2*(s->pairs-(V90_TRELLIS_DEPTH-1))-1;
+        if(!valid)++s->rejected_frames;
+        if(s->receive_bits)s->receive_bits(s->opaque,valid?bits:NULL);
+    }
+}
+int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
+{
+    uint64_t index=s->symbols++;
+    if(!isfinite(re)||!isfinite(im)||fabs(re)>1e100||fabs(im)>1e100 ||
+       (s->locked && (fabs(re/s->carrier.gain)>1e100 || fabs(im/s->carrier.gain)>1e100))) {
+        s->locked=s->have_a=s->count=0;s->b1.position=s->b1.count=0;return -1;
+    }
+    if(s->locked){qam8_locked(s,re,im);return 1;}
+    double gain,phase,score;
+    if(!v90_qam8_b1_symbol(&s->b1,re,im,&gain,&phase,&score))return 0;
+    v90_carrier_init(&s->carrier,phase,gain);
+    v90_trellis_init(&s->trellis);v90_qam8_frames_init(&s->frames,0);
+    s->origin=index+1-V90_QAM8_B1_SYMBOLS;s->pairs=0;s->count=s->have_a=0;
+    s->output_frames=s->rejected_frames=0;s->score=score;s->locked=1;
+    for(unsigned i=0;i<V90_QAM8_B1_SYMBOLS;++i) {
+        unsigned j=(s->b1.position+i)%V90_QAM8_B1_SYMBOLS;
+        qam8_locked(s,s->b1.re[j],s->b1.im[j]);
+    }
+    return 1;
+}

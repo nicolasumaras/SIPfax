@@ -1,4 +1,4 @@
-/* 4800-bit/s upstream V.34 in V.90: b=12,K=0, four-point constellation.
+/* Experimental upstream V.34 in V.90: 4800 four-point / 7200 eight-point.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
@@ -9,9 +9,17 @@
 #include <string.h>
 #include "v90upstream.h"
 static void soft_pair(void *,unsigned,unsigned);
+static void qam_bits(void *,const uint8_t *);
 void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
+    const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
+    s->rate=rate && !strcmp(rate,"7200")?7200:4800;
+    if(s->rate==7200)for(unsigned i=0;i<V90_UP_PHASES;++i) {
+        V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
+        v90_qam8_stream_init(&l->stream);
+        l->stream.opaque=l;l->stream.receive_bits=qam_bits;
+    }
     /* V.34 10.1.3.1: one frame of scrambled ones, zero encoder state,
        inversion as the last frame of the J=7 superframe. */
     unsigned bits[192],state=0,previous=0;
@@ -89,6 +97,16 @@ static void soft_pair(void *opaque,unsigned a,unsigned b)
     }
     l->previous=a;l->have_previous=1;
 }
+static void qam_bits(void *opaque,const uint8_t *bits)
+{
+    V90UpQamLane *l=opaque;
+    if(l->stream.output_frames==1 || !bits) {
+        memset(&l->lane,0,sizeof(l->lane));l->lane.crc=0xffff;
+    }
+    if(!bits)return;
+    l->lane.source_sample=(long)((10*l->stream.output_symbol+l->phase)/4);
+    for(unsigned i=0;i<18;++i)bit(l->up,&l->lane,bits[i]);
+}
 static unsigned delta(double ar,double ai,double br,double bi)
 {
     return (-(int)lrint(atan2(ai*br-ar*bi,ar*br+ai*bi)/(M_PI/2)))&3;
@@ -123,6 +141,14 @@ static void b1_symbol(V90Upstream *s,unsigned phase,double re,double im)
 }
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
+    if(s->rate==7200) {
+        V90Qam8Stream *q=&s->qam[time%V90_UP_PHASES].stream;
+        int locked=v90_qam8_stream_symbol(q,re,im);
+        if(locked==1 && !s->b1_seen) {
+            s->b1_seen=1;s->b1_sample=s->samples;s->b1_score=q->score;
+        }
+        return;
+    }
     b1_symbol(s,time%V90_UP_PHASES,re,im);
     if(s->soft_enabled) {
         v90_trellis_stream_symbol(&s->soft[time%V90_UP_PHASES].stream,re,im);

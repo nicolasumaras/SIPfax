@@ -1,8 +1,9 @@
 # Extending the V.90 upstream receiver
 
-The live `v90upstream.c` / `v90trellis.c` path remains restricted to 4,800 bit/s
-at 3,200 symbols/s. The new shell mapper and eight-point decoder are not yet
-connected to that path and do not change the advertised MP rate.
+The deployed default remains 4,800 bit/s at 3,200 symbols/s. The experimental
+`SIPFAX_V90_UPSTREAM_RATE=7200` setting now selects the eight-point receiver and
+advertises only 7,200 bit/s in MP. Unset or unsupported values select 4,800.
+Hardware validation is required before changing the default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -28,15 +29,24 @@ quadrant; this is not joint soft shell decoding.
 the final data frame's superframe inversions. Its bounded symbol-domain
 correlator reports the B1 end, carrier phase, and gain. Tests independently
 generate all 288 scrambled bits and 128 symbols, then check noisy acquisition,
-phase/gain changes, and negative/reset controls. This detector still needs
-matched-filter timing-lane integration and subsequent carrier tracking.
+phase/gain changes, and negative/reset controls. The continuous stream replays B1 through the trellis and descrambler, tracks
+carrier/gain against eight-point decisions, and aligns mapping frames. Ten
+matched-filter timing lanes feed this receiver in `v90upstream.c`. Invalid
+symbols drop lock; reacquisition requires another B1. A rejected shell resets
+the affected lane’s PPP framing/descrambler, which then self-synchronizes.
 
 Remaining integration work:
 
-- Timing-lane integration of eight-point B1 acquisition and carrier tracking.
-- Mapping-frame alignment after B1 and live bit delivery.
-- Per-rate MP generation and capability masks, followed by hardware PPP tests.
+- Hardware 7,200-bit/s training, authenticated PPP, and bidirectional payload tests.
+- Adaptive timing/equalization and loss-of-lock detection beyond invalid inputs.
+- Higher rates and fallback after this first eight-point path is qualified.
 
 V.90 Table 16 defines upstream rate selection and its capability mask. Higher
 rates must not be enabled by default until their receive path is validated.
 See [V.90 Table 16](https://www.itu.int/rec/dologin_pub.asp?id=T-REC-V.90-199809-I!!PDF-E&lang=e&type=items).
+
+`v90-qam8-wave.py` independently generates B1, scrambled UART/PPP data, shell
+and trellis symbols, and pulse-shaped PCM. Exact frames survive fractional
+timing, carrier offset and noise; a deliberately invalid FCS is rejected.
+Rate negotiation tests independently decode MP rate, capability mask and CRC.
+These synthetic checks do not establish hardware interoperability.

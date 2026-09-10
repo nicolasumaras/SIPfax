@@ -1300,3 +1300,30 @@ Previous turn made progress ruling out callable runtime DSP alias. Read-only Pro
 PassiveLLDP/CDP50sworker89118terminal(timeout124normalbound):2LLDPpacketsfrom74:ac:b9:d9:b6:15,systemUDM-ProApartamento,chassis74:ac:b9:d9:b6:11,1000BASE-Tfullduplex. ThisidentifiesProxmoxneighborasUniFiDreamMachinePro; ATAattachmenttopologystillunverified. SSHroot@.1reachablebutexistingkeydeniedpublickey/keyboard-interactive(afterfirst-usehostkeyacceptance); nopasswordguessing. Requestedread-onlyUniFiaccessasynchronouslytoinspectATAport/errors/dropcounters;answerpending.
 
 40smulticastcapture17637terminal391packets/0kerneldrops;max62packetsand18631wirebytesinone1sbucket. Noongoingmulticastflooddemonstratedinthissample;doesnotexcludeintermittentburstsortrafficelsewhere. Privatework/v90-lan-multicast.pcapandsummary.json. ATAHTTPcumulativemulticastcountsalonewerenotsufficientevidence. No modemcalls/settingschanges. Allworkersnowterminal,serveridle4b3650a/42667.Goalactive.NextuseUniFiaccessifprovided;physicalATApathcannotbeinferredsolelyfromProxmoxneighbor.
+
+## Post-E missing-B1 recovery deployed (2026-09-10 UTC)
+
+Native commit `5a98c1e` adds a local recovery policy for renegotiation that has
+received E but never recognizes B1: retrain after 5 seconds plus 2 RTDs of
+post-E receiver samples. This is an implementation watchdog, not a claim that
+V.90 specifies that B1 deadline. Initial training retains its existing INFO1a
+watchdog; CPs silence and recognized B1 are excluded. Tests exercise the exact
+boundary, both PCM laws, negative/zero/positive RTD, valid-B1 cancellation,
+silence and initial-training exclusions, 70ms mute and DTE clamp. Startup,
+E-recovery and B1 tests passed locally; CI run 34427341945 passed.
+
+Built on CT105 in `/tmp/sipfax-b1-watchdog-5a98c1e`, installed while idle.
+Binary SHA256 `325aed1c45ab1045b48a84992df777f0f870b69e90f75818de1709f6efcb949d`.
+Rollback archive `/tmp/sipfax-before-b1-watchdog-5a98c1e.tar.gz` contains previous
+binary and startup source. Runtime rate/soft-RX/ATA settings unchanged.
+
+Hardware attempt `6c8c01a5-4ec7-4720-948c-9532c7df87dc` connected at reported
+41296 bit/s with PPP addresses 10.64.0.2/10.64.0.1 and initial CRC errors zero.
+Three CT-to-XP HTTP health requests over PPP passed in 20.568, 2.861 and 2.858
+seconds. Caller retraining occurred; this is not reliability acceptance or
+live proof of the new timeout (the missing-B1 condition did not occur).
+Public internet probe still returns HTTP400: "Another network probe is running."
+Private artifacts: `work/v90-b1-watchdog-health.json`, `...-live.log`,
+`...-disconnect.json`, and the attempt diagnostics JSON. All workers terminal;
+disconnect confirmed by API and no lm/pppd processes; sipfax remains active.
+UniFi SSH still denied for the existing key; awaiting access clarification.

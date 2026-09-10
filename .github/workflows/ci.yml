@@ -17,6 +17,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Test ATA call preparation
+        run: python3 -m unittest discover -s tools/tests -p test_ata187_prepare.py
 
   native-modem:
     runs-on: ubuntu-latest

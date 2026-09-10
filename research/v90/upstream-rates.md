@@ -12,9 +12,8 @@ equalization.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental 21,600 receiver. A private 24,000
-prototype passed one short hardware trial and was then reverted; the integrated
-provisional-feedback revision still requires hardware qualification.
+The lab currently selects the integrated 24,000 receiver (`36577ed`) after CI
+and a successful short hardware test. Its first sustained run is in progress.
 The preceding 19,200 carrier-fit build passed a sustained run with live
 renegotiation recovery. Broader qualification is required before changing
 the code default.
@@ -435,3 +434,13 @@ delay and invalid-state preservation. ASan/UBSan passes feedback history wrap
 and reacquisition at five rates. The full native suite and the extended 19.2
 and 21.6 regressions pass locally. CI and hardware results for this revision
 must be recorded separately from the earlier private short-call success.
+
+
+CI passed for `36577ed` (run 34535254143). Replay of the saved private 24,000
+call yields the same 179 CRC-valid PPP frames with matching frame hashes.
+
+The integrated `36577ed` hardware call passed authenticated PPP at 24,000 bit/s upstream and native CP 49.333 kbit/s downstream. The verified 32 KiB download took 7.463 seconds; sixteen distinct 1 KiB upstream checks took 1.411–1.459 seconds (median 1.429). All 18 response hashes were independently verified. The call disconnected cleanly after 36.673 seconds with zero Windows CRC/alignment errors. All 3,272 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX. The 13,201-packet capture had zero kernel drops and no RTP sequence gaps.
+
+CT105 now runs `36577ed` at 24,000 upstream. The previous binary and rate
+setting are saved for rollback. A sustained run is in progress; this exact
+build has not yet completed sustained hardware qualification.

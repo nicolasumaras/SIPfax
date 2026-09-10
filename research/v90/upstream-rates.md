@@ -243,3 +243,13 @@ by 1.614 ms. The forwarded upstream suffix also matched. The 14,769-packet
 capture had no RTP sequence gaps or kernel drops. CT105 retains 16,800, with
 the validated 14,400 binary saved for rollback. Sustained 16,800 qualification
 remains outstanding.
+
+## 19,200-bit/s mapping foundation
+
+V.34 Table 10 selects M=12/K=28/q=1 at 3200 symbols/s: 96 constellation points
+and 48 bits per mapping frame. The new kernel preserves seven-bit labels,
+including Q=2*ring+uncoded_bit. The inverse implements the clause 9.3.1 parser
+order: 28 shell bits followed by four groups of I1/I2/I3/Qa/Qb. Independent
+coordinate/trellis tests cover all states and labels; shell tests cover bucket
+boundaries, unused tuples and output bounds. Native acquisition is not enabled
+by this mapping foundation alone.

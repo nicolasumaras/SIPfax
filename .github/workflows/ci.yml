@@ -52,6 +52,7 @@ jobs:
           python3 tools/tests/v90-qam8-wave.py --14400 --clock-drift
           python3 tools/tests/v90-qam8-wave.py --14400 --isi
           python3 tools/tests/v90-qam32.py --16800
+          python3 tools/tests/v90-qam32.py --19200
           python3 tools/tests/v90-qam8-wave.py --16800
           python3 tools/tests/v90-qam8-wave.py --16800 --clock-drift
           python3 tools/tests/v90-qam8-wave.py --16800 --isi

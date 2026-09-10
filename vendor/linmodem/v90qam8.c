@@ -4,65 +4,79 @@
 #include "v90qam8.h"
 void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous)
 {
-    v90_shell_init(&s->shell,2,6);s->previous=previous&3;
+    v90_shell_init(&s->shell,2,6);s->previous=previous&3;s->q=0;
 }
 static int mapping_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t *bits,
-                         unsigned m,unsigned k)
+                         unsigned m,unsigned k,unsigned q)
 {
-    uint8_t rings[8],decoded[42];uint32_t index;
-    if(s->shell.m!=m || s->shell.k!=k)return 0;
-    for(unsigned i=0;i<8;++i){if(labels[i]>=4*m)return 0;rings[i]=labels[i]>>2;}
+    uint8_t rings[8],decoded[48];uint32_t index;
+    if(s->shell.m!=m || s->shell.k!=k || s->q!=q)return 0;
+    for(unsigned i=0;i<8;++i){if(labels[i]>=(4*m<<q))return 0;rings[i]=labels[i]>>(2+q);}
     unsigned previous=s->previous;s->previous=labels[6]&3;
     if(!v90_shell_decode(&s->shell,rings,&index))return 0;
     for(unsigned i=0;i<k;++i)decoded[i]=(index>>i)&1;
     for(unsigned pair=0;pair<4;++pair) {
         unsigned a=labels[2*pair]&3,b=labels[2*pair+1]&3;
         unsigned difference=(a+4-previous)&3;
-        decoded[k+3*pair]=((b+4-a)&3)>>1;
-        decoded[k+1+3*pair]=difference&1;
-        decoded[k+2+3*pair]=difference>>1;
+        unsigned group=k+(3+2*q)*pair;
+        decoded[group]=((b+4-a)&3)>>1;
+        decoded[group+1]=difference&1;
+        decoded[group+2]=difference>>1;
+        for(unsigned j=0;j<q;++j) {
+            decoded[group+3+j]=(labels[2*pair]>>(2+j))&1;
+            decoded[group+3+q+j]=(labels[2*pair+1]>>(2+j))&1;
+        }
         previous=a;
     }
-    memcpy(bits,decoded,k+12);return 1;
+    memcpy(bits,decoded,k+12+8*q);return 1;
 }
 int v90_qam8_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t bits[18])
 {
-    return mapping_frame(s,labels,bits,2,6);
+    return mapping_frame(s,labels,bits,2,6,0);
 }
 void v90_qam12_frames_init(V90Qam12Frames *s,unsigned previous)
 {
-    v90_shell_init(&s->shell,3,12);s->previous=previous&3;
+    v90_shell_init(&s->shell,3,12);s->previous=previous&3;s->q=0;
 }
 int v90_qam12_frame(V90Qam12Frames *s,const uint8_t labels[8],uint8_t bits[24])
 {
-    return mapping_frame(s,labels,bits,3,12);
+    return mapping_frame(s,labels,bits,3,12,0);
 }
 
 void v90_qam20_frames_init(V90Qam20Frames *s,unsigned previous)
 {
-    v90_shell_init(&s->shell,5,18);s->previous=previous&3;
+    v90_shell_init(&s->shell,5,18);s->previous=previous&3;s->q=0;
 }
 int v90_qam20_frame(V90Qam20Frames *s,const uint8_t labels[8],uint8_t bits[30])
 {
-    return mapping_frame(s,labels,bits,5,18);
+    return mapping_frame(s,labels,bits,5,18,0);
 }
 
 void v90_qam32_frames_init(V90Qam32Frames *s,unsigned previous)
 {
-    v90_shell_init(&s->shell,8,24);s->previous=previous&3;
+    v90_shell_init(&s->shell,8,24);s->previous=previous&3;s->q=0;
 }
 int v90_qam32_frame(V90Qam32Frames *s,const uint8_t labels[8],uint8_t bits[36])
 {
-    return mapping_frame(s,labels,bits,8,24);
+    return mapping_frame(s,labels,bits,8,24,0);
 }
 
 void v90_qam56_frames_init(V90Qam56Frames *s,unsigned previous)
 {
-    v90_shell_init(&s->shell,14,30);s->previous=previous&3;
+    v90_shell_init(&s->shell,14,30);s->previous=previous&3;s->q=0;
 }
 int v90_qam56_frame(V90Qam56Frames *s,const uint8_t labels[8],uint8_t bits[42])
 {
-    return mapping_frame(s,labels,bits,14,30);
+    return mapping_frame(s,labels,bits,14,30,0);
+}
+
+void v90_qam96_frames_init(V90Qam96Frames *s,unsigned previous)
+{
+    v90_shell_init(&s->shell,12,28);s->previous=previous&3;s->q=1;
+}
+int v90_qam96_frame(V90Qam96Frames *s,const uint8_t labels[8],uint8_t bits[48])
+{
+    return mapping_frame(s,labels,bits,12,28,1);
 }
 
 static void point(unsigned label,double *re,double *im)

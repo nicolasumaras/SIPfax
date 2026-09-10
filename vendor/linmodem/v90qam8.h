@@ -4,7 +4,7 @@
 #include "v90shell.h"
 #include "v90trellis.h"
 #include "v90equalizer.h"
-typedef struct { V90Shell shell; unsigned previous; } V90Qam8Frames;
+typedef struct { V90Shell shell; unsigned previous,q; } V90Qam8Frames;
 void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous_quadrant);
 /* Eight time-ordered quadrant|(ring<<2) labels -> 18 scrambled bits.
  * Caller establishes frame alignment and differential state. Rejected frames
@@ -31,6 +31,12 @@ void v90_qam56_frames_init(V90Qam56Frames *s,unsigned previous_quadrant);
 /* M=14/K=30, 42 scrambled bits for 16800/3200. Unused shell tuples reject.
  * This inverse alone does not enable live 16800 reception. */
 int v90_qam56_frame(V90Qam56Frames *s,const uint8_t labels[8],uint8_t bits[42]);
+typedef V90Qam8Frames V90Qam96Frames;
+void v90_qam96_frames_init(V90Qam96Frames *s,unsigned previous_quadrant);
+/* M=12/K=28/q=1: 48 scrambled bits, including uncoded symbol bits in parser
+ * order. Labels carry Q=2*ring+uncoded_bit above their two quadrant bits.
+ * This inverse alone does not enable live 19200 reception. */
+int v90_qam96_frame(V90Qam96Frames *s,const uint8_t labels[8],uint8_t bits[48]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
     uint8_t labels[V90_QAM8_B1_SYMBOLS];

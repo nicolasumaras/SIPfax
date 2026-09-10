@@ -55,7 +55,8 @@ unsigned k(V90Phase4 *s){return s->encoder.k;}
     assert plain[:training_frames*17]==[1]*(training_frames*17)
     mp=plain[training_frames*17:training_frames*17+102]
     assert mp[:17]==[1]*17 and all(mp[k]==0 for k in [17,34,51,68,*range(85,102)])
-    assert sum(mp[24+k]<<k for k in range(4))==2 and mp[36]==1 and mp[33]==0
+    rate=3 if os.environ.get('SIPFAX_V90_UPSTREAM_RATE')=='7200' else 2
+    assert sum(mp[24+k]<<k for k in range(4))==rate and mp[34+rate]==1 and mp[33]==0
     crc=0xffff
     for k in range(18,69):
         if k%17==0:continue

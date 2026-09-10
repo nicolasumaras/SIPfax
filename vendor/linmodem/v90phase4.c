@@ -109,6 +109,13 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         void *opaque=s->upstream.opaque;
         v90_upstream_init(&s->upstream);s->upstream.require_b1=1;
         s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
+        /* The matched training detector can report E after B1 has begun.
+         * Replay bounded pre-decision audio to retain the complete B1 and
+         * warm the new receive filter. Current input is fed below once. */
+        for(unsigned i=0;i<s->upstream_history_count;++i) {
+            unsigned j=(s->upstream_history_position+160-s->upstream_history_count+i)%160;
+            v90_upstream_receive(&s->upstream,s->upstream_history[j]);
+        }
         s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; starting upstream B1/data receiver\n",s->samples/8000.0);
     }
     if(s->stage==2 && s->ed_frame && s->samples-s->trn_start==(s->ed_frame+2)*6) {
@@ -189,5 +196,8 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             }
         }
     }
+    s->upstream_history[s->upstream_history_position]=input;
+    s->upstream_history_position=(s->upstream_history_position+1)%160;
+    if(s->upstream_history_count<160)++s->upstream_history_count;
     ++s->samples;return out;
 }

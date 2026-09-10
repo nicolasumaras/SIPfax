@@ -59,7 +59,7 @@ def pulse(t):
 with tempfile.TemporaryDirectory() as td:
     d=Path(td);w=d/'wrapper.c';so=d/'receiver.so'
     w.write_text('''#include <stdlib.h>
-#include "v90upstream.h"
+#include "v90phase4.c"
 void *create(void (*cb)(void*,const uint8_t*,unsigned)) {
  V90Upstream*s=malloc(sizeof(*s));v90_upstream_init(s);s->require_b1=1;s->receive_frame=cb;return s;
 }
@@ -67,13 +67,27 @@ void run(V90Upstream*s,const int16_t*x,unsigned n){for(unsigned i=0;i<n;++i)v90_
 void destroy(void*s){free(s);}
 unsigned rate(V90Upstream*s){return s->rate;}
 unsigned acquired(V90Upstream*s){return s->b1_seen;}
+void *phase4_create(void (*cb)(void*,const uint8_t*,unsigned)) {
+ V90Phase4*s=malloc(sizeof(*s));v90_phase4_init(s,0,78);
+ s->cpt.drn=9;s->cpt.sr=1;s->cpt.lookahead=1;s->cpt.count=1;s->cpt.filter[0]=63;
+ unsigned u[4]={53,78,88,96};for(unsigned i=0;i<4;++i)s->cpt.mask[0][0][u[i]]=1;
+ if(v90_pcm_init(&s->encoder,&s->cpt,training_bit,s))abort();
+ s->stage=2;s->have_cpt=1;s->mp_length=102;s->upstream.receive_frame=cb;return s;
+}
+void phase4_run(V90Phase4*s,const int16_t*x,unsigned n) {
+ for(unsigned i=0;i<n;++i){if(s->samples==140)s->rx.e_seen=1;v90_phase4_next(s,x[i]);}
+}
+unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
+
 ''')
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
-        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c']],'-lm','-o',str(so)],check=True)
+        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90shell.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)
     lib.create.argtypes=[cbtype];lib.create.restype=C.c_void_p
     lib.run.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint]
-    for name in ['rate','acquired','destroy']:getattr(lib,name).argtypes=[C.c_void_p]
+    lib.phase4_create.argtypes=[cbtype];lib.phase4_create.restype=C.c_void_p
+    lib.phase4_run.argtypes=lib.run.argtypes
+    for name in ['rate','acquired','destroy','phase4_acquired']:getattr(lib,name).argtypes=[C.c_void_p]
     os.environ['SIPFAX_V90_UPSTREAM_RATE']='7200'
     rng=np.random.default_rng(9072)
     for fraction in [0,.25,.5,.75]:
@@ -93,5 +107,11 @@ unsigned acquired(V90Upstream*s){return s->b1_seen;}
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
             assert lib.acquired(s)
             assert received==expected,(fraction,[len(x) for x in received])
+        finally:lib.destroy(s)
+        received.clear();s=lib.phase4_create(cb)
+        try:
+            lib.phase4_run(s,pcm,len(pcm))
+            assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
+            assert received==expected, 'Pre-E replay changed PPP data'
         finally:lib.destroy(s)
 print('PASS: 7200 PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

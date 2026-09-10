@@ -1416,3 +1416,22 @@ work/v90_sll_rtcp_summary.py handles LinuxSLL/IPv4 UDP and reuses the tested
 RTCP report decoder. All workers terminal; next investigation should focus
 on actual ATA receive behavior or a controlled alternate transport path,
 rather than attributing the loss to switch CRC errors without evidence.
+
+## Failed-call timing audit narrows next training investigation (2026-09-10 UTC)
+
+Private SLL RTP audit of v90-switch-call.pcap finds3039downstream PT0 packets
+SSRC1823421705, no sequence discontinuities and no timestamp discontinuities
+(all160sample steps). Interpacket spacing18.0318..21.9221ms. The RTCP interval
+with cumulative loss+2 covers231sequence advances/231captured packets and
+19.1448..20.9119ms spacing. Thus no PBX-visible gap or reordering explains the
+reported additional loss. This remains a PBX observation, not ATA-wire proof.
+Saved work/v90_switch_timing.py and work/v90-switch-call-timing.json.
+
+Reviewed server log: first Ja CRCvalid, Sd/Sbar/TRN1d/Jd begins5.022s;
+caller S9.227375s, DIL stage1 at9.2295s, first S/Sbar9.379875s, caller retrain
+10.649875s. Second attempt reaches DIL stage1 again and retrains25.374875s;
+subsequent retries repeatedly return to ranging. No initial Phase4 completion
+or PPP in this failed call. This failure precedes the B1 watchdog/data path.
+Saved latest native16487 TX/RX captures privately, each970752bytes
+(60.672seconds at8kHz16bit), for offline Phase3/DIL investigation.
+No service/network changes, no calls/workers started or left live this turn.

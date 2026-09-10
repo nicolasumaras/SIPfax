@@ -1116,3 +1116,12 @@ Read FreePBX eth0 offload state, then enabled a bounded diagnostic: systemd v90-
 Started physical capture79530 LIVE at /tmp/v90-no-txoffload-physical.pcap,360sbound. Fresh call893de5c6-e0bd-4f83-9edc-f588773903c8 connected00:04:25.526UTC, Windows0x1060000 reports41296bps despite unchanged42667ceiling, native14957/pppd14958; initial errors0. Dial75927 terminal, public probe still400. Prefix now validates all2202PBX outbound UDP checksums and2204ATA inbound packets. Fixed private UDP audit to skip IP fragments/truncated records before checksum evaluation; initial three apparent invalid ATA datagrams were not valid complete UDP inputs. ATA RTCP already reports cumulative loss1, so no claim offload removal fixes loss.
 
 Six-request healthworker81975 LIVE, work/v90_no_txoffload_health.py -> work/v90-no-txoffload-health.json; index0passed2.609344s. Preserve call14957, capture79530, health81975 and restoration timer. Runtime2f6213csoft receiver unchanged. Ethernet-topology answer pending. Goal active.
+
+
+## Offload experiment negative; exact settings restored (2026-09-10 UTC)
+
+Previous turn started the scoped FreePBX TX-offload comparison. Health81975 completed6requests:4pass,2timeouts (indices3/4), then index5recovered2.617375s. Stopped capture79530 after test:30141captured/30208received/0kernel drops. Disconnected call893de5c6 successfully (65053terminal), verified no native/pppd and sipfax active.
+
+Restored FreePBX eth0 TX checksum offload manually before the fallback deadline. `diff -u /tmp/v90-offload-before.txt /tmp/v90-offload-restored.txt` returns no difference, including dependent TSO/UFO flags restored on; stopped v90-offload-restore.timer only after exact verification. No temporary network setting remains.
+
+Final complete UDP datagrams validate:15071fromATA,15068fromPBX, none with invalid checksums after excluding fragments/truncated records. SixtyATA RTCP reports show cumulative loss0->19. PBX->ATA G.71114988packets has no sequence/timestamp gaps; ATA->PBX14991packets has no sequence gaps and a single startup timestamp step120rather than160 at+0.020035s. This negative experiment does not support TX checksum offload as the loss cause; it does not establish wire reception or distinguish post-host network loss from ATA accounting/handling. Final metadata work/v90-no-txoffload-final-control.json and work/v90-no-txoffload-final-rtp.json. All experiment workers/captures/timers terminal; server idle. Runtime2f6213c/ceiling42667unchanged. Ethernet topology answer remains pending. Goal active.

@@ -216,29 +216,42 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
         if(s->receive_bits)s->receive_bits(s->opaque,valid?bits:NULL);
     }
 }
-/* Estimate carrier slope from the known B1 before replaying it. A single
- * whole-frame phase estimate leaves a transient large enough to misclassify
- * outer points at higher rates. Divide out reference energy so shell weights
- * cannot move the two half-frame time centres. */
+/* Fit gain, phase and carrier slope to the known B1 by minimizing waveform
+ * squared error. Dividing each observation by its reference point amplifies
+ * noise and intersymbol distortion on inner points and biases the slope.
+ * Maximizing complex cross-correlation gives the least-squares fit for each
+ * frequency, with gain/phase referenced to the first B1 symbol. */
+static double b1_fit(V90Qam8Stream *s,double frequency,double *gain,double *phase)
+{
+    double r=0,j=0,energy=0;
+    for(unsigned i=0;i<128;++i) {
+        unsigned n=(s->b1.position+i)%128;
+        double rr,ri;point(s->b1.labels[i],&rr,&ri);
+        double ar=s->b1.re[n]*rr+s->b1.im[n]*ri;
+        double ai=s->b1.im[n]*rr-s->b1.re[n]*ri;
+        double cs=cos(frequency*i),sn=sin(frequency*i);
+        r+=ar*cs+ai*sn;j+=ai*cs-ar*sn;energy+=rr*rr+ri*ri;
+    }
+    *gain=hypot(r,j)/energy;*phase=atan2(j,r);return r*r+j*j;
+}
 static void b1_carrier(V90Qam8Stream *s,double *gain,double *phase,double *frequency)
 {
-    double re[128],im[128],hr[2]={0,0},hi[2]={0,0};
-    for(unsigned i=0;i<128;++i) {
-        unsigned j=(s->b1.position+i)%128;
-        double rr,ri;point(s->b1.labels[i],&rr,&ri);
-        double energy=rr*rr+ri*ri;
-        re[i]=(s->b1.re[j]*rr+s->b1.im[j]*ri)/energy;
-        im[i]=(s->b1.im[j]*rr-s->b1.re[j]*ri)/energy;
-        hr[i/64]+=re[i];hi[i/64]+=im[i];
+    /* Search the carrier loop's supported interval, then refine the best
+     * coarse cell. The high-correlation B1 gate bounds the initial offset. */
+    double best=-1,center=0;
+    for(int step=-20;step<=20;++step) {
+        double f=step*.001,value=b1_fit(s,f,gain,phase);
+        if(value>best){best=value;center=f;}
     }
-    *frequency=atan2(hi[1]*hr[0]-hr[1]*hi[0],hr[1]*hr[0]+hi[1]*hi[0])/64;
-    double r=0,j=0;
-    for(unsigned i=0;i<128;++i) {
-        double cs=cos(*frequency*i),sn=sin(*frequency*i);
-        r+=re[i]*cs+im[i]*sn;j+=im[i]*cs-re[i]*sn;
+    double lo=fmax(-.02,center-.001),hi=fmin(.02,center+.001);
+    for(unsigned iteration=0;iteration<24;++iteration) {
+        double a=lo+(hi-lo)/3,b=hi-(hi-lo)/3;
+        double va=b1_fit(s,a,gain,phase),vb=b1_fit(s,b,gain,phase);
+        if(va<vb)lo=a;else hi=b;
     }
-    *gain=hypot(r,j)/128;*phase=atan2(j,r);
+    *frequency=(lo+hi)/2;b1_fit(s,*frequency,gain,phase);
 }
+
 int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
 {
     uint64_t index=s->symbols++;

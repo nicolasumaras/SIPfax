@@ -264,3 +264,22 @@ boundaries, unused tuples and output bounds. Rate-specific B1, continuous
 including fractional timing, carrier/gain changes, clock drift and intersymbol
 interference. The q-bit count is explicit in acquisition and PPP delivery so
 uncoded bits remain in parser order throughout. The first 19,200-bit/s hardware call authenticated PPP, fetched an external page, verified a 32 KiB download in 7.476 seconds and sixteen distinct 1 KiB upstream request payloads. It disconnected cleanly after 39.527 seconds with zero Windows CRC or alignment errors. Native CP confirmed 49.333 kbit/s downstream. All 3,415 downstream primary payloads matched across FreePBX, as did the forwarded upstream suffix after eleven early-media packets. The 13,763-packet capture had zero kernel drops and no RTP sequence gaps. CT105 now retains the experimental 19,200 receiver, with the validated 16,800 binary saved for rollback. The first sustained 19,200-bit/s test failed after twelve successful download/upload cycles (384 KiB downloaded and 12 KiB of upstream payloads). The thirteenth 32 KiB download timed out after 30.004 seconds with 18,681 bytes received. Windows reported eight CRC errors and one alignment error at 168.161 seconds; the harness disconnected cleanly. All 9,872 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX; the 39,690-packet capture had zero kernel drops and no RTP sequence gaps. Native logs show a rate renegotiation retaining 49.333 kbit/s downstream. B1 acquisition succeeded afterward, but offline replay of the recorded post-renegotiation audio reproduced poor recovery: only two valid PPP frames were decoded. This does not yet establish the cause of the earlier downstream CRC errors. Post-call ATA counters reported 128 lost segments, one underflow and one FIFO drop, without event timing. The short-call success therefore does not establish sustained 19,200 reliability.
+
+
+## B1 carrier fitting after the 19,200 soak
+
+The previous estimator divided observations by individual B1 reference points
+and estimated slope from two half-frame averages. This weights disturbances on
+inner points heavily. The revised estimator minimizes known-waveform squared
+error: a bounded frequency search maximizes complex cross-correlation, then
+extracts gain and phase referenced to the first B1 symbol.
+
+An independent 48-trial noisy-constellation test measures frequency RMSE of
+0.00012064 rad/symbol, versus 0.00020290 with the previous estimator, and checks
+noiseless signed offsets, gain/phase and circular B1 history. Existing waveform
+tests include clock drift and intersymbol interference. Replaying the failed
+call after renegotiation now yields nine valid PPP frames versus two; the best
+timing lane rejects one shell versus 140. Before renegotiation, replay yields
+483 frames versus 481 and the best lane rejects 35 shells versus 187. This
+improves receiver recovery in the saved recording; it does not yet prove the
+original downstream CRC cause or sustained hardware reliability.

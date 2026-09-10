@@ -1435,3 +1435,24 @@ or PPP in this failed call. This failure precedes the B1 watchdog/data path.
 Saved latest native16487 TX/RX captures privately, each970752bytes
 (60.672seconds at8kHz16bit), for offline Phase3/DIL investigation.
 No service/network changes, no calls/workers started or left live this turn.
+
+## Failed DIL samples match caller descriptor and outgoing RTP (2026-09-10 UTC)
+
+Offline native Ja decode of16487RX obtains CRCvalid147segment descriptor,
+LSP126/LTP126. Private independent DIL waveform reconstruction uses descriptor
+Ucodes, chord H/reference, training/sign patterns and explicit G.711 mu-law
+level formula; no transmitter generator reused. Expected cycle17334samples
+(2.16675s). Exact nativeTX matches: start121196(15.1495s),11363samples(1.420375s)
+until caller retrain; start207871(25.983875s),two complete17334sample cycles,
+then7820samples of a third. First match duration equals logged DIL-to-retrain
+interval. This verifies generated DIL against the decoded caller descriptor,
+not all upstream decoding assumptions or full V.90 compliance.
+
+Decoded PBX outgoing PT0 RTP forSSRC1823421705 to PCM independently. Both
+11363sample first excerpt and34668sample second excerpt match nativeTX exactly,
+at identical stream sample offsets121196 and207871. Combined with prior
+continuous sequences/timestamps, no transmitter-to-PBX waveform change was
+found in these failed training excerpts. Actual ATA playout/analog delivery
+remains unverified. Private scripts/results work/v90_16487_dil_audit.py,
+v90-16487-dil-audit.json, v90_16487_dil_wire.py, v90-16487-dil-wire.json.
+No live call, settings changes or deployment this turn; goal unfinished.

@@ -1344,3 +1344,28 @@ Executable SHA256 `1bacafcfc8e41db20ca94435d4c6cb7edad2bcd06e6e89ff39c8e1927fef8
 ZIP integrity and byte-for-byte EXE inclusion verified. Installation on XP is
 still pending; no remote installation capability is exposed by the current
 API. No calls or server configuration changes this turn. Goal remains active.
+
+## XP update and UniFi access verified; public internet over PPP passes (2026-09-10 UTC)
+
+User confirmed both access changes. XP health now reports 1.1.1.0; UDM root
+SSH key authentication works (`info` is absent but shell commands succeed).
+UDM eth10 is 10Gbps/full with zero reported MAC/UDMA/FEC errors; these are
+cumulative observations, not proof of the complete path. LLDP identifies
+USW Pro Max 16 PoE (6c:63:f8:6d:85:01), 192.168.1.2, uplink port18/SFP2.
+UDM bridge learns ATA MAC via eth10. Controller Mongo read-only projection
+of switch port_table identifies ATA 192.168.1.235/MAC5c:50:15:a8:db:ab on
+port4 at100Mbps. Switch root SSH rejects current key; no settings changed.
+
+Hardware attempt909a654c-dd05-4ac2-8e8b-08b2dc1cd6f2 connected at42600bps,
+PPP10.64.0.2/10.64.0.1, initialCRC1. Updated probe completed example.com HTTP200
+559bytes in1662ms. Three repeats passed with identical body SHA256
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d,
+elapsed4201/1085/1095ms; CRC rose to2 then stayed2. CT105 ppp0 capture confirms
+10.64.0.2 TCP connections/GETs and HTTP200 responses from172.66.147.243:80.
+Thus public internet over PPP now has direct path evidence, beyond a source
+address assertion. Capture42packets/0kernel drops; capture stopped withSIGINT,
+worker34128terminal. Dial worker8705 and repeatprobe77987terminal. API disconnect
+96891terminal statusDisconnected. Runtime remains5a98c1e. Private artifacts:
+work/v90-public-internet.pcap, v90-public-internet-probes.json,
+v90-public-internet-disconnect.json and attempt diagnosticsJSON.
+Reliability/long transfers/higher upstream remain unfinished; no completion claim.

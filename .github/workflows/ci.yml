@@ -35,9 +35,13 @@ jobs:
       - name: Test synthetic waveforms and committed training fixtures
         shell: bash
         run: |
-          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo linmodem-framing; do
+          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-shell v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
+      - name: Sanitize upstream shell mapping
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize
+          /tmp/v90-shell-sanitize
       - name: Test experimental soft receiver lifecycle
         run: |
           SIPFAX_V90_SOFT_RX=1 /usr/bin/python3 tools/tests/v90-e-recovery.py

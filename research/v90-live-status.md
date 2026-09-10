@@ -1620,3 +1620,16 @@ The packet capture contained 13,183 packets, zero kernel drops and no RTP sequen
 An earlier attempt (`82083e1e-6dc2-4c43-9fb8-48955a0a52bc`) returned Windows 676 before reaching the modem because FreePBX marked SIPfax unavailable during service restart. The wrapper now sends SIP OPTIONS and waits for the specific SIPfax contact to become available before dialing and after restoration. That readiness failure is not a modem test result.
 
 The reversible wrapper restored runtime `36577ed` at 24 kbit/s and its expected binary hash; FreePBX confirmed it available. The 26.4/echo candidate remains private and uncommitted. Next work is integration with regression coverage, then sustained hardware qualification. Full V.90 scope, higher upstream rates, broader reliability and future concurrent calls remain incomplete.
+
+
+## Integrated 26.4 kbit/s sustained result and deployment
+
+Revision `117ae76` passed CI run 34541455033 and the sustained hardware trial `c8bbf7b8-56f3-4049-8e15-c72483cfd548`. All 129 response hashes were independently verified: 64 downloads totaling 2 MiB, 64 upstream checks totaling 64 KiB, and a final PASS response. The call disconnected cleanly after 655.552 seconds. Windows reported 30 CRC errors and three alignment errors, with 195,672 bytes sent and 2,282,801 bytes received including protocol overhead.
+
+Native CP began at 49.333 kbit/s downstream. A completed renegotiation at 388.975–391.006 seconds reduced downstream CP to 48 kbit/s, and verified transfers continued. The subsequent error counters stayed at 30/3 through the end. Upstream was configured and process-verified at 26,400 bit/s throughout the call. This proves one sustained transfer run with rate recovery, not error-free maximum-rate operation. The final S indication at 665.802 seconds was associated with hangup and was not another completed renegotiation.
+
+The capture contained 137,445 packets, zero kernel drops and no RTP sequence gaps. All 34,218 downstream primary payloads matched through FreePBX/RED. All 34,220 forwarded upstream payloads matched the ATA sequence after eleven startup packets. Notebook connections were empty and SIPFAXRED registration was cleared after hangup; capture, HTTP fixture, trial and retrieval processes completed.
+
+The reversible trial initially restored `36577ed`. After result verification, `117ae76` was installed for continued development with `SIPFAX_V90_UPSTREAM_RATE=26400` and `SIPFAX_V90_LINE_ECHO=1`. The active service, expected binary SHA-256 `badbecb9aff6f50c1201b9eacc69865273cb932e91ac5441da596b0f005142e2`, configuration and FreePBX availability were checked. The previous runtime remains saved as `lm.pre-26400-integrated`, with its configuration in `/tmp/v90-upstream-before-26400-integrated.conf`.
+
+Full V.90 scope remains incomplete: higher upstream rates and symbol-rate coverage, broader reliability, general echo-delay acquisition/tracking, V.34 fallback and future concurrent calls still require work. The known additional synthetic-seed losses remain documented. No completion claim follows from this single sustained run.

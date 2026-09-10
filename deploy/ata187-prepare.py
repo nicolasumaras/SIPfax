@@ -24,14 +24,26 @@ EXPECTED = {
 }
 
 
-def profile_matches(response):
+def red_expectations(red):
+    if red is None: return {}
+    result = {'red': r'PLR red_enable\s+= ' + ('Enabled' if red else 'Disabled'),
+              'fec': r'PLR fec_enable\s+= Disabled'}
+    if red:
+        result.update(red_type=r'PLR red_payload_type\s+= 96',
+                      red_level=r'PLR red_level_voice\s+= 1',
+                      red_dir=r'PLR enable_dir\s+= TO_TELE')
+    return result
+
+
+def profile_matches(response, red=None):
     response = response.replace('\r', '')
     return all(re.search(r'^\s*' + value + r'\s*$', response, re.M)
-               for value in EXPECTED.values())
+               for value in dict(EXPECTED, **red_expectations(red)).values())
 
 
 class Console:
-    def __init__(self, channel):
+    def __init__(self, channel, red=None):
+        self.red = red
         self.channel = channel
         channel.settimeout(1)
         self.read(r'(?m)^[^\r\n]*# ')
@@ -64,15 +76,21 @@ class Console:
         return response
 
     def prepare(self):
-        changed = not profile_matches(self.command('show coding 2'))
+        changed = not profile_matches(self.command('show coding 2'), self.red)
         if changed:
-            for setting in SETTINGS:
+            settings = list(SETTINGS)
+            if self.red is not None:
+                settings += ['plr enable_dir to_tele', 'plr fec_enable off',
+                             'plr red_enable ' + ('on' if self.red else 'off')]
+                if self.red:
+                    settings += ['plr red_payload_type 96', 'plr red_level_voice 1']
+            for setting in settings:
                 self.command('set coding 2 ' + setting)
         # "show coding" reads the pending profile, not the active DSP copy.
         # Activate even when pending values match. The caller must exclude
         # another active ATA call because this rebuilds both FXS channels.
         self.command('activate')
-        if not profile_matches(self.command('show coding 2')):
+        if not profile_matches(self.command('show coding 2'), self.red):
             raise RuntimeError('Profile readback mismatch')
         return changed
 
@@ -106,8 +124,11 @@ def main():
                         raise
                     client.close()
                     time.sleep(0.5)  # Dropbear can briefly refuse a new session.
-            changed = Console(client.invoke_shell()).prepare()
-        result = {'status': 'ready', 'changed': changed, 'activated': True,
+            red = config.get('redundantAudio', False)
+            if not isinstance(red, bool):
+                raise ValueError('redundantAudio must be boolean')
+            changed = Console(client.invoke_shell(), red=red).prepare()
+        result = {'status': 'ready', 'changed': changed, 'activated': True, 'redundantAudio': red,
                   'elapsedMs': round((time.monotonic() - started) * 1000)}
         print(json.dumps(result), flush=True)
         syslog.syslog(syslog.LOG_INFO, json.dumps(result))

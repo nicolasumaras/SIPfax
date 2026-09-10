@@ -130,3 +130,52 @@ invocation during that answered call returned failure before SSH; no additional
 preparation appeared in the helper journal. The call still had 13 CRC errors and
 six ATA-reported losses, so this verifies automatic configuration and the busy
 guard, not elimination of the remaining audio impairments.
+
+### Experimental redundant audio bridge
+
+The optional `sipfax_red.py` service wraps PBX-to-ATA PCMU packets in RFC 2198
+redundancy with one previous 20 ms audio block (payload type 96). This is specific
+to the lab ATA187 diagnostic receive configuration; RED is not negotiated in the
+SIP SDP. Do not enable this route for arbitrary SIP devices. The native V.90
+modem and PPP server remain in CT105; this bridge runs on FreePBX.
+
+Install `sipfax_red.py` as root-owned mode 0644 at
+`/usr/local/lib/sipfax/sipfax_red.py` on FreePBX, and `sipfax-red.service` in
+`/etc/systemd/system/`. It uses the existing Python 2.7 or Python 3 standard
+library, Linux NFQUEUE number 105, and iptables. The service runs as root to own
+the packet rule. Its local control socket is root:asterisk mode 0660 inside a
+root-owned directory. Default source/ATA addresses are the development lab;
+change both ExecStart and ExecStopPost arguments for another deployment.
+
+Set `redundantAudio` to the JSON boolean `true` in CT105's protected
+`/etc/sipfax/ata187.json`, deploy the updated preparation helper, then merge
+`ata187-freepbx-red-route.conf.example` while preserving existing contexts.
+Run `systemctl daemon-reload` and `systemctl start sipfax-red` before dialing.
+Enable the service at boot only after validating the installation.
+
+The route prepares and activates the ATA before `Progress()`, reads its actual
+RTP destination, and registers that call through a fixed local command. Database
+access occurs in a separate control thread, never in the RTP loop. An absent
+service or invalid destination rejects setup. The hangup handler removes the
+registration. Unregistered traffic passes unchanged. A new call clears audio
+history, even if it reuses the previous call's port.
+
+The bridge accepts only the configured source/destination, a registered port,
+IPv4 without options/fragments, and 160-byte PCMU with a 12-byte RTP header.
+Other packets pass unchanged, preserving kernel checksum state. Redundant audio
+is included only for consecutive sequence numbers and 160-sample timestamps.
+No loss injection interface is installed in this service.
+
+Stopping removes the exact owned packet rule and queue. ExecStopPost and startup
+also clear an orphaned rule/socket under a process lock. Queue bypass and the
+kernel queue-full fail-open flag allow ordinary packets if the bridge is absent
+or overloaded. Restart begins without an active registration: existing calls
+may lose their modem connection, and seamless mid-call recovery is unverified.
+A subsequent call registers normally. This remains a single-call development
+route; the shared ATA activation and global registration are not a multicall
+implementation.
+
+For rollback, set `redundantAudio` to `false`, restore the ordinary route example,
+and invoke the normal preparation wrapper while idle to disable RED/FEC and
+activate the basic profile. Stop/disable `sipfax-red` after the call ends. With
+the new helper, omitted `redundantAudio` also means explicitly disabled.

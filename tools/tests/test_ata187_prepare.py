@@ -17,6 +17,8 @@ Packet loss conceal:    NONE
 VAD = Disabled
 EC                   = Disabled
 Tone detect = Disabled
+PLR red_enable = Disabled
+PLR fec_enable = Disabled
 '''
 
 
@@ -66,6 +68,20 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(ata.Console(channel).prepare())
         self.assertEqual(channel.commands[-2], 'activate')
         self.assertEqual(channel.commands[-1], 'show coding 2')
+
+    def test_red_profile_requires_all_receive_parameters(self):
+        profile = PROFILE.replace('PLR red_enable = Disabled', 'PLR red_enable = Enabled')
+        profile += 'PLR red_payload_type = 96\nPLR red_level_voice = 1\nPLR enable_dir = TO_TELE\n'
+        self.assertTrue(ata.profile_matches(profile, red=True))
+        self.assertFalse(ata.profile_matches(profile, red=False))
+        self.assertFalse(ata.profile_matches(profile.replace('= 96', '= 97'), red=True))
+        channel = FakeChannel(profile)
+        self.assertFalse(ata.Console(channel, red=True).prepare())
+        self.assertIn('activate', channel.commands)
+
+    def test_disabled_red_requires_readback(self):
+        self.assertTrue(ata.profile_matches(PROFILE, red=False))
+        self.assertFalse(ata.profile_matches(PROFILE.replace('PLR fec_enable = Disabled', ''), red=False))
 
     def test_setting_rejection_aborts(self):
         channel = FakeChannel('defaults', reject=True)

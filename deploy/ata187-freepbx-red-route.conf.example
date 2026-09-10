@@ -1,0 +1,27 @@
+; Optional replacement for the lab extension, once sipfax-red.service is installed
+; and CT105 ata187.json has redundantAudio=true. Merge contexts; preserve others.
+[from-internal-custom]
+exten => 12345678,1,NoOp(SIPfax with ATA187 redundant audio)
+ same => n,GotoIf($["${CUT(CHANNEL,-,1)}" != "PJSIP/23416874" & "${CUT(CHANNEL,-,1)}" != "PJSIP/63416874"]?dial)
+ same => n,Set(SIPFAX_ATA_LOCK=${TRYLOCK(sipfax-ata187)})
+ same => n,GotoIf($["${SIPFAX_ATA_LOCK}" != "1"]?busy)
+ same => n,Set(CHANNEL(hangup_handler_push)=sipfax-red-cleanup,s,1)
+ same => n,TrySystem(/usr/local/bin/sipfax-ata-prepare)
+ same => n,GotoIf($["${SYSTEMSTATUS}" != "SUCCESS"]?unavailable)
+ same => n,Progress()
+ same => n,Set(SIPFAX_RTP_DEST=${CHANNEL(rtp,dest)})
+ same => n,GotoIf($["${SIPFAX_RTP_DEST}" = ""]?unavailable)
+ same => n,Set(DB(SIPFAXRED/current)=${UNIQUEID}|${SIPFAX_RTP_DEST})
+ same => n,TrySystem(/usr/bin/python /usr/local/lib/sipfax/sipfax_red.py --sync --require-active)
+ same => n,GotoIf($["${SYSTEMSTATUS}" != "SUCCESS"]?unavailable)
+ same => n(dial),Dial(PJSIP/sipfax,60)
+ same => n,Hangup()
+ same => n(busy),Busy(2)
+ same => n,Hangup(17)
+ same => n(unavailable),Congestion(2)
+ same => n,Hangup(41)
+
+[sipfax-red-cleanup]
+exten => s,1,Set(SIPFAX_RED_UNUSED=${DB_DELETE(SIPFAXRED/current)})
+ same => n,TrySystem(/usr/bin/python /usr/local/lib/sipfax/sipfax_red.py --sync)
+ same => n,Return()

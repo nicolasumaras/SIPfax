@@ -7,7 +7,9 @@ the experimental thirty-two-point receiver.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental equalized 12,000 receiver. Broader qualification is required before changing the code default.
+The lab currently selects the experimental equalized 14,400 receiver after its
+first successful hardware test. Broader qualification is required before changing
+the code default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -180,7 +182,13 @@ Windows CRC/alignment errors. Native CP confirmed 49.333 kbit/s downstream.
 All 3,851 downstream primary payloads and the forwarded upstream suffix matched
 across FreePBX. The 15,520-packet capture had no sequence gaps or kernel drops.
 CT105 retains this experimental equalized 12,000 build, with the validated
-9,600 binary saved as rollback. Sustained 12,000 qualification remains pending.
+9,600 binary saved as rollback. A subsequent 677.614-second sustained call
+completed all 64 alternating checksummed 32 KiB downloads (2 MiB total) and
+64 verified 1 KiB upstream requests, followed by a clean disconnect. Native
+CP remained at 49.333 kbit/s downstream. Windows counted 19 CRC and one alignment
+error. All 35,322 downstream RTP primary payloads and the forwarded upstream
+suffix matched across FreePBX, with no sequence gaps or kernel drops in the
+141,866-packet capture. This is a successful soak, not error-free qualification.
 
 ## 14,400-bit/s foundation
 
@@ -193,5 +201,11 @@ is cross-checked exhaustively for M=1/2/3. Rate-specific B1, continuous
 36-bit decoding and native audio/MP integration now pass independent tests,
 including carrier offset/gain changes, reacquisition, fractional timing,
 both signs of 100 ppm clock drift and simulated intersymbol interference.
-Hardware interoperability at 14,400 is untested; the deployed receiver remains
-at 12,000 pending completion of its sustained test.
+The first 14,400 hardware call authenticated PPP, fetched an external page,
+verified a 32 KiB download in 7.532 seconds and all sixteen 1 KiB upstream
+request payloads, then disconnected cleanly after 44.374 seconds. Windows
+reported zero CRC/alignment errors; native CP confirmed 49.333 kbit/s downstream.
+All 3,657 downstream primary audio payloads and the forwarded upstream suffix
+matched across FreePBX. The 14,739-packet capture had no sequence gaps or kernel
+drops. CT105 retains the 14,400 build, with the validated equalized 12,000 binary
+saved for rollback. Sustained 14,400 testing remains outstanding.

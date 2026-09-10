@@ -1390,3 +1390,29 @@ controller projection. Saved work/unifi-ata-port-telemetry.txt and
 work/unifi-ata-port-baseline.txt. Next scoped call can compare live counter
 deltas with ATA RTCP loss. No calls, configuration changes, counter resets,
 port restarts or traffic shaping this turn; all diagnostic workers terminal.
+
+## Failed call with unchanged switch error counters (2026-09-10 UTC)
+
+Baseline switch telemetry immediately before attempt
+bb635443-a8b7-4b22-8aae-bc274808cd39, followed by telemetry during terminal
+failure. Dialworker64391 terminal Failed678 (remote did not respond); retraining
+occurred before PPP connection. PBX capture85296 stopped with SIGINT, terminal
+6131packets/0kernel drops. ATA RTCP13reports cumulative loss2->4; PBX12reports
+loss0 throughout. Source SSRCs1823421705 downstream/47342125 upstream.
+
+Port4 interval deltas RX2870/TX6564packets, RX630356/TX1629302bytes;
+RXerrors/TXerrors/RXdropped/TXdropped/link_down_count all zero delta.
+Uplink18 RX905975/TX386875packets, RX1316044316/TX30044773bytes, same five
+error/drop/link counters zero delta. Therefore the ATA-reported loss during
+this failed call is not accompanied by exported switch port error/drop/link
+increments. This does not establish actual wire delivery or exclude ATA
+receive/playout discards, unreported hardware loss, or modem software faults.
+No network changes. Server check idle (no lm/pppd), sipfax active.
+
+Private artifacts: work/unifi-call-before.txt, unifi-call-during.txt,
+v90-switch-call.pcap, v90-switch-call.pcap.rtcp.json,
+v90-switch-call-server.log and attemptdiagnosticsJSON. Private parser
+work/v90_sll_rtcp_summary.py handles LinuxSLL/IPv4 UDP and reuses the tested
+RTCP report decoder. All workers terminal; next investigation should focus
+on actual ATA receive behavior or a controlled alternate transport path,
+rather than attributing the loss to switch CRC errors without evidence.

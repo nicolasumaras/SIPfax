@@ -56,6 +56,9 @@ jobs:
           python3 tools/tests/v90-qam8-wave.py --16800
           python3 tools/tests/v90-qam8-wave.py --16800 --clock-drift
           python3 tools/tests/v90-qam8-wave.py --16800 --isi
+          python3 tools/tests/v90-qam8-wave.py --19200
+          python3 tools/tests/v90-qam8-wave.py --19200 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --19200 --isi
       - name: Sanitize upstream shell mapping
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize

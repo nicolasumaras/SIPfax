@@ -35,7 +35,7 @@ unsigned long long rejected(V90Qam8Stream*s){return s->rejected_frames;}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Trellis*s){return s->pairs;}
 ''')
-    if q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init'))
+    if q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init').replace('s,14400','s,19200'))
     elif m==14:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam56Frames').replace('v90_qam32_frames_init','v90_qam56_frames_init').replace('s,14400','s,16800'))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.trellis.restype=lib.frames.restype=C.c_void_p;lib.frames.argtypes=[C.c_uint];lib.destroy.argtypes=[C.c_void_p]
@@ -84,9 +84,6 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
                 if pair_fn(s,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb)):decoded.append((aa.value,bb.value))
             assert decoded[64:]==pairs[64:len(decoded)],(initial,noisy)
             lib.destroy(s)
-    if q_bits:
-        print('PASS: 96-point kernel, all states, noise, q=1 parser order, shell boundaries and rejection')
-        sys.exit(0)
     cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8))
     lib.stream.argtypes=[cbtype];lib.stream.restype=C.c_void_p
     lib.label.argtypes=[C.c_void_p,C.c_uint]
@@ -103,9 +100,12 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
         rings=oracle[sum(bits[i]<<i for i in range(k))]
         for p in range(4):
             pair=4*n+p+384;inv=pattern[(pair//32)%14] if pair%32==0 else 0
-            a=(previous+bits[k+1+3*p]+2*bits[k+2+3*p])%4
-            b=(a+2*bits[k+3*p]+((encoder&1)^inv))%4;previous=a
-            a+=4*rings[2*p];b+=4*rings[2*p+1];labels.extend([a,b])
+            g=k+(3+2*q_bits)*p
+            a=(previous+bits[g+1]+2*bits[g+2])%4
+            b=(a+2*bits[g]+((encoder&1)^inv))%4;previous=a
+            qa=sum(bits[g+3+j]<<j for j in range(q_bits))
+            qb=sum(bits[g+3+q_bits+j]<<j for j in range(q_bits))
+            a+=4*((rings[2*p]<<q_bits)|qa);b+=4*((rings[2*p+1]<<q_bits)|qb);labels.extend([a,b])
             y=converter[subset(points[a])][subset(points[b])];u=encoder&1
             encoder=(encoder>>1)^(y&1)^(((y>>1)&1)<<1)^((((y>>1)&1)^u)<<2)^(u<<3)
     import cmath
@@ -126,5 +126,5 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
             z=points[label];lib.v90_qam8_stream_symbol(s,z.real,z.imag)
         assert output==source[:33] and positions[0]==len(labels)+8
         lib.destroy(s)
-    print('PASS:',(k+12)*400,'B1, continuous 36-bit frames, gain/carrier/noise, source timing and reacquisition')
-print('PASS: 32 points, all trellis states, noise, 36-bit shell/differential mapping, all energy-bucket boundaries and rejection bounds')
+    print('PASS:',frame_bits*400,'B1, continuous 36-bit frames, gain/carrier/noise, source timing and reacquisition')
+print(f'PASS: {point_count} points, all trellis states, noise, {frame_bits}-bit shell/differential mapping, energy-bucket boundaries and rejection bounds')

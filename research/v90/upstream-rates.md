@@ -4,7 +4,8 @@ The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver; `14400` selects
 the experimental thirty-two-point receiver; `16800` selects the experimental
-fifty-six-point receiver.
+fifty-six-point receiver; `19200` selects the experimental ninety-six-point
+receiver with one uncoded bit per symbol.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
@@ -251,5 +252,9 @@ and 48 bits per mapping frame. The new kernel preserves seven-bit labels,
 including Q=2*ring+uncoded_bit. The inverse implements the clause 9.3.1 parser
 order: 28 shell bits followed by four groups of I1/I2/I3/Qa/Qb. Independent
 coordinate/trellis tests cover all states and labels; shell tests cover bucket
-boundaries, unused tuples and output bounds. Native acquisition is not enabled
-by this mapping foundation alone.
+boundaries, unused tuples and output bounds. Rate-specific B1, continuous
+48-bit frame decoding and PCM/MP integration now pass independent tests,
+including fractional timing, carrier/gain changes, clock drift and intersymbol
+interference. The q-bit count is explicit in acquisition and PPP delivery so
+uncoded bits remain in parser order throughout. Hardware validation at 19,200
+remains pending; the deployed server is still at 16,800.

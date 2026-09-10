@@ -1,4 +1,4 @@
-/* V.34 9.3/9.5 inverse for 7200/9600/12000, q=0, all high frames. GPL-2.0. */
+/* V.34 9.3/9.5 inverse for q=0/1, all high mapping frames. GPL-2.0. */
 #include <string.h>
 #include <math.h>
 #include "v90qam8.h"
@@ -81,20 +81,21 @@ int v90_qam96_frame(V90Qam96Frames *s,const uint8_t labels[8],uint8_t bits[48])
 
 static void point(unsigned label,double *re,double *im)
 {
-    static const double r[56]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3,5,5,-5,-5,-7,1,7,-1,1,-7,-1,7,-7,-3,7,3,-3,-7,3,7,-7,5,7,-5};
-    static const double j[56]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5,5,-5,-5,5,1,7,-1,-7,-7,-1,7,1,-3,7,3,-7,-7,3,7,-3,5,7,-5,-7};
+    static const double r[96]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3,5,5,-5,-5,-7,1,7,-1,1,-7,-1,7,-7,-3,7,3,-3,-7,3,7,-7,5,7,-5,5,-7,-5,7,1,9,-1,-9,9,1,-9,-1,-3,9,3,-9,9,-3,-9,3,-7,-7,7,7,5,9,-5,-9,9,5,-9,-5,-11,1,11,-1,1,-11,-1,11};
+    static const double j[96]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5,5,-5,-5,5,1,7,-1,-7,-7,-1,7,1,-3,7,3,-7,-7,3,7,-3,5,7,-5,-7,-7,-5,7,5,9,-1,-9,1,1,-9,-1,9,9,3,-9,-3,-3,-9,3,9,-7,7,7,-7,9,-5,-9,5,5,-9,-5,9,1,11,-1,-11,-11,-1,11,1};
     *re=r[label];*im=j[label];
 }
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate)
 {
     /* V.34 10.1.3.1: zero encoders, scrambled ones, last J=7 data frame.
-     * 16 mapping frames, 18 through 42 bits / 8 symbols. No auxiliary channel. */
+     * 16 mapping frames, 18 through 48 bits / 8 symbols. No auxiliary channel. */
     memset(s,0,sizeof(*s));
-    if(rate!=7200 && rate!=9600 && rate!=12000 && rate!=14400 && rate!=16800)return 0;
-    s->m=rate==7200?2:rate==9600?3:rate==12000?5:rate==14400?8:14;s->k=rate/400-12;
-    unsigned frame_bits=s->k+12;
+    if(rate!=7200 && rate!=9600 && rate!=12000 && rate!=14400 && rate!=16800 && rate!=19200)return 0;
+    s->m=rate==7200?2:rate==9600?3:rate==12000?5:rate==14400?8:rate==16800?14:12;s->q=rate==19200;
+    s->k=rate/400-12-8*s->q;
+    unsigned frame_bits=s->k+12+8*s->q;
     V90Shell shell;v90_shell_init(&shell,s->m,s->k);
-    uint8_t bits[672];unsigned state=0,previous=0;
+    uint8_t bits[768];unsigned state=0,previous=0;
     for(unsigned i=0;i<16*frame_bits;++i)
         bits[i]=1^(i>=5?bits[i-5]:0)^(i>=23?bits[i-23]:0);
     for(unsigned f=0;f<16;++f) {
@@ -102,10 +103,13 @@ int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate)
         for(unsigned k=0;k<s->k;++k)index|=(uint32_t)bits[frame_bits*f+k]<<k;
         v90_shell_encode(&shell,index,rings);
         for(unsigned p=0;p<4;++p) {
-            unsigned k=frame_bits*f+s->k+3*p,i=8*f+2*p;
+            unsigned k=frame_bits*f+s->k+(3+2*s->q)*p,i=8*f+2*p;
             unsigned a=(previous+bits[k+1]+2*bits[k+2])&3;
             unsigned u=state&1,b=(a+2*bits[k]+(u^(i==0)))&3;
-            s->labels[i]=a+4*rings[2*p];s->labels[i+1]=b+4*rings[2*p+1];
+            unsigned qa=0,qb=0;
+            for(unsigned j=0;j<s->q;++j){qa|=(unsigned)bits[k+3+j]<<j;qb|=(unsigned)bits[k+3+s->q+j]<<j;}
+            s->labels[i]=a+4*((rings[2*p]<<s->q)|qa);
+            s->labels[i+1]=b+4*((rings[2*p+1]<<s->q)|qb);
             unsigned y1=((a&1)&((b&1)^1))^(a>>1)^(b>>1),y2=a&1;
             state=(state>>1)^y1^(y2<<1)^((y2^u)<<2)^(u<<3);previous=a;
         }
@@ -160,12 +164,12 @@ static int normalized(V90Qam8Stream *s,double re,double im,double *ar,double *ai
         c->phase=remainder(c->phase+c->frequency,2*acos(-1.0));return 0;
     }
     double best=1e300,rr=1,ri=1;
-    for(unsigned i=0;i<4*s->b1.m;++i) {
+    for(unsigned i=0;i<(4*s->b1.m<<s->b1.q);++i) {
         double r,j;point(i,&r,&j);
         double distance=(*ar-r)*(*ar-r)+(*ai-j)*(*ai-j);
         if(distance<best){best=distance;rr=r;ri=j;}
     }
-    if(s->b1.m>=14 && best<.25)
+    if((s->b1.m>=14 || s->b1.q) && best<.25)
         v90_equalizer_adapt(&s->equalizer,rr,ri,.01);
     double error=0;
     /* Track against the decided point, not average magnitude: ring energy
@@ -188,7 +192,8 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
     unsigned a,b;
     /* B1 is the last 64 pairs of J=7. The following data starts at V0[0]. */
     unsigned inv=v90_trellis_inversion((unsigned)((s->pairs+384)%448),0);
-    int ready=s->b1.m==14?
+    int ready=s->b1.q==1?
+        v90_trellis_qam96_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):s->b1.m==14?
         v90_trellis_qam56_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):s->b1.m==8?
         v90_trellis_qam32_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):s->b1.m==5?
         v90_trellis_qam20_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):s->b1.m==3?
@@ -198,7 +203,8 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
     if(ready!=1)return;
     s->labels[s->count++]=(uint8_t)a;s->labels[s->count++]=(uint8_t)b;
     if(s->count==8) {
-        uint8_t bits[42];int valid=s->b1.m==14?
+        uint8_t bits[48];int valid=s->b1.q==1?
+            v90_qam96_frame(&s->frames,s->labels,bits):s->b1.m==14?
             v90_qam56_frame(&s->frames,s->labels,bits):s->b1.m==8?
             v90_qam32_frame(&s->frames,s->labels,bits):s->b1.m==5?
             v90_qam20_frame(&s->frames,s->labels,bits):s->b1.m==3?
@@ -259,7 +265,8 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
         v90_equalizer_train(&s->equalizer,xr,xi,tr,ti);
     }
     v90_trellis_init(&s->trellis);
-    if(s->b1.m==14)v90_qam56_frames_init(&s->frames,0);
+    if(s->b1.q==1)v90_qam96_frames_init(&s->frames,0);
+    else if(s->b1.m==14)v90_qam56_frames_init(&s->frames,0);
     else if(s->b1.m==8)v90_qam32_frames_init(&s->frames,0);
     else if(s->b1.m==5)v90_qam20_frames_init(&s->frames,0);
     else if(s->b1.m==3)v90_qam12_frames_init(&s->frames,0);

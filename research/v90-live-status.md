@@ -1540,3 +1540,19 @@ isolated toport1. Existing notebook cable remains onport2/line23416874 for
 subsequenttests. No network/server settings changed. Serververifiedidle,
 sipfaxactive. Private work/v90-port2.pcap,v90-port2-rtcp.jsonl,
 ata-port2-retained.txt and attemptdiagnosticsJSON. Allworkers terminal.
+
+## Pass-through signaling distinction checked (2026-09-10 UTC)
+
+Cisco employee NSE passthrough description at
+https://community.cisco.com/t5/collaboration-knowledge-base/nse-passthrough/ta-p/3117916
+explains NSE192 codec/VAD/jitter switchover and NSE193 echo-canceller disabling;
+it describes Cisco proprietary interoperability, not a verified ATA187 fix.
+Older ATA187 overview URL currently redirects to Cisco retired-products page.
+Existing firmware strings include NSE192/193/194 and NSE200/201/202, but that
+alone does not establish supported provisioning or an exposed runtime control.
+Captured SDP in v90-ptime10-final.pcap offersPCMU/PCMA/G729/telephone-event,
+noX-NSE/negotiated NSE payload. Existing ATA logs already document PASSTHRU
+and Voice->VBD on2100-PR-Net. Therefore neither selecting existingPASSTHRU
+again nor sending arbitrary unnegotiated NSE is justified by these observations.
+Need establish actual supported switchover/control before experimenting.
+No livecall, injection, configchange or deployment this turn.

@@ -52,6 +52,10 @@ unsigned b1_label(V90Qam8B1*s,unsigned i){return s->labels[i];}
 void *stream(void (*cb)(void*,const uint8_t*)) {
  V90Qam8Stream*s=malloc(sizeof(*s));v90_qam8_stream_init(s);s->receive_bits=cb;return s;
 }
+void *stream_rate(unsigned rate,void (*cb)(void*,const uint8_t*)) {
+ V90Qam8Stream*s=malloc(sizeof(*s));if(!v90_qam_stream_init_rate(s,rate)){free(s);return NULL;}s->receive_bits=cb;return s;
+}
+void *b1_rate(unsigned rate){V90Qam8B1*s=malloc(sizeof(*s));if(!v90_qam_b1_init_rate(s,rate)){free(s);return NULL;}return s;}
 uint64_t output_symbol(V90Qam8Stream*s){return s->output_symbol;}
 uint64_t rejected(V90Qam8Stream*s){return s->rejected_frames;}
 uint64_t count(V90Trellis*s){return s->pairs;}
@@ -241,4 +245,48 @@ uint64_t count(V90Trellis*s){return s->pairs;}
     lib.destroy(f)
     print('PASS: all 4096 twelve-point shell frames, differential bits and rejection bounds')
     print('PASS: twelve-point kernel, coordinate-derived Figure 9 subsets, Table 13, all states and noise')
+    lib.stream_rate.argtypes=[C.c_uint,callback_type];lib.stream_rate.restype=C.c_void_p
+    lib.b1_rate.argtypes=[C.c_uint];lib.b1_rate.restype=C.c_void_p
+    register=0;ones12=[]
+    for _ in range(384):
+        b=1^((register>>22)&1);register=(register<<1)&0x7fffff
+        if b:register^=1|(1<<18)
+        ones12.append(b)
+    data12=ones12+[rng.randrange(2) for _ in range(24*700)]
+    source12=[data12[i:i+24] for i in range(0,len(data12),24)]
+    previous=state=0;labels12=[]
+    for frame,v in enumerate(source12):
+        shell=shells12[sum(v[i]<<i for i in range(12))]
+        for p in range(4):
+            i=4*frame+p+384;inv=pattern[(i//32)%14] if i%32==0 else 0
+            a=(previous+v[13+3*p]+2*v[14+3*p])%4
+            b=(a+2*v[12+3*p]+((state&1)^inv))%4;previous=a
+            x=a+4*shell[2*p];y=b+4*shell[2*p+1];labels12.extend([x,y])
+            t=converter[subset(point12(x))][subset(point12(y))];u=state&1
+            state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)
+    b1=lib.b1_rate(9600)
+    assert [lib.b1_label(b1,i) for i in range(128)]==labels12[:128]
+    lib.destroy(b1)
+    for rate in [0,4800,7201,9599,9601,12000]:assert not lib.b1_rate(rate)
+    for frequency in [-1,0,1]:
+        received=[];positions=[]
+        def callback12(_,bits):
+            received.append(list(bits[:24]) if bits else None)
+            positions.append(lib.output_symbol(stream))
+        cb=callback_type(callback12);stream=lib.stream_rate(9600,cb)
+        for i,label in enumerate(labels12):
+            z=point12(label)*(1+.06*i/len(labels12))*cmath.exp(1j*(.7+2*cmath.pi*frequency*i/3200))
+            z+=complex(rng.gauss(0,.02),rng.gauss(0,.02))
+            assert lib.v90_qam8_stream_symbol(stream,z.real,z.imag)==int(i>=127)
+        assert received==source12[:len(received)] and len(received)==(len(labels12)-126)//8,frequency
+        assert positions==[8*(i+1)-1 for i in range(len(received))]
+        assert lib.rejected(stream)==0
+        assert lib.v90_qam8_stream_symbol(stream,float('nan'),0)==-1
+        received.clear();positions.clear()
+        for label in labels12[:400]:
+            z=point12(label);lib.v90_qam8_stream_symbol(stream,z.real,z.imag)
+        assert received==source12[:34]
+        assert positions[0]==len(labels12)+8
+        lib.destroy(stream)
+    print('PASS: 9600 B1, continuous 24-bit frames, carrier offset/gain/noise and reacquisition')
 print('PASS: continuous B1/data decoding, carrier offset/gain drift/noise, source positions and reacquisition')

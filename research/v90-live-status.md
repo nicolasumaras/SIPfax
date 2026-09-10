@@ -1327,3 +1327,20 @@ Private artifacts: `work/v90-b1-watchdog-health.json`, `...-live.log`,
 `...-disconnect.json`, and the attempt diagnostics JSON. All workers terminal;
 disconnect confirmed by API and no lm/pppd processes; sipfax remains active.
 UniFi SSH still denied for the existing key; awaiting access clarification.
+
+## Identifiable XP probe-fix package prepared (2026-09-10 UTC)
+
+Fetched both repositories: no new unmerged SIPfax work appeared, and DialUpLab
+still exposes no remote restart, update or probe-cancel endpoint. Existing
+probe-recovery executable shared version 1.1.0.0 with the original, preventing
+health-based deployment verification. DialUpLab commit `6f588f7` bumps XP to
+1.1.1 (health/assembly 1.1.1.0), preserving the bind-retry fix. Windows CI run
+34427636627 passed core tests, XP diagnostics tests and XP executable build;
+full installer packaging was still in progress at last observation.
+Downloaded the XP artifact, verified embedded version 1.1.1.0 and produced
+`outputs/DialUpLab-XP-probe-fix-1.1.1.zip` with EXE, license and instructions to
+replace only the EXE after stopping the application, preserving settings.
+Executable SHA256 `1bacafcfc8e41db20ca94435d4c6cb7edad2bcd06e6e89ff39c8e1927fef8d0f`.
+ZIP integrity and byte-for-byte EXE inclusion verified. Installation on XP is
+still pending; no remote installation capability is exposed by the current
+API. No calls or server configuration changes this turn. Goal remains active.

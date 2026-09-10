@@ -331,3 +331,25 @@ PPP frames per waveform, including after delayed-E replay. The staged-clock hard
 
 CT105 now runs `047d95e` at 21,600 bit/s; the prior build remains available
 as `lm.pre-staged-clock`, and the validated 19,200 binary as `lm.pre-21600`.
+
+
+## Steady-state phase correction and G.711 coverage
+
+After three seconds from B1, the 19,200 and 21,600 profiles now reduce the
+phase correction gain from 0.1 to 0.02 while preserving phase/frequency state.
+The first 21,600 recording yields 202 valid PPP frames instead of 193 with
+integrator narrowing alone (188 before either change); the best timing lane
+rejects five shells instead of eight. Recorded 19,200 renegotiation recovery
+retains all nine previously decoded frames.
+
+The waveform test can now encode/decode G.711 mu-law before the native receiver,
+using an independent segmented codec with all-code reconstruction checks.
+The extended 19,200 drift/distortion/PCMU case loses frames with the previous
+phase gain and passes with this change. Both clock-offset signs and delayed-E
+replay recover all expected frames. The equivalent 21,600 case also passes.
+This revision has not yet been tested on hardware; the ongoing soak uses the
+preceding integrator-only revision.
+
+An exploratory 24,000 profile implements the 256-point M=8/K=24/q=3 mapping,
+B1 and basic PCM path, but still loses frames in extended distorted-clock
+tests. That work remains outside the committed receiver until qualified.

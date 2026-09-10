@@ -175,7 +175,10 @@ static void symbol(V90Upstream *s,long time,double re,double im)
                 if(l->timing_frequency<-.002)l->timing_frequency=-.002;
             }
             l->previous_time=l->next_symbol;
-            l->next_symbol+=10+l->timing_frequency+.1*error;
+            /* Narrow the phase correction with the tracking integrator so
+             * steady-state timing noise does not dominate the denser QAM. */
+            double phase_gain=s->rate>=19200 && q->symbols-q->origin>=9600?.02:.1;
+            l->next_symbol+=10+l->timing_frequency+phase_gain*error;
             l->previous_re=ar;l->previous_im=ai;l->have_timing_previous=locked>=0;
             if(locked==1 && !s->b1_seen) {
                 s->b1_seen=1;s->b1_sample=s->samples;s->b1_score=q->score;

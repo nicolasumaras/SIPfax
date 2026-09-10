@@ -79,6 +79,19 @@ def pulse(t):
     if abs(abs(t)-1/(4*beta))<1e-9:
         return beta/math.sqrt(2)*((1+2/math.pi)*math.sin(math.pi/(4*beta))+(1-2/math.pi)*math.cos(math.pi/(4*beta)))
     return (math.sin(math.pi*t*(1-beta))+4*beta*t*math.cos(math.pi*t*(1+beta)))/(math.pi*t*(1-16*beta*beta*t*t))
+# Independent G.711 mu-law quantization, using the 14-bit segmented mapping.
+# Reference (Sun/Sox codec):
+# https://github.com/python/cpython/blob/3.12/Modules/audioop.c
+def ulaw_encode(sample):
+    value=sample>>2;mask=0x7f if value<0 else 0xff
+    value=abs(value)+33;segment=max(0,value.bit_length()-6)
+    return (0x7f if segment>=8 else (segment<<4)|((value>>(segment+1))&15))^mask
+def ulaw_decode(code):
+    value=code^255;magnitude=(((value&15)<<3)+132)<<((value>>4)&7)
+    return 132-magnitude if value&128 else magnitude-132
+if '--pcmu' in sys.argv:
+    assert [ulaw_decode(x) for x in [0,128,127,255]]==[-32124,32124,0,0]
+    assert all(ulaw_encode(ulaw_decode(x))==(255 if x==127 else x) for x in range(256))
 with tempfile.TemporaryDirectory() as td:
     d=Path(td);w=d/'wrapper.c';so=d/'receiver.so'
     w.write_text('''#include <stdlib.h>
@@ -122,6 +135,8 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
         wave=np.rint((900 if rate>=16800 else 1800)*(base*carrier).real+rng.normal(0,1,len(base)))
         assert np.max(abs(wave))<32768,'synthetic PCM clipping'
         pcm=wave.astype(np.int16)
+        if '--pcmu' in sys.argv:
+            pcm=np.fromiter((ulaw_decode(ulaw_encode(int(x))) for x in pcm),dtype=np.int16)
         received=[]
         cb=cbtype(lambda _,p,n:received.append(bytes(p[:n])))
         s=lib.create(cb)
@@ -139,4 +154,4 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
             assert received==expected, 'Pre-E replay changed PPP data'
         finally:lib.destroy(s)
-print('PASS: clock drift '+str(clock_drift)+'; '+str(rate)+' PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+print('PASS: PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

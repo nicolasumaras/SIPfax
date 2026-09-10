@@ -1456,3 +1456,26 @@ found in these failed training excerpts. Actual ATA playout/analog delivery
 remains unverified. Private scripts/results work/v90_16487_dil_audit.py,
 v90-16487-dil-audit.json, v90_16487_dil_wire.py, v90-16487-dil-wire.json.
 No live call, settings changes or deployment this turn; goal unfinished.
+
+## Retained ATA counters confirm receive/playout disruption in failed call
+
+Read-only MXP diagnostics after call, worker91000terminal. RXlastSSRC1823421705
+matches failed16487call/capture, so counters are attributed to that stream.
+ATA3033voicepackets, RXmaxinterarrival70ms/min0ms, networklost4/seqgaps4,
+invalidheaders/SSRC/payload/routing/microoverflow0. Lastsequence23536 and
+lasttimestamp485760. Playout remains VPtype1(adjustduring silence), average15ms,
+lostsegments35, FIFO droppedsegments19, underflows5, starveevents7,
+adaptiveincreases2/decreases7, profilechanges2. These retained counters were
+read after the call, so this SSH diagnostic session cannot have caused its
+reported timing disruption. PBX spacing for same stream18.0..21.9ms and
+switch error/drop/link counters unchanged were established previously.
+
+The ATA's own receive/playout observations now strengthen the case for a
+transport/ATA playback problem; they do not prove the physical location of
+loss or the absence of modem software defects. Existing stored-profile
+fixedbuffer tests did not change liveVPtype, so do not repeat that experiment
+without a new verified runtime control. Requested availability/model of an
+alternate SIP ATA for a controlled comparison using the same XP modem.
+Private work/ata-16487-retained-diagnostics.txt. No livecalls or settings
+changes this turn; no new blocking-status declaration while comparison
+options remain under investigation.

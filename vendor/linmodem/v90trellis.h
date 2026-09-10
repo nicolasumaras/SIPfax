@@ -1,6 +1,6 @@
 #ifndef V90TRELLIS_H
 #define V90TRELLIS_H
-/* Experimental four/eight-point, 16-state V.34 upstream kernel. GPL-2.0.
+/* Experimental four/eight/twelve-point, 16-state V.34 upstream kernel. GPL-2.0.
  * Caller supplies carrier/gain-aligned pairs and the known V0 inversion bit.
  * Acquisition, superframe synchronization and PPP delivery are external.
  * Four-point native integration is opt-in with SIPFAX_V90_SOFT_RX=1.
@@ -28,6 +28,12 @@ int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
  * Ring decisions are nearest within a quadrant, not joint shell decoding. */
 int v90_trellis_qam8_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                          unsigned inversion,unsigned *a,unsigned *b);
+/* Twelve-point minimum constellation for 9600/3200, q=0, M=3.
+ * Quarter points (1,1),(-3,1),(1,-3); labels retain ring index in bits 2..3.
+ * Same return contract as qam8_pair. Reset before changing constellation.
+ * This kernel alone does not enable 9600-bit/s acquisition or live reception. */
+int v90_trellis_qam12_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *a,unsigned *b);
 /* Acquire the 448-pair J=7 superframe phase from 896..16384 hard pairs.
  * Labels are a|(b<<2). offset is relative to labels[0]. Returns 0 if
  * confidence is insufficient; errors reports the best syndrome score. */

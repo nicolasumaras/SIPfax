@@ -72,3 +72,11 @@ The passive captures had zero kernel drops and no sequence gaps in the call
 streams. Both ATA streams had a 120-sample timestamp increment during early
 media; forwarded call audio had normal increments. RED primary payloads matched
 the server streams. Internal ATA underflow was not measured.
+
+The next-rate `v90_trellis_qam12_pair` kernel accepts the three-ring, twelve-point
+minimum constellation for 9,600 bit/s at 3,200 symbols/s. Its independent tests
+compute Figure 9 subsets from coordinates and then apply Table 13, covering all
+16 initial encoder states and noise. Ring 2 repeats a subset class; its ring
+index must not be used directly as a Table 13 subset number. This kernel does
+not yet provide 24-bit mapping frames, rate-specific B1 acquisition or a live
+9,600-bit/s mode. It does not alter the deployed 7,200-bit/s receiver.

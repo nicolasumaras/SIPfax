@@ -186,4 +186,33 @@ uint64_t count(V90Trellis*s){return s->pairs;}
             assert received==source[:len(received)] and len(received)==34
             assert positions[0]==prefix+len(clean)+1+7
             lib.destroy(stream)
+    # Next-rate kernel: derive Figure 9 subsets from coordinates, rather than
+    # treating a ring index as a Table 13 subset number (ring 2 repeats subset 4).
+    lib.v90_trellis_qam12_pair.argtypes=lib.v90_trellis_qam8_pair.argtypes
+    def point12(label):return [1+1j,-3+1j,1-3j][label>>2]*(-1j)**(label&3)
+    def subset(z):
+        x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
+        return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
+    for initial in range(16):
+        state=initial;labels=[];inversions=[]
+        for i in range(1600):
+            inv=pattern[(i//32)%14] if i%32==0 else 0
+            a=rng.randrange(4);b=(a+2*rng.randrange(2)+((state&1)^inv))%4
+            a+=4*rng.randrange(3);b+=4*rng.randrange(3)
+            labels.append((a,b));inversions.append(inv)
+            v=converter[subset(point12(a))][subset(point12(b))];u=state&1
+            state=(state>>1)^(v&1)^(((v>>1)&1)<<1)^((((v>>1)&1)^u)<<2)^(u<<3)
+        for noisy in [False,True]:
+            state=lib.trellis();decoded=[]
+            for (a,b),inv in zip(labels,inversions):
+                x,y=point12(a),point12(b)
+                if noisy:
+                    x+=complex(rng.gauss(0,.08),rng.gauss(0,.08))
+                    y+=complex(rng.gauss(0,.08),rng.gauss(0,.08))
+                aa=C.c_uint();bb=C.c_uint()
+                ready=lib.v90_trellis_qam12_pair(state,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb))
+                if ready:decoded.append((aa.value,bb.value))
+            assert decoded[64:]==labels[64:len(decoded)],(initial,noisy)
+            lib.destroy(state)
+    print('PASS: twelve-point kernel, coordinate-derived Figure 9 subsets, Table 13, all states and noise')
 print('PASS: continuous B1/data decoding, carrier offset/gain drift/noise, source positions and reacquisition')

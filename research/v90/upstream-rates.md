@@ -9,7 +9,7 @@ receiver with one uncoded bit per symbol.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental adaptive 16,800 receiver after its
+The lab currently selects the experimental adaptive 19,200 receiver after its
 first successful hardware test. Broader qualification is required before changing
 the code default.
 
@@ -241,7 +241,7 @@ cleanly after 44.494 seconds with zero Windows CRC/alignment errors. Native CP
 confirmed 49.333 kbit/s downstream. All 3,663 forwarded downstream primary
 payloads matched; the final unforwarded server packet followed the caller BYE
 by 1.614 ms. The forwarded upstream suffix also matched. The 14,769-packet
-capture had no RTP sequence gaps or kernel drops. CT105 retains 16,800, with
+capture had no RTP sequence gaps or kernel drops. At that stage CT105 retained 16,800, with
 the validated 14,400 binary saved for rollback. Sustained 16,800 qualification
 now includes a 624.238-second bidirectional soak: all 64 verified 32 KiB
 downloads (2 MiB) and 64 verified 1 KiB upstream requests passed, followed by a
@@ -262,5 +262,4 @@ boundaries, unused tuples and output bounds. Rate-specific B1, continuous
 48-bit frame decoding and PCM/MP integration now pass independent tests,
 including fractional timing, carrier/gain changes, clock drift and intersymbol
 interference. The q-bit count is explicit in acquisition and PPP delivery so
-uncoded bits remain in parser order throughout. Hardware validation at 19,200
-remains pending; the deployed server is still at 16,800.
+uncoded bits remain in parser order throughout. The first 19,200-bit/s hardware call authenticated PPP, fetched an external page, verified a 32 KiB download in 7.476 seconds and sixteen distinct 1 KiB upstream request payloads. It disconnected cleanly after 39.527 seconds with zero Windows CRC or alignment errors. Native CP confirmed 49.333 kbit/s downstream. All 3,415 downstream primary payloads matched across FreePBX, as did the forwarded upstream suffix after eleven early-media packets. The 13,763-packet capture had zero kernel drops and no RTP sequence gaps. CT105 now retains the experimental 19,200 receiver, with the validated 16,800 binary saved for rollback. Sustained 19,200 qualification remains pending.

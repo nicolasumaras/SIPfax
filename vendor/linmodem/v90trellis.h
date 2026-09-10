@@ -15,6 +15,11 @@ typedef struct {
     uint64_t pairs;
 } V90Trellis;
 void v90_trellis_init(V90Trellis *s);
+/* Read a provisional best-survivor pair with age pairs of lookahead.
+ * Does not advance or mutate the decoder. label_bits must match its input
+ * constellation (2..8). Returns 0 without writing outputs if unavailable. */
+int v90_trellis_peek(const V90Trellis *s,unsigned age,unsigned label_bits,
+                     unsigned *a,unsigned *b);
 /* Inputs must be finite and gain-normalized to unit magnitude.
  * Quadrants are clockwise from +Re: 0=+1, 1=-j, 2=-1, 3=+j.
  * Returns 1 with a decoded pair after 63 pairs of lookahead, otherwise 0. */
@@ -99,5 +104,8 @@ void v90_trellis_stream_init(V90TrellisStream *s);
 void v90_trellis_stream_symbol(V90TrellisStream *s,double re,double im);
 /* 21600/3200 minimum constellation, M=10/q=2, eight-bit labels. */
 int v90_trellis_qam160_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                           unsigned inversion,unsigned *out_a,unsigned *out_b);
+/* 24000/3200 minimum constellation, M=8/q=3, eight-bit labels. */
+int v90_trellis_qam256_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                            unsigned inversion,unsigned *out_a,unsigned *out_b);
 #endif

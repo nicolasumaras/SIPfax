@@ -1,4 +1,4 @@
-/* 7200/9600/12000/14400/16800/19200/21600 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
+/* 7200/9600/12000/14400/16800/19200/21600/24000 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
 #ifndef V90QAM8_H
 #define V90QAM8_H
 #include "v90shell.h"
@@ -41,6 +41,10 @@ typedef V90Qam8Frames V90Qam160Frames;
 void v90_qam160_frames_init(V90Qam160Frames *s,unsigned previous_quadrant);
 /* M=10/K=26/q=2: 54 bits, Q=4*ring+two_uncoded_bits. */
 int v90_qam160_frame(V90Qam160Frames *s,const uint8_t labels[8],uint8_t bits[54]);
+typedef V90Qam8Frames V90Qam256Frames;
+void v90_qam256_frames_init(V90Qam256Frames *s,unsigned previous_quadrant);
+/* M=8/K=24/q=3: 60 bits, Q=8*ring+three_uncoded_bits. All byte labels valid. */
+int v90_qam256_frame(V90Qam256Frames *s,const uint8_t labels[8],uint8_t bits[60]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
     uint8_t labels[V90_QAM8_B1_SYMBOLS];
@@ -49,7 +53,7 @@ typedef struct {
     unsigned position,count,m,k,q;
 } V90Qam8B1;
 void v90_qam8_b1_init(V90Qam8B1 *s);
-/* 7200/9600/12000/14400/16800/19200/21600 at 3200 symbols/s; invalid rate clears state and returns 0. */
+/* 7200/9600/12000/14400/16800/19200/21600/24000 at 3200 symbols/s; invalid rate clears state and returns 0. */
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate);
 /* Feed symbol-spaced matched-filter output. On a match, gain/phase describe
  * received = gain * exp(j*phase) * reference; score is normalized correlation.
@@ -58,12 +62,18 @@ int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate);
  * written on a match. Caller must select the correct symbol timing lane. */
 int v90_qam8_b1_symbol(V90Qam8B1 *s,double re,double im,
                       double *gain,double *phase,double *score);
+#define V90_QAM_FEEDBACK_AGE 8
+#define V90_QAM_FEEDBACK_HISTORY 32
+#if V90_QAM_FEEDBACK_HISTORY <= 2*V90_QAM_FEEDBACK_AGE+1
+#error Feedback history must retain the provisional pair
+#endif
 typedef struct {
     V90Qam8B1 b1;
     V90Trellis trellis;
     V90Qam8Frames frames;
     V90Carrier carrier;
     V90Equalizer equalizer;
+    double history_re[V90_QAM_FEEDBACK_HISTORY][V90_EQ_MAX_TAPS],history_im[V90_QAM_FEEDBACK_HISTORY][V90_EQ_MAX_TAPS];
     uint64_t symbols,origin,pairs,output_symbol,output_frames,rejected_frames;
     double score,a_re,a_im;
     uint8_t labels[8];

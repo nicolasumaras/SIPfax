@@ -14,9 +14,9 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rate=21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
-k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10)}[rate]
-q_bits=2 if rate==21600 else 1 if rate==19200 else 0
+rate=24000 if '--24000' in sys.argv else 21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
+k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10),24000:(24,8)}[rate]
+q_bits=3 if rate==24000 else 2 if rate==21600 else 1 if rate==19200 else 0
 frame_bits=k+12+8*q_bits
 from v90_shell_reference import ShellReference
 if rate>=14400:rings=ShellReference(m)
@@ -29,7 +29,7 @@ def frame(payload):
         crc^=value
         for _ in range(8):crc=(crc>>1)^(0x8408 if crc&1 else 0)
     return payload+bytes([(crc^0xffff)&255,(crc^0xffff)>>8])
-expected=[frame(b'\xff\x03\xc0\x21'+bytes(range(n))) for n in [20,64,256]]
+expected=[frame(b'\xff\x03\xc0\x21'+(bytes(np.random.default_rng(24090+n).integers(0,256,n,dtype=np.uint8)) if '--random-payloads' in sys.argv else bytes(range(n)))) for n in [20,64,256]]
 bad=bytearray(frame(b'\xff\x03\xc0\x21wrong CRC'));bad[-1]^=1
 wire=bytearray(b'\x7e'*8)
 for packet in [expected[0],bad,*expected[1:]]:
@@ -65,7 +65,7 @@ for f in range(len(bits)//frame_bits):
         b=(a+2*v[g]+((state&1)^inv))%4;previous=a
         qa=sum(v[g+3+j]<<j for j in range(q_bits));qb=sum(v[g+3+q_bits+j]<<j for j in range(q_bits))
         x=a+4*((shell[2*p]<<q_bits)|qa);y=b+4*((shell[2*p+1]<<q_bits)|qb)
-        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j,-7+9j,-11-3j,9-7j,-3-11j,-11+5j,5-11j,9+9j,1+13j,13+1j,-11-7j,-7-11j,-3+13j,13-3j,5+13j,13+5j,-11+9j][q>>2])*(-1j)**(q&3) for q in [x,y]]
+        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j,-7+9j,-11-3j,9-7j,-3-11j,-11+5j,5-11j,9+9j,1+13j,13+1j,-11-7j,-7-11j,-3+13j,13-3j,5+13j,13+5j,-11+9j,9-11j,-7+13j,13-7j,-15+1j,1-15j,-15-3j,-3-15j,-11-11j,9+13j,13+9j,-15+5j,5-15j,-15-7j,-7-15j,1+17j,-11+13j,17+1j,13-11j,-3+17j,17-3j,-15+9j,9-15j,5+17j,17+5j][q>>2])*(-1j)**(q&3) for q in [x,y]]
         symbols.extend(points)
         t=converter[subset(points[0])][subset(points[1])];u=state&1
         state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)
@@ -126,7 +126,8 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
     for name in ['rate','acquired','destroy','phase4_acquired']:getattr(lib,name).argtypes=[C.c_void_p]
     os.environ['SIPFAX_V90_UPSTREAM_RATE']=str(rate)
     rng=np.random.default_rng(9072)
-    for fraction,ppm in ([(.25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]):
+    cases=[(f,p) for f in [0,.25,.5,.75] for p in [-100,100]] if "--timing-sweep" in sys.argv else [( .25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]
+    for fraction,ppm in cases:
         base=np.zeros(int(len(symbols)*2.5)+250,dtype=complex)
         for i,z in enumerate(symbols):
             center=100+fraction+2.5*i*(1+ppm/1e6)
@@ -146,7 +147,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             for start in range(0,len(pcm),137):
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
             assert lib.acquired(s)
-            assert received==expected,(fraction,[len(x) for x in received])
+            assert received==expected,(fraction,ppm,len(received),len(expected),next((i for i,(a,b) in enumerate(zip(received,expected)) if a!=b),None))
         finally:lib.destroy(s)
         received.clear();s=lib.phase4_create(cb)
         try:

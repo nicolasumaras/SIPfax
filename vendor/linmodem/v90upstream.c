@@ -1,4 +1,4 @@
-/* Experimental V.34 upstream receiver for V.90: 4800..21600 bit/s at 3200 symbols/s.
+/* Experimental V.34 upstream receiver for V.90: 4800..24000 bit/s at 3200 symbols/s.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
@@ -15,7 +15,7 @@ void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
     const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
-    s->rate=rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
+    s->rate=rate && !strcmp(rate,"24000")?24000:rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
     if(s->rate!=4800)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
         l->next_symbol=i;
@@ -167,9 +167,11 @@ static void symbol(V90Upstream *s,long time,double re,double im)
                  * error samples later. Keep phase and clock corrections
                  * separate; the phase term must not become clock drift. */
                 if(energy>1e-12)error=((l->previous_re-ar)*mr+(l->previous_im-ai)*mi)/energy;
-                /* Acquire the denser 21.6k constellation with the fast loop
+                /* Acquire 21.6 kbit/s with the fast loop
                  * for three seconds after B1. Then reduce integrator noise
-                 * while retaining the learned frequency and phase state. */
+                 * while retaining the learned frequency and phase state.
+                 * The longer 24 kbit/s equalizer uses slow acquisition to
+                 * avoid outrunning its decision-directed adaptation. */
                 l->timing_frequency+=(s->rate==21600 && q->symbols-q->origin<9600?.0001:.00001)*error;
                 if(l->timing_frequency>.002)l->timing_frequency=.002;
                 if(l->timing_frequency<-.002)l->timing_frequency=-.002;

@@ -6,12 +6,15 @@ the twelve-point receiver; `12000` selects the experimental twenty-point receive
 the experimental thirty-two-point receiver; `16800` selects the experimental
 fifty-six-point receiver; `19200` selects the experimental ninety-six-point
 receiver with one uncoded bit per symbol; `21600` selects the experimental
-160-point receiver with two uncoded bits per symbol.
+160-point receiver with two uncoded bits per symbol; `24000` selects the
+256-point receiver with three uncoded bits and provisional trellis-feedback
+equalization.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental 21,600 receiver after its first
-successful short hardware test. Upstream throughput still needs improvement.
+The lab currently selects the experimental 21,600 receiver. A private 24,000
+prototype passed one short hardware trial and was then reverted; the integrated
+provisional-feedback revision still requires hardware qualification.
 The preceding 19,200 carrier-fit build passed a sustained run with live
 renegotiation recovery. Broader qualification is required before changing
 the code default.
@@ -404,3 +407,31 @@ The server automatically returned to `816a07a` at 21,600 upstream after the
 trial. Incoming PCM was saved privately for replay. The experimental receiver
 remains outside the committed runtime pending broader startup qualification
 and preservation of lower-rate behavior.
+
+
+### Integrated 24,000 candidate: provisional training decisions
+
+The remaining random-payload startup failure was resolved in the expanded
+synthetic checks by using survivor decisions after eight pairs to train the
+equalizer. Final decoded data still waits for all 63 lookahead pairs. Training
+uses the saved normalized FIR input window with current coefficients; updates
+are bounded by the existing 0.1 NLMS step and coefficient-norm limit. A 32-symbol
+history retains the required 18-symbol feedback span, avoiding the private
+prototype's much larger buffer.
+
+Only 24,000 selects fifteen taps and provisional feedback; lower rates retain
+seven taps and their prior adaptation rules. The 24,000 clock integrator uses
+the slower lower-rate gain. M=8/K=24/q=3 yields 60 bits per mapping frame;
+MP advertises drn=10 and only its corresponding capability bit. The code default
+remains 4,800 and unsupported settings still fall back to it.
+
+The original extended clock/distortion/PCMU case and random-payload sweep over
+four fractional offsets and both 100 ppm clock directions recover every exact
+PPP frame, including delayed-E replay. The independent constellation/trellis
+and MP tests pass. Peek tests check read-only behavior, invalid ages/widths,
+all encoder states, ring wrap, noisy known symbols and agreement with full-depth
+output. Seven/fifteen-tap equalizer tests cover holdout validation, streaming
+delay and invalid-state preservation. ASan/UBSan passes feedback history wrap
+and reacquisition at five rates. The full native suite and the extended 19.2
+and 21.6 regressions pass locally. CI and hardware results for this revision
+must be recorded separately from the earlier private short-call success.

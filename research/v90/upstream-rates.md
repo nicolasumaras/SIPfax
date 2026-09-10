@@ -180,3 +180,13 @@ All 3,851 downstream primary payloads and the forwarded upstream suffix matched
 across FreePBX. The 15,520-packet capture had no sequence gaps or kernel drops.
 CT105 retains this experimental equalized 12,000 build, with the validated
 9,600 binary saved as rollback. Sustained 12,000 qualification remains pending.
+
+## 14,400-bit/s foundation
+
+The thirty-two-point minimum constellation (M=8/K=24 at 3200 symbols/s) now
+has a soft trellis kernel and a 36-bit mapping-frame inverse. Independent
+Figure 5/9 and Table 13 tests cover all states, all labels and noisy pairs.
+A half-tuple enumeration oracle covers every energy-bucket boundary and random
+24-bit shell indices without storing all 16 million eight-tuples. Its ordering
+is cross-checked exhaustively for M=1/2/3. B1 and native audio/MP integration
+for 14,400 remain unimplemented; the deployed receiver is unchanged.

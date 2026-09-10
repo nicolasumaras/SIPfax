@@ -40,6 +40,11 @@ int v90_trellis_qam12_pair(V90Trellis *s,double ar,double ai,double br,double bi
  * Same contract as qam12_pair; acquisition/live 12000 reception is separate. */
 int v90_trellis_qam20_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                           unsigned inversion,unsigned *a,unsigned *b);
+/* Thirty-two-point minimum constellation for 14400/3200, q=0, M=8.
+ * Quarter points add (5,1),(-3,5),(5,-3) to the twenty-point set.
+ * Same contract as qam20_pair; live acquisition is separate. */
+int v90_trellis_qam32_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *a,unsigned *b);
 /* Acquire the 448-pair J=7 superframe phase from 896..16384 hard pairs.
  * Labels are a|(b<<2). offset is relative to labels[0]. Returns 0 if
  * confidence is insufficient; errors reports the best syndrome score. */

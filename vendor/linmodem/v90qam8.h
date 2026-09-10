@@ -21,6 +21,11 @@ void v90_qam20_frames_init(V90Qam20Frames *s,unsigned previous_quadrant);
 /* Same frame contract, M=5/K=18, 30 scrambled bits for 12000/3200.
  * This inverse alone does not enable 12000 acquisition or live reception. */
 int v90_qam20_frame(V90Qam20Frames *s,const uint8_t labels[8],uint8_t bits[30]);
+typedef V90Qam8Frames V90Qam32Frames;
+void v90_qam32_frames_init(V90Qam32Frames *s,unsigned previous_quadrant);
+/* M=8/K=24, 36 scrambled bits for 14400/3200. All shell tuples are valid.
+ * This inverse alone does not enable live 14400 reception. */
+int v90_qam32_frame(V90Qam32Frames *s,const uint8_t labels[8],uint8_t bits[36]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
     uint8_t labels[V90_QAM8_B1_SYMBOLS];

@@ -1508,3 +1508,17 @@ retaineddiagnostics65842terminal. Server no lm/pppd; sipfaxactive. No temporary
 configuration remains. Private work/v90-ptime10-{prefix,final}.pcap,
 ata-ptime10-retained.txt and attemptdiagnosticsJSON. Source snapshots of public
 Asterisk16 parser/SDP code underwork only. Goal unfinished.
+
+## Fallback gate and missed-CPt hypothesis checked; second analog line available
+
+INFO1a parser already activatesV90training only for upstream4/downstream6;
+subsequent down4 requests are unsupportedV34fallback, not erroneously sent
+throughV90training. Existing limitation remains; no cosmetic log change made.
+Independent PythonCPdecoder finds0CRCvalidCPframes in16487RX15..16.6s and
+26..31.3s (two failed DIL intervals). Positive control10222RX17..19s still
+returns20CRCvalidframes. This finds no evidence of the historical missed-CPt
+issue in these intervals, but cannot prove the signal contains no undecodable
+message. User has only the current ATA model available. FreePBX endpoint
+23416874 is registered on192.168.1.235:5062, Available and Not in use; second
+analog-port comparison is prepared and requires physically moving notebook
+phone cable. No network/service changes or livecalls this turn.

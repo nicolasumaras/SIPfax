@@ -1,9 +1,10 @@
 # Extending the V.90 upstream receiver
 
-The deployed default remains 4,800 bit/s at 3,200 symbols/s. The experimental
+The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` setting now selects the eight-point receiver and
 advertises only 7,200 bit/s in MP. Unset or unsupported values select 4,800.
-Hardware validation is required before changing the default.
+The lab server now explicitly selects 7,200 after the short hardware trials
+below; broader qualification is required before changing the code default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -50,3 +51,24 @@ and trellis symbols, and pulse-shaped PCM. Exact frames survive fractional
 timing, carrier offset and noise; a deliberately invalid FCS is rejected.
 Rate negotiation tests independently decode MP rate, capability mask and CRC.
 These synthetic checks do not establish hardware interoperability.
+
+## Hardware qualification of 7,200 upstream
+
+The first hardware call acknowledged MP but missed upstream B1. Recorded audio
+showed E detection about 4.7 ms after B1 began. Phase 4 now retains 160 samples
+and replays them through the reset receiver; a delayed-E synthetic regression
+checks exact PPP data recovery. The recorded B1 then acquires at 0.9823.
+
+Two subsequent XP/ATA187 calls authenticated PPP and fetched an external page.
+The first verified a 32 KiB download; the second verified another 32 KiB download
+and 16 KiB sent upstream in 16 encoded HTTP request payloads. The server checked
+the complete uploaded bytes and hash, with PPP source 10.64.0.2. Both calls
+finished with zero Windows CRC/alignment errors and disconnected cleanly.
+Native logs show initial downstream 160000/3 bit/s; the live process was verified
+to select the 7,200 upstream receiver. These are short interoperability tests,
+not a sustained throughput measurement or full V.90 conformance result.
+
+The passive captures had zero kernel drops and no sequence gaps in the call
+streams. Both ATA streams had a 120-sample timestamp increment during early
+media; forwarded call audio had normal increments. RED primary payloads matched
+the server streams. Internal ATA underflow was not measured.

@@ -1583,3 +1583,14 @@ The trial automatically restored runtime `36577ed`, binary SHA-256 `b773a2918d10
 Replaying the failed call recovers zero CRC-valid PPP frames with the original or joint fit. One timing lane decodes B1 frames 2–16 exactly. Freezing equalizer updates still recovers zero frames; freezing timing correction recovers nine. Separate clock controls recover zero with phase correction alone, three with frequency correction alone, and seven with both gains scaled to one tenth. These are diagnostic replay results from one recording, not independent hardware successes. A frozen clock cannot support sustained clock drift. The next receiver change must preserve drift tracking and pass independent waveform tests before hardware qualification.
 
 A separate private compatibility variant preserves byte-sized public frame APIs at lower rates while using wider labels internally and for the new 448-point API. Independent 26.4, 24 and low-rate symbol tests pass. No 26.4 implementation has been committed or left deployed.
+
+
+## Four-pair feedback hardware trial
+
+Attempt `9061bb34-5478-445a-b91e-7d7f46cdaf27` tested the private four-pair feedback candidate after CT105 ASan/UBSan and native build checks passed. Binary SHA-256 was `9ecb14abd0952951423771fd06af48baaf5c6763d1372f95a710b6827dda5f7d`; live process 10352 was verified at 26400 upstream. The notebook reached the device-connected/authenticating phase but failed with Windows error 721. No PPP connection or payload probes succeeded. Native CP remained 49.333 kbit/s, upstream E was detected at 4.059125 s, and B1 correlation was 0.9823 at 4.099125 s. Renegotiation began at 47.0105 s.
+
+The capture contained 13,212 packets with zero kernel drops and no RTP sequence gaps. All 3,277 downstream primary payloads matched through FreePBX/RED; all 3,279 forwarded upstream payloads matched the ATA sequence after eleven startup packets. The ATA's initial timestamp increment was 120 samples; subsequent forwarding integrity does not establish analog playout quality.
+
+The fresh recording yields zero CRC-valid PPP frames both with the four-pair candidate and with the fixed-clock control. The prior recording's nine-frame improvement therefore does not generalize. A separate diagnostic replay decodes B1 frames 2–16 exactly on two timing lanes, so post-training tracking remains the unresolved part; the good B1 score alone cannot qualify a connection.
+
+The wrapper restored `36577ed` at 24 kbit/s, with its expected binary hash and active service verified. Notebook connections are empty, SIPFAXRED call registration is cleared, and the capture, HTTP fixture, trial and diagnostic processes have terminated. No 26.4 changes are committed or left deployed.

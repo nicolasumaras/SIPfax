@@ -1607,3 +1607,16 @@ A 65-tap linear echo model spanning delays 1396â€“1460 samples was fitted on 25â
 A cross-call control also yielded ten frames on each recording: coefficients learned only from the other call were used for subtraction. The recovered frame hashes exactly matched the respective same-call corrected results. This is stronger evidence than a same-recording fit, but still only two recordings and no live PPP connection. A production canceller must learn and track delay/filter coefficients causally, preserve the modem signal, handle startup and clock drift, and pass live transfer tests. No fixed recording-derived coefficients have been deployed or committed.
 
 The tested 24 kbit/s upstream deployment remains unchanged. All echo fit, replay, cross-call replay and retrieval processes completed. The next implementation target is causal transmit-reference echo cancellation with explicit startup and delay handling, followed by a reversible hardware trial.
+
+
+## First successful 26.4 kbit/s hardware trial with causal echo cancellation
+
+Attempt `87c5d93e-1f07-472a-8a92-c26d91218817` established authenticated PPP and passed the internet probe, verified 32 KiB download, sixteen distinct verified 1 KiB upstream checks and final PASS response. All 18 response hashes were independently verified. The call disconnected after 36.583 seconds with zero Windows CRC and alignment errors. Download time was 7.455 seconds; median upstream check time was 1.385 seconds. Native CP reported 49.333 kbit/s downstream. Process 10822 was independently verified with upstream rate 26400 and line echo enabled.
+
+The private binary SHA-256 is `3803ee96ad9190d1f8378c92c7a6a64959ee1479ba93f79b1e85415c1b726d9b`. It combines the 448-point receiver, four-pair provisional feedback and causal zero-initialized NLMS echo cancellation at the measured 1428-sample delay. CT105 ASan/UBSan startup/bounds/history checks and a fresh native build passed before the trial. B1 correlation was 0.9584 at 4.081125 seconds. This is one short successful call, not sustained qualification or general delay acquisition.
+
+The packet capture contained 13,183 packets, zero kernel drops and no RTP sequence gaps. All 3,268 downstream primary payloads matched through FreePBX/RED; the 3,270 forwarded upstream payloads matched after eleven ATA startup packets. The notebook is disconnected and SIPFAXRED call registration is cleared. Capture, fixture, trial and retrieval processes terminated.
+
+An earlier attempt (`82083e1e-6dc2-4c43-9fb8-48955a0a52bc`) returned Windows 676 before reaching the modem because FreePBX marked SIPfax unavailable during service restart. The wrapper now sends SIP OPTIONS and waits for the specific SIPfax contact to become available before dialing and after restoration. That readiness failure is not a modem test result.
+
+The reversible wrapper restored runtime `36577ed` at 24 kbit/s and its expected binary hash; FreePBX confirmed it available. The 26.4/echo candidate remains private and uncommitted. Next work is integration with regression coverage, then sustained hardware qualification. Full V.90 scope, higher upstream rates, broader reliability and future concurrent calls remain incomplete.

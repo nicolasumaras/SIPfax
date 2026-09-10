@@ -243,7 +243,13 @@ payloads matched; the final unforwarded server packet followed the caller BYE
 by 1.614 ms. The forwarded upstream suffix also matched. The 14,769-packet
 capture had no RTP sequence gaps or kernel drops. CT105 retains 16,800, with
 the validated 14,400 binary saved for rollback. Sustained 16,800 qualification
-remains outstanding.
+now includes a 624.238-second bidirectional soak: all 64 verified 32 KiB
+downloads (2 MiB) and 64 verified 1 KiB upstream requests passed, followed by a
+clean disconnect. Windows counted three CRC errors and zero alignment errors.
+Native downstream CP remained at 49.333 kbit/s. All 32,656 downstream primary
+payloads and the forwarded upstream suffix matched across FreePBX. Capture
+contained 131,165 packets, zero kernel drops and no RTP sequence gaps. This is
+one successful sustained run, not broad reliability qualification.
 
 ## 19,200-bit/s mapping foundation
 

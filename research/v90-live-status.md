@@ -1572,3 +1572,14 @@ not executed, modified or uploaded. No activecalls/workers/settingschanges.
 Remaining external verification gap is actual ATA receive/playout/analog
 behavior; do not claim firmware incapability or all modem software correct
 from these observations alone.
+
+
+## Reversible 26.4 kbit/s hardware trial and clock controls
+
+The private joint carrier/equalizer prototype was tested on CT105. Attempt `ee7693f6-5cbd-42bf-90ea-69e0da94548e` failed with Windows error 721 and no established PPP connection. Native downstream CP was 49.333 kbit/s; B1 correlation was 0.9827. The 13,214-packet capture had no kernel drops or RTP sequence gaps. All 3,275 downstream primary payloads matched through RED forwarding, as did 3,277 upstream packets after eleven startup packets. These checks establish forwarding integrity, not analog playout integrity.
+
+The trial automatically restored runtime `36577ed`, binary SHA-256 `b773a2918d1089c9a97b606b5fc37c09f91306b0e31e8b08e2fc03242904e3d3`, at 24 kbit/s upstream. Service activity, binary hash, rate override, empty notebook connections and cleared SIPFAXRED call registration were subsequently verified.
+
+Replaying the failed call recovers zero CRC-valid PPP frames with the original or joint fit. One timing lane decodes B1 frames 2–16 exactly. Freezing equalizer updates still recovers zero frames; freezing timing correction recovers nine. Separate clock controls recover zero with phase correction alone, three with frequency correction alone, and seven with both gains scaled to one tenth. These are diagnostic replay results from one recording, not independent hardware successes. A frozen clock cannot support sustained clock drift. The next receiver change must preserve drift tracking and pass independent waveform tests before hardware qualification.
+
+A separate private compatibility variant preserves byte-sized public frame APIs at lower rates while using wider labels internally and for the new 448-point API. Independent 26.4, 24 and low-rate symbol tests pass. No 26.4 implementation has been committed or left deployed.

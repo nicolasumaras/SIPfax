@@ -45,3 +45,38 @@ for bad in [[float('nan')]*128, [float('inf')]*128, [[1]*128]]:
         raise AssertionError('Invalid symbols accepted')
 assert m.audit(np.zeros(1000)) == []
 print('PASS: B1 frame/reset/GPA, phase/gain/noise correlation and negative controls')
+
+# Exercise the production C detector against the independent Python template.
+import ctypes as C
+import subprocess
+import tempfile
+with tempfile.TemporaryDirectory() as td:
+    d = Path(td)
+    (d/'wrap.c').write_text('''#include <stdlib.h>
+#include "v90upstream.c"
+void *create(void){V90Upstream*s=malloc(sizeof(*s));v90_upstream_init(s);return s;}
+void destroy(void*s){free(s);}
+int feed(void*p,double re,double im){V90Upstream*s=p;b1_symbol(s,0,re,im);return s->b1_seen;}
+int pcm(void*p,const int16_t*x,unsigned n){V90Upstream*s=p;for(unsigned i=0;i<n;i++)v90_upstream_receive(s,x[i]);return s->b1_seen;}
+long detected(void*p){return ((V90Upstream*)p)->b1_sample;}
+''')
+    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC',
+                    '-I'+str(root/'vendor/linmodem'),str(d/'wrap.c'),
+                    str(root/'vendor/linmodem/v90trellis.c'),'-lm','-o',str(d/'b1.so')],check=True)
+    lib=C.CDLL(str(d/'b1.so'));lib.create.restype=C.c_void_p
+    lib.destroy.argtypes=[C.c_void_p]
+    lib.feed.argtypes=[C.c_void_p,C.c_double,C.c_double]
+    def feed(values):
+        state=lib.create()
+        try:
+            for i,v in enumerate(values):
+                if lib.feed(state,float(v.real),float(v.imag)):return i
+            return None
+        finally:lib.destroy(state)
+    assert feed(signal) == 650
+    assert feed(noise(5000)) is None
+    assert feed(np.zeros(500)) is None
+    assert feed(reference[:-1]) is None
+    assert feed(np.r_[reference[:100],complex(float('nan'),0),reference]) == 228
+    assert feed(reference[::-1]) is None
+print('PASS: native bounded B1 detector, noisy acquisition and reset/rejection controls')

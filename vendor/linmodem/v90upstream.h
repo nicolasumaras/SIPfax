@@ -6,6 +6,11 @@
 #define V90_UP_PHASES 10
 #define V90_UP_FRAME 4096
 #define V90_UP_RECENT 128
+#define V90_UP_B1_SYMBOLS 128
+typedef struct {
+    double re[V90_UP_B1_SYMBOLS],im[V90_UP_B1_SYMBOLS];
+    unsigned position,count;
+} V90UpB1Lane;
 typedef struct {
     double a_re,a_im,previous_re,previous_im;
     unsigned have_a,have_previous,scrambler,uart_count,uart_value;
@@ -32,6 +37,12 @@ typedef struct V90Upstream {
     V90UpLane lanes[V90_UP_PHASES][2];
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];
+    /* Known 4800/3200 B1, observed independently of data acquisition. */
+    unsigned b1_seen;
+    long b1_sample;
+    double b1_score;
+    uint8_t b1_labels[V90_UP_B1_SYMBOLS];
+    V90UpB1Lane b1[V90_UP_PHASES];
     void *opaque;
     void (*receive_frame)(void *,const uint8_t *,unsigned);
 } V90Upstream;

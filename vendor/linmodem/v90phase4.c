@@ -156,7 +156,12 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         }
     } else if(s->stage==4 || s->stage==5 || s->stage==6) {
         unsigned n=s->samples-s->data_start;
-        if(s->stage==4 && s->rx_e_logged)v90_upstream_receive(&s->upstream,input);
+        if(s->stage==4 && s->rx_e_logged) {
+            unsigned had_b1=s->upstream.b1_seen;
+            v90_upstream_receive(&s->upstream,input);
+            if(!had_b1 && s->upstream.b1_seen)
+                fprintf(stderr,"[v90p4] upstream B1 correlation %.4f at %.6fs\n",s->upstream.b1_score,s->samples/8000.0);
+        }
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
         if(n==288)fprintf(stderr,"[v90p4] B1d transmitted; bidirectional PPP data path enabled\n");

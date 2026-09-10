@@ -12,6 +12,18 @@ static void soft_pair(void *,unsigned,unsigned);
 void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
+    /* V.34 10.1.3.1: one frame of scrambled ones, zero encoder state,
+       inversion as the last frame of the J=7 superframe. */
+    unsigned bits[192],state=0,previous=0;
+    for(unsigned i=0;i<192;++i)
+        bits[i]=1^(i>=5?bits[i-5]:0)^(i>=23?bits[i-23]:0);
+    for(unsigned i=0;i<64;++i) {
+        unsigned a=(previous+bits[3*i+1]+2*bits[3*i+2])&3;
+        unsigned b=(a+2*bits[3*i]+((state&1)^(i==0)))&3;
+        s->b1_labels[2*i]=a;s->b1_labels[2*i+1]=b;previous=a;
+        unsigned y1=((a&1)&((b&1)^1))^(a>>1)^(b>>1),y2=a&1,u=state&1;
+        state=(state>>1)^y1^(y2<<1)^((y2^u)<<2)^(u<<3);
+    }
     const char *option=getenv("SIPFAX_V90_SOFT_RX");
     s->soft_enabled=option && !strcmp(option,"1");
     if(s->soft_enabled)for(unsigned i=0;i<V90_UP_PHASES;++i) {
@@ -81,8 +93,37 @@ static unsigned delta(double ar,double ai,double br,double bi)
 {
     return (-(int)lrint(atan2(ai*br-ar*bi,ar*br+ai*bi)/(M_PI/2)))&3;
 }
+static void b1_symbol(V90Upstream *s,unsigned phase,double re,double im)
+{
+    if(s->b1_seen)return;
+    V90UpB1Lane *l=&s->b1[phase];
+    if(!isfinite(re) || !isfinite(im)) {memset(l,0,sizeof(*l));return;}
+    l->re[l->position]=re;l->im[l->position]=im;
+    l->position=(l->position+1)%V90_UP_B1_SYMBOLS;
+    if(l->count<V90_UP_B1_SYMBOLS)++l->count;
+    if(l->count<V90_UP_B1_SYMBOLS)return;
+    double cr=0,ci=0,energy=0;
+    for(unsigned i=0;i<V90_UP_B1_SYMBOLS;++i) {
+        unsigned j=(l->position+i)%V90_UP_B1_SYMBOLS;
+        double ar=l->re[j],ai=l->im[j];
+        energy+=ar*ar+ai*ai;
+        switch(s->b1_labels[i]) {
+        case 0:cr+=ar;ci+=ai;break;
+        case 1:cr-=ai;ci+=ar;break;
+        case 2:cr-=ar;ci-=ai;break;
+        case 3:cr+=ai;ci-=ar;break;
+        }
+    }
+    double power=cr*cr+ci*ci;
+    if(energy>0 && isfinite(energy) && isfinite(power) &&
+       power>=.9*.9*V90_UP_B1_SYMBOLS*energy) {
+        s->b1_seen=1;s->b1_sample=s->samples;
+        s->b1_score=sqrt(power/(V90_UP_B1_SYMBOLS*energy));
+    }
+}
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
+    b1_symbol(s,time%V90_UP_PHASES,re,im);
     if(s->soft_enabled) {
         v90_trellis_stream_symbol(&s->soft[time%V90_UP_PHASES].stream,re,im);
         return;

@@ -11,13 +11,13 @@
 typedef struct {
     double metric[16];
     uint8_t previous[V90_TRELLIS_DEPTH][16];
-    uint16_t labels[V90_TRELLIS_DEPTH][16];
+    uint32_t labels[V90_TRELLIS_DEPTH][16];
     uint64_t pairs;
 } V90Trellis;
 void v90_trellis_init(V90Trellis *s);
 /* Read a provisional best-survivor pair with age pairs of lookahead.
  * Does not advance or mutate the decoder. label_bits must match its input
- * constellation (2..8). Returns 0 without writing outputs if unavailable. */
+ * constellation (2..9). Returns 0 without writing outputs if unavailable. */
 int v90_trellis_peek(const V90Trellis *s,unsigned age,unsigned label_bits,
                      unsigned *a,unsigned *b);
 /* Inputs must be finite and gain-normalized to unit magnitude.
@@ -107,5 +107,7 @@ int v90_trellis_qam160_pair(V90Trellis *s,double ar,double ai,double br,double b
                            unsigned inversion,unsigned *out_a,unsigned *out_b);
 /* 24000/3200 minimum constellation, M=8/q=3, eight-bit labels. */
 int v90_trellis_qam256_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                           unsigned inversion,unsigned *out_a,unsigned *out_b);
+int v90_trellis_qam448_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                            unsigned inversion,unsigned *out_a,unsigned *out_b);
 #endif

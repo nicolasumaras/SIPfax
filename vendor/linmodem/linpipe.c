@@ -14,6 +14,7 @@
 #include <strings.h>
 #include <termios.h>
 #include "lm.h"
+#include "v90lineecho.h"
 
 extern struct sm_hw_info sm_hw_null;
 extern char *sm_states_str[];
@@ -48,6 +49,7 @@ static int write_frame(int fd,const u8*pay,int n){ u8 h[2]={(u8)(n>>8),(u8)(n&0x
 void pipe_modem(void)
 {
     struct sm_state sm1, *dce = &sm1;
+    V90LineEcho line_echo={0};
     s16 in_buf[2048], out_buf[2048];
     u8 pay[4096], g711out[2048], data[1024];
     int pty, len, i, n, last_state = -1, last_sm = -1, frames = 0;
@@ -93,6 +95,12 @@ void pipe_modem(void)
     /* NOTE: do NOT force SM_TEST_RING here — that is the simulation-only ring path
        (5s ring_timer) and delays ANSam by 5s, desyncing the real modem's V.8. */
 
+    /* Private measured-line experiment; automatic delay acquisition is pending. */
+    const char *echo_option=getenv("SIPFAX_V90_LINE_ECHO");
+    if(echo_option && !strcmp(echo_option,"1")) {
+        v90_line_echo_init(&line_echo,1428);
+        fprintf(stderr,"[linmodem] experimental line echo: delay=1428 taps=65 step=0.0005\n");
+    }
     for (;;) {
         if (read_frame(0, pay, sizeof(pay), &len) <= 0) break;   /* RTP closed */
         if (len > (int)(sizeof(in_buf)/2)) len = sizeof(in_buf)/2;
@@ -113,7 +121,9 @@ void pipe_modem(void)
         n = room > 0 ? read(pty, data, room) : 0;
         for (i = 0; i < n; i++) sm_put_bit(&dce->tx_fifo, data[i]);
 
+        if(line_echo.enabled)for(i=0;i<len;++i)in_buf[i]=v90_line_echo_rx(&line_echo,in_buf[i]);
         sm_process(dce, out_buf, in_buf, len);
+        if(line_echo.enabled)for(i=0;i<len;++i)v90_line_echo_tx(&line_echo,out_buf[i]);
 
         /* modem rx data -> pty */
         {

@@ -456,3 +456,34 @@ still losing a frame in the following positive-drift case. A separate noisy
 carrier diagnostic shows an eightfold frequency-RMSE improvement under the
 tested distortion, a small regression without it, and about twentyfold local
 fitting cost. This remains a private prototype, not a qualified next rate.
+
+
+### Integrated experimental 26.4 kbit/s candidate
+
+The development branch now includes the 448-point profile and preserves the
+existing byte-sized lower-rate frame APIs. Internal labels use 16 bits and
+packed trellis history uses 32 bits; the provisional peek supports widths
+through nine bits. Only 26.4 kbit/s uses joint B1 carrier/equalizer fitting and
+four-pair feedback; 24 kbit/s retains eight pairs. Final data still uses the
+63-pair trellis lookahead.
+
+`SIPFAX_V90_LINE_ECHO=1` enables experimental causal transmit-reference NLMS
+in the pipe bridge. It starts with zero coefficients, uses 65 taps, a fixed
+measured delay of 1428 samples and step 0.0005, and bounds coefficient energy.
+Raw RX captures precede cancellation. The option is off by default. Its delay
+is specific to the tested ATA path; automatic delay acquisition and drift
+qualification remain incomplete. A no-echo synthetic test measures about
+20 PCM units RMS of added adaptation noise, so it should not be enabled
+indiscriminately.
+
+The private predecessor passed one short hardware PPP call at 26.4 kbit/s
+upstream / native CP 49.333 kbit/s downstream: 18 independently verified
+transfer hashes, 36.583 seconds, zero Windows CRC/alignment errors. The
+integrated source still needs deployment and sustained qualification.
+
+The original random-payload/distortion/PCMU drift sweep passes. Additional
+seeds expose isolated errors and remain unresolved. Reproduce with
+`python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed 43127`
+or the same command with `--seed 62091`. These cases previously recovered
+191/192 frames at their first failing phase/drift setting. Passing CI and the
+short hardware call do not establish error-free or full-rate V.90 conformance.

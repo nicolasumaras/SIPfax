@@ -8,7 +8,7 @@
 int main(void)
 {
     V90Qam8Stream *s=malloc(sizeof(*s));assert(s);
-    const unsigned rates[]={14400,16800,19200,21600,24000};
+    const unsigned rates[]={14400,16800,19200,21600,24000,26400};
     for(unsigned rate=0;rate<sizeof(rates)/sizeof(rates[0]);++rate) {
         assert(v90_qam_stream_init_rate(s,rates[rate]));
         for(unsigned repeat=0;repeat<3;++repeat) {
@@ -18,7 +18,7 @@ int main(void)
                 assert(ready>=0);
             }
             assert(s->locked && s->output_frames>400);
-            assert(s->equalizer.taps==(rates[rate]==24000?15:7));
+            assert(s->equalizer.taps==(rates[rate]>=24000?15:7));
             assert(v90_qam8_stream_symbol(s,NAN,0)==-1);
         }
     }

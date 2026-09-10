@@ -8,14 +8,14 @@ import tempfile
 import sys
 from v90_shell_reference import ShellReference
 root=Path(__file__).resolve().parents[2]
-m,k,q_bits=(8,24,3) if '--24000' in sys.argv else (10,26,2) if '--21600' in sys.argv else (12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
+m,k,q_bits=(14,30,3) if "--26400" in sys.argv else (8,24,3) if '--24000' in sys.argv else (10,26,2) if '--21600' in sys.argv else (12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
 frame_bits=k+12+8*q_bits
 point_count=4*m*(1<<q_bits)
 converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-points=[z*(-1j)**q for z in [1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j,-7+9j,-11-3j,9-7j,-3-11j,-11+5j,5-11j,9+9j,1+13j,13+1j,-11-7j,-7-11j,-3+13j,13-3j,5+13j,13+5j,-11+9j,9-11j,-7+13j,13-7j,-15+1j,1-15j,-15-3j,-3-15j,-11-11j,9+13j,13+9j,-15+5j,5-15j,-15-7j,-7-15j,1+17j,-11+13j,17+1j,13-11j,-3+17j,17-3j,-15+9j,9-15j,5+17j,17+5j][:m*(1<<q_bits)] for q in range(4)]
+points=[z*(-1j)**q for z in [1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j,-7+9j,-11-3j,9-7j,-3-11j,-11+5j,5-11j,9+9j,1+13j,13+1j,-11-7j,-7-11j,-3+13j,13-3j,5+13j,13+5j,-11+9j,9-11j,-7+13j,13-7j,-15+1j,1-15j,-15-3j,-3-15j,-11-11j,9+13j,13+9j,-15+5j,5-15j,-15-7j,-7-15j,1+17j,-11+13j,17+1j,13-11j,-3+17j,17-3j,-15+9j,9-15j,5+17j,17+5j,-7+17j,13+13j,17-7j,-15-11j,-11-15j,-19+1j,1-19j,9+17j,17+9j,-19-3j,-3-19j,-19+5j,5-19j,-15+13j,13-15j,-11+17j,-19-7j,17-11j,-7-19j,1+21j,-19+9j,21+1j,9-19j,-3+21j,21-3j,-15-15j,13+17j,17+13j,5+21j,21+5j,-19-11j,-11-19j,-7+21j,21-7j,-15+17j,17-15j,9+21j,21+9j,-19+13j,-23+1j,13-19j,1-23j,-23-3j,-3-23j,-23+5j,5-23j,-11+21j,21-11j][:m*(1<<q_bits)] for q in range(4)]
 def subset(z):
     x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
     return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
@@ -40,7 +40,8 @@ unsigned long long rejected(V90Qam8Stream*s){return s->rejected_frames;}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Trellis*s){return s->pairs;}
 ''')
-    if q_bits==3:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam256Frames').replace('v90_qam32_frames_init','v90_qam256_frames_init').replace('s,14400','s,24000'))
+    if "--26400" in sys.argv:w.write_text(w.read_text().replace("V90Qam32Frames","V90Qam448Frames").replace("v90_qam32_frames_init","v90_qam448_frames_init").replace("s,14400","s,26400"))
+    elif q_bits==3:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam256Frames').replace('v90_qam32_frames_init','v90_qam256_frames_init').replace('s,14400','s,24000'))
     elif q_bits==2:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam160Frames').replace('v90_qam32_frames_init','v90_qam160_frames_init').replace('s,14400','s,21600'))
     elif q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init').replace('s,14400','s,19200'))
     elif m==14:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam56Frames').replace('v90_qam32_frames_init','v90_qam56_frames_init').replace('s,14400','s,16800'))
@@ -49,7 +50,9 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
     lib.count.argtypes=[C.c_void_p];lib.count.restype=C.c_ulonglong
     frame_fn=getattr(lib,'v90_qam%d_frame'%point_count)
     pair_fn=getattr(lib,'v90_trellis_qam%d_pair'%point_count)
-    frame_fn.argtypes=lib.v90_qam20_frame.argtypes=[C.c_void_p,C.POINTER(C.c_uint8),C.POINTER(C.c_uint8)]
+    label_type=C.c_uint16 if point_count>256 else C.c_uint8
+    frame_fn.argtypes=[C.c_void_p,C.POINTER(label_type),C.POINTER(C.c_uint8)]
+    lib.v90_qam20_frame.argtypes=[C.c_void_p,C.POINTER(C.c_uint8),C.POINTER(C.c_uint8)]
     pair_fn.argtypes=[C.c_void_p,*([C.c_double]*4),C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
     lib.peek.argtypes=[C.c_void_p,C.c_uint,C.c_uint,C.POINTER(C.c_uint),C.POINTER(C.c_uint)]
     f=lib.frames(0);previous=0;seen=set()
@@ -63,15 +66,15 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
             qb=sum(bits[g+3+q_bits+j]<<j for j in range(q_bits))
             labels.extend([a+4*((shell[2*p]<<q_bits)|qa),b+4*((shell[2*p+1]<<q_bits)|qb)])
         seen.update(labels);out=(C.c_uint8*frame_bits)()
-        assert frame_fn(f,(C.c_uint8*8)(*labels),out) and list(out)==bits,index
+        assert frame_fn(f,(label_type*8)(*labels),out) and list(out)==bits,index
     assert seen==set(range(point_count))
-    if point_count<256:
-        out=(C.c_uint8*frame_bits)(*([99]*frame_bits));assert not frame_fn(f,(C.c_uint8*8)(point_count,0,0,0,0,0,0,0),out) and list(out)==[99]*frame_bits
+    if point_count<1<<(8*C.sizeof(label_type)):
+        out=(C.c_uint8*frame_bits)(*([99]*frame_bits));assert not frame_fn(f,(label_type*8)(point_count,0,0,0,0,0,0,0),out) and list(out)==[99]*frame_bits
     small=(C.c_uint8*30)(*([99]*30));assert not lib.v90_qam20_frame(f,(C.c_uint8*8)(),small) and list(small)==[99]*30
     if m in [10,12,14]:
         # The first unused shell is rejected without overwriting output.
         out=(C.c_uint8*frame_bits)(*([99]*frame_bits))
-        assert not frame_fn(f,(C.c_uint8*8)(*[4*(r<<q_bits) for r in oracle[1<<k]]),out)
+        assert not frame_fn(f,(label_type*8)(*[4*(r<<q_bits) for r in oracle[1<<k]]),out)
         assert list(out)==[99]*frame_bits
     lib.destroy(f)
     for initial in range(16):
@@ -93,7 +96,7 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
                 ready=pair_fn(s,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb))
                 if ready:decoded.append((aa.value,bb.value))
                 pa=C.c_uint(999);pb=C.c_uint(999);width=(point_count-1).bit_length()
-                for age,bits in [(64,width),(0,1),(0,9),(count+1,width)]:
+                for age,bits in [(64,width),(0,1),(0,10),(count+1,width)]:
                     assert lib.peek(s,age,bits,C.byref(pa),C.byref(pb))==0 and pa.value==pb.value==999
                 early=lib.peek(s,8,width,C.byref(pa),C.byref(pb))
                 assert early==int(count>=8)

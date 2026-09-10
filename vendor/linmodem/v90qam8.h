@@ -45,9 +45,12 @@ typedef V90Qam8Frames V90Qam256Frames;
 void v90_qam256_frames_init(V90Qam256Frames *s,unsigned previous_quadrant);
 /* M=8/K=24/q=3: 60 bits, Q=8*ring+three_uncoded_bits. All byte labels valid. */
 int v90_qam256_frame(V90Qam256Frames *s,const uint8_t labels[8],uint8_t bits[60]);
+typedef V90Qam8Frames V90Qam448Frames;
+void v90_qam448_frames_init(V90Qam448Frames *s,unsigned previous);
+int v90_qam448_frame(V90Qam448Frames *s,const uint16_t labels[8],uint8_t bits[66]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
-    uint8_t labels[V90_QAM8_B1_SYMBOLS];
+    uint16_t labels[V90_QAM8_B1_SYMBOLS];
     double re[V90_QAM8_B1_SYMBOLS],im[V90_QAM8_B1_SYMBOLS];
     double reference_energy;
     unsigned position,count,m,k,q;
@@ -76,7 +79,7 @@ typedef struct {
     double history_re[V90_QAM_FEEDBACK_HISTORY][V90_EQ_MAX_TAPS],history_im[V90_QAM_FEEDBACK_HISTORY][V90_EQ_MAX_TAPS];
     uint64_t symbols,origin,pairs,output_symbol,output_frames,rejected_frames;
     double score,a_re,a_im;
-    uint8_t labels[8];
+    uint16_t labels[8];
     unsigned locked,have_a,count;
     void *opaque;
     /* Includes B1, starting with output_frames=1. NULL bits denotes an

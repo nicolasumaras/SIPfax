@@ -12,7 +12,8 @@ unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
 The lab currently selects the experimental adaptive 19,200 receiver after its
 first successful hardware test. Its first sustained run subsequently failed;
-post-renegotiation audio provides a repeatable receiver diagnostic. Broader qualification is required before changing
+the carrier-fit revision subsequently passed a sustained run with live
+renegotiation recovery. Broader qualification is required before changing
 the code default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
@@ -283,7 +284,9 @@ call after renegotiation now yields nine valid PPP frames versus two; the best
 timing lane rejects one shell versus 140. Before renegotiation, replay yields
 483 frames versus 481 and the best lane rejects 35 shells versus 187. This
 improves receiver recovery in the saved recording; it does not yet prove the
-original downstream CRC cause or sustained hardware reliability.
+original downstream CRC cause.
+
+The carrier-fit hardware retry completed all 64 verified 32 KiB downloads (2 MiB) and 64 verified 1 KiB upstream requests over 710.161 seconds, then disconnected cleanly. Windows counted 31 CRC errors and two alignment errors. Native CP changed downstream from 49.333 to 48 kbit/s during renegotiation; verified transfers continued afterward and the error counters stopped increasing. All 36,953 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX. The 148,419-packet capture had zero kernel drops and no RTP sequence gaps. All 129 response hashes were independently checked. Post-call ATA counters included 23 lost segments, one underflow and one FIFO drop, without event timing. This establishes one sustained 19,200 run with live rate-change recovery, not error-free maximum-rate reliability.
 
 
 ## 21,600-bit/s integration
@@ -305,4 +308,4 @@ An exploratory joint carrier/equalizer fit was unnecessary and is excluded.
 Independent tests cover all 160 labels and trellis states, shell boundaries,
 unused tuples, B1 and source timing, PCM to exact PPP, clock drift, distortion,
 and their combination. This rate is not yet hardware qualified. CT105 remains
-at 19,200 while the carrier-estimation retry runs.
+at 19,200 after the carrier-estimation retry passed.

@@ -349,8 +349,13 @@ using an independent segmented codec with all-code reconstruction checks.
 The extended 19,200 drift/distortion/PCMU case loses frames with the previous
 phase gain and passes with this change. Both clock-offset signs and delayed-E
 replay recover all expected frames. The equivalent 21,600 case also passes.
-This revision passed CI but has not yet been tested on hardware. The completed
-soak used the preceding integrator-only revision `047d95e`, still deployed.
+This revision passed CI. The previous completed soak used the integrator-only
+revision `047d95e`.
+
+The first phase-noise hardware trial passed authenticated PPP, a verified 32 KiB download in 7.492 seconds and all sixteen 1 KiB upstream payload checks. All uploads completed in 1.478–1.510 seconds (median 1.488), with no long pauses in this call. It disconnected cleanly after 38.215 seconds with zero Windows CRC or alignment errors. Native CP confirmed 49.333 kbit/s downstream. All 3,350 forwarded downstream primary payloads matched; the final server packet followed the caller BYE by 1.271 ms. The upstream suffix also matched. The 13,510-packet capture had zero kernel drops and no RTP sequence gaps, and all 18 response hashes were independently verified. This is one successful short trial; the new revision still requires sustained qualification.
+
+CT105 now runs `816a07a`; the previous binary is saved as
+`lm.pre-phase-noise`. A sustained retry is running.
 
 An exploratory 24,000 profile implements the 256-point M=8/K=24/q=3 mapping,
 B1 and basic PCM path, but still loses frames in extended distorted-clock

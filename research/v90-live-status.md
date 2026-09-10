@@ -1369,3 +1369,24 @@ worker34128terminal. Dial worker8705 and repeatprobe77987terminal. API disconnec
 work/v90-public-internet.pcap, v90-public-internet-probes.json,
 v90-public-internet-disconnect.json and attempt diagnosticsJSON.
 Reliability/long transfers/higher upstream remain unfinished; no completion claim.
+
+## Direct managed-switch diagnostics available (2026-09-10 UTC)
+
+Read UniFi's existing managed-device SSH credentials in memory through UDM
+root SSH and used them to authenticate to switch192.168.1.2. No credentials
+printed or persisted. Private helper work/unifi_switch_read.py runs read-only
+commands with pinned host verification. swctrl confirms ATA MAC on port4,
+100Mbps/full, autoneg, forwarding, flowcontrol enabled, jumbo enabled, anomaly0.
+The swctrl detailed-counter interface returned all-zero traffic totals and a
+Port0 label despite port4 selection; those outputs are unusable as evidence.
+
+mca-dump's port_table has nonzero traffic totals and usable telemetry. Port4:
+RXerrors0/TXerrors0/RXdropped0/TXdropped0, link_down_count2 (cumulative),
+RXpackets9591987/TXpackets62260364 at first read. Uplink18: 10Gbps/full,
+RXerrors8/TXerrors0/RXdropped0/TXdropped0, link_down_count2 cumulative. No timing
+correlation yet, so neither historical link-down events nor8uplink errors
+are attributed to modem trials. MAC topology verified directly, matching
+controller projection. Saved work/unifi-ata-port-telemetry.txt and
+work/unifi-ata-port-baseline.txt. Next scoped call can compare live counter
+deltas with ATA RTCP loss. No calls, configuration changes, counter resets,
+port restarts or traffic shaping this turn; all diagnostic workers terminal.

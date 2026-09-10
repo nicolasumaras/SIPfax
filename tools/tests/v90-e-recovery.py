@@ -40,6 +40,21 @@ int detect(const unsigned char *bits,unsigned n,int other_lane){
  for(unsigned i=0;i<n;++i)bit(&s,&s.lanes[other_lane && i>=428?1:0],bits[i]);
  return s.e_seen;
 }
+static void ignored_frame(void*p,const uint8_t*b,unsigned n){(void)p;(void)b;(void)n;}
+int early_e(const unsigned char *cp,unsigned n){
+ V90Phase4 s;v90_phase4_init(&s,0,78);
+ if(v90_cp_parse(&s.cp,cp,n,0)!=1)return -1;
+ if(v90_pcm_init(&s.encoder,&s.cp,training_bit,&s))return -2;
+ s.stage=2;s.ed_frame=1;s.trn_start=0;s.mp_length=102;
+ s.rx.e_seen=1;s.upstream.samples=100;s.upstream.frames=99;
+ s.upstream.receive_frame=ignored_frame;s.upstream.opaque=&s;
+ for(unsigned i=0;i<30;++i){
+  v90_phase4_next(&s,0);
+  if(s.upstream.samples!=i+1)return -3;
+ }
+ return s.stage==4 && s.upstream.require_b1 && !s.upstream.frames &&
+        s.upstream.receive_frame==ignored_frame && s.upstream.opaque==&s;
+}
 int finish(const unsigned char *cp,unsigned n,int have_cp,int have_e){
  V90Phase4 s;v90_phase4_init(&s,0,78);
  if(v90_cp_parse(&s.cpt,cp,n,0)!=1)return -1;
@@ -60,6 +75,10 @@ int finish(const unsigned char *cp,unsigned n,int have_cp,int have_e){
     lib = C.CDLL(str(so))
     lib.detect.argtypes = [C.c_char_p, C.c_uint, C.c_int]
     lib.finish.argtypes = [C.c_char_p, C.c_uint, C.c_int, C.c_int]
+    lib.early_e.argtypes = [C.c_char_p, C.c_uint]
+    fixture=(root/'test/fixtures/v90-cpt-6417.bits').read_bytes()
+    assert lib.early_e(fixture,len(fixture)) == 1, 'early E receiver reset or stopped at Ed'
+
     for kind, silence, corrupt in [(1,0,False), (0,0,False), (1,1,False), (1,0,True)]:
         cp = message(kind, silence, corrupt)
         for ones in [19,20,30]:

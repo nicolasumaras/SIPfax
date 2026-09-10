@@ -101,6 +101,12 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
     int count=s->rx.found;v90_training_receive(&s->rx,&input,1);
     if(count!=s->rx.found)receive_cp(s);
     if(s->rx.e_seen && !s->rx_e_logged) {
+        /* Upstream B1 follows E independently of our downstream Ed.
+           Reset here so an early E cannot lose B1 at Ed completion. */
+        void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
+        void *opaque=s->upstream.opaque;
+        v90_upstream_init(&s->upstream);s->upstream.require_b1=1;
+        s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
         s->rx_e_logged=1;fprintf(stderr,"[v90p4] upstream E detected at %.6fs; starting upstream B1/data receiver\n",s->samples/8000.0);
     }
     if(s->stage==2 && s->ed_frame && s->samples-s->trn_start==(s->ed_frame+2)*6) {
@@ -114,10 +120,6 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         } else if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
             s->stage=4;s->data_start=s->samples;
             s->data_bits=0;memset(&s->rate_detector,0,sizeof(s->rate_detector));
-            /* Keep callbacks but reset the upstream demapper for the new B1. */
-            void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
-            void *opaque=s->upstream.opaque;
-            v90_upstream_init(&s->upstream);s->upstream.require_b1=1;s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
             fprintf(stderr,"[v90p4] Ed complete; transmit B1d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable data constellation\n");}
     }
@@ -127,6 +129,12 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             mp_build(s);s->stage=1;s->rbar_end=s->samples+24;
             fprintf(stderr,"[v90p4] Ri-bar then TRN2d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable training constellation\n");}
+    }
+    if(s->rx_e_logged && (s->stage==2 || s->stage==4) && !s->cp.silence) {
+        unsigned had_b1=s->upstream.b1_seen;
+        v90_upstream_receive(&s->upstream,input);
+        if(!had_b1 && s->upstream.b1_seen)
+            fprintf(stderr,"[v90p4] upstream B1 correlation %.4f at %.6fs\n",s->upstream.b1_score,s->samples/8000.0);
     }
     int out=0;
     if(s->stage<=1) {
@@ -156,12 +164,6 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         }
     } else if(s->stage==4 || s->stage==5 || s->stage==6) {
         unsigned n=s->samples-s->data_start;
-        if(s->stage==4 && s->rx_e_logged) {
-            unsigned had_b1=s->upstream.b1_seen;
-            v90_upstream_receive(&s->upstream,input);
-            if(!had_b1 && s->upstream.b1_seen)
-                fprintf(stderr,"[v90p4] upstream B1 correlation %.4f at %.6fs\n",s->upstream.b1_score,s->samples/8000.0);
-        }
         if(n%6==0)v90_pcm_frame(&s->encoder,s->frame);
         out=s->frame[n%6];
         if(n==288)fprintf(stderr,"[v90p4] B1d transmitted\n");

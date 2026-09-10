@@ -33,6 +33,9 @@ export class Line extends EventEmitter {
     this.rtpEndpoint.on('timing', ({ reason }) => {
       this.emit('backend-log', { callId, line: `[rtp] ${reason}` });
     });
+    this.modemBridge.on('timing', ({ reason, samples }) => {
+      this.emit('backend-log', { callId, line: `[rtp] ${reason} samples=${samples}` });
+    });
     this.modemBridge.on('outbound-audio', (audio) => {
       this.rtpEndpoint.sendPayload(audio.payload, {
         payloadType: audio.payloadType,

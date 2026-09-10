@@ -2,6 +2,7 @@ import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { RtpPacer } from './rtp-pacer.js';
+import { RtpContinuity } from './rtp-continuity.js';
 
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
@@ -200,10 +201,12 @@ export class ModemBridge extends EventEmitter {
     this.audioBytesOut = 0;
     this.framesIn = 0;
     this.framesOut = 0;
+    this.continuity = new RtpContinuity({ report: (event) => this.emit('timing', event) });
     this.attachModem(modem);
   }
 
   setSessionCodec(codec) {
+    this.continuity.reset();
     this.codec = codec ?? null;
     if (this.modem?.setSessionCodec) {
       this.modem.setSessionCodec(this.codec);
@@ -235,6 +238,10 @@ export class ModemBridge extends EventEmitter {
   }
 
   acceptFrame(frame) {
+    for (const audio of this.continuity.accept(frame)) this.acceptContinuousFrame(audio);
+  }
+
+  acceptContinuousFrame(frame) {
     const payload = Buffer.from(frame.payload);
     const audio = {
       codec: this.codec,

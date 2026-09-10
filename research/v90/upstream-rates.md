@@ -5,8 +5,8 @@ The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
-12,000 passes synthetic tests but its first hardware upload failed. The lab currently
-selects 9,600. Broader qualification is required before changing the code default.
+12,000 initially failed its hardware upload, then passed after B1 equalization.
+The lab currently selects the experimental equalized 12,000 receiver. Broader qualification is required before changing the code default.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -172,4 +172,11 @@ with zero rejected shells in one timing lane. Other lanes still reject shells.
 Independent distorted-PCM tests recover exact PPP frames; the pre-equalizer
 receiver recovers only the first frame in the same regression. Separate tests
 cover held-out validation, unseen symbol recovery, delay and invalid-input
-state preservation. Hardware validation of this change remains required.
+state preservation. The hardware retry authenticated PPP, fetched an external
+page, verified a 32 KiB download in 7.579 seconds and all sixteen 1 KiB upstream
+request payloads. It disconnected cleanly after 48.179 seconds, with zero
+Windows CRC/alignment errors. Native CP confirmed 49.333 kbit/s downstream.
+All 3,851 downstream primary payloads and the forwarded upstream suffix matched
+across FreePBX. The 15,520-packet capture had no sequence gaps or kernel drops.
+CT105 retains this experimental equalized 12,000 build, with the validated
+9,600 binary saved as rollback. Sustained 12,000 qualification remains pending.

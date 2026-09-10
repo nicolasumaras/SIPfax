@@ -1556,3 +1556,19 @@ and Voice->VBD on2100-PR-Net. Therefore neither selecting existingPASSTHRU
 again nor sending arbitrary unnegotiated NSE is justified by these observations.
 Need establish actual supported switchover/control before experimenting.
 No livecall, injection, configchange or deployment this turn.
+
+## Bounded offline playback-control reference audit (2026-09-10 UTC)
+
+Read-only disassembly of existing private ata-mxp-library.elf. ELF32MIPSlittle
+endian, fixedgp0x100a0540 verified from function prologue. GOT reference scan
+finds nmmp_set_voice_playout_delay(0x44eee8) loaded only at0x465434 in the
+previously identified dsp command handler. ccup_set_voice_playout_delay
+(0x4931dc) load0x475278; configbuilder0x479794 load0x486b14. This limited static
+scan does not prove absence of indirect callers. Existing exposedSSHMXP
+interface rejects dsp/vpdelay, and stored-profile activation did not change
+liveVPtype. No new independent VBD provisioning control identified.
+Private helpers work/ata_disassemble.py,ata_playout_xrefs.py. Firmware was
+not executed, modified or uploaded. No activecalls/workers/settingschanges.
+Remaining external verification gap is actual ATA receive/playout/analog
+behavior; do not claim firmware incapability or all modem software correct
+from these observations alone.

@@ -1,0 +1,22 @@
+; Merge into pjsip.endpoint_custom_post.conf after these endpoints are defined.
+; Lab-specific modem extensions and SIPfax trunk. Preserve unrelated endpoints.
+; The ATA187 can fail DSP association during multi-codec early-media changes.
+[63416874](+)
+disallow=all
+allow=ulaw
+direct_media=no
+t38_udptl=no
+one_touch_recording=off
+
+[23416874](+)
+disallow=all
+allow=ulaw
+direct_media=no
+t38_udptl=no
+one_touch_recording=off
+
+[sipfax](+)
+disallow=all
+allow=ulaw
+direct_media=no
+t38_udptl=no

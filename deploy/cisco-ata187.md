@@ -40,6 +40,17 @@ reported `faxMode: PASSTHRU` and, on `2100-PR-Net`, `[Voice->VBD]` with
 `faxMode: FAX_RELAY` and remained `[Voice->Voice]`.
 
 Keep G.711 μ-law end-to-end for the current experimental SIPfax V.90 server.
+Use `ata187-freepbx-endpoints.conf.example` to restrict both lab ATA endpoints
+and the SIPfax trunk to `allow=ulaw` after `disallow=all`. An offer containing
+both μ-law and A-law triggered the ATA's early-media codec UPDATE. Failed
+calls logged `Assoc Channel on dsp=0, chan=2 failed -1`, followed by
+`TCID 1 has no DSP`, and sent no RTP. Restricting the offer to μ-law restored
+RTP and PPP in the next test. This is a tested interoperability setting;
+repeated startup and sustained-transfer reliability still require validation.
+Reload with `asterisk -rx "module reload res_pjsip.so"` and verify the live
+endpoint's `allow` field. If the ATA is already in the failed DSP state, restart
+its services while idle and confirm that registration returns before testing.
+
 This ATA setting fixes the observed media-mode configuration; it does not
 establish that SIPfax's V.90 training, sustained transfers or internet access
 are reliable. Those require separate hardware acceptance tests.

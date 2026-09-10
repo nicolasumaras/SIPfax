@@ -36,9 +36,10 @@ for packet in [expected[0],bad,*expected[1:]]:
     for b in packet:
         wire.extend([0x7d,b^0x20] if b<32 or b in [0x7d,0x7e] else [b])
     wire.extend(b'\x7e'*8)
-clock_drift='--clock-drift' in sys.argv
+clock_drift='--clock-drift' in sys.argv or '--long-clock' in sys.argv
 if clock_drift:
-    wire*=8;expected*=8
+    repetitions=64 if '--long-clock' in sys.argv else 8
+    wire*=repetitions;expected*=repetitions
 plain=[1]*(16*frame_bits)+[1]*180
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 # Flush the rate-dependent trellis lookahead with real idle symbols.

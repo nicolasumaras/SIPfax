@@ -315,3 +315,17 @@ Offline replay decodes 188 valid PPP frames. A slower clock-loop control decodes
 
 CT105 retains the experimental 21,600 build `d87f907`, with the validated
 19,200 carrier-fit binary saved as `lm.pre-21600`.
+
+
+## 21,600 clock acquisition and tracking
+
+The fast clock integrator is now limited to the first 9600 symbols (three
+seconds) after B1. It then uses the existing 0.00001 tracking gain while
+preserving frequency and phase state. Reacquisition starts the fast interval
+again. Lower-rate profiles are unchanged. The saved first hardware call
+now decodes 193 valid PPP frames instead of 188; the best lane rejects eight
+shells instead of 23. This matches the slower-loop control without sacrificing
+the high-drift case. Independent PCM tests now extend both signs of 100 ppm
+clock error with distortion to roughly 15 seconds, recovering all 192 expected
+PPP frames per waveform, including after delayed-E replay. Hardware retry
+is pending.

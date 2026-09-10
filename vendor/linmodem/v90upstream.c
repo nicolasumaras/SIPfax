@@ -167,9 +167,10 @@ static void symbol(V90Upstream *s,long time,double re,double im)
                  * error samples later. Keep phase and clock corrections
                  * separate; the phase term must not become clock drift. */
                 if(energy>1e-12)error=((l->previous_re-ar)*mr+(l->previous_im-ai)*mi)/energy;
-                /* The denser 21.6k constellation needs faster clock convergence;
-                 * retain the existing phase gain and bounded frequency range. */
-                l->timing_frequency+=(s->rate==21600?.0001:.00001)*error;
+                /* Acquire the denser 21.6k constellation with the fast loop
+                 * for three seconds after B1. Then reduce integrator noise
+                 * while retaining the learned frequency and phase state. */
+                l->timing_frequency+=(s->rate==21600 && q->symbols-q->origin<9600?.0001:.00001)*error;
                 if(l->timing_frequency>.002)l->timing_frequency=.002;
                 if(l->timing_frequency<-.002)l->timing_frequency=-.002;
             }

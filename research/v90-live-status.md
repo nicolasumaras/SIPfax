@@ -1594,3 +1594,16 @@ The capture contained 13,212 packets with zero kernel drops and no RTP sequence 
 The fresh recording yields zero CRC-valid PPP frames both with the four-pair candidate and with the fixed-clock control. The prior recording's nine-frame improvement therefore does not generalize. A separate diagnostic replay decodes B1 frames 2–16 exactly on two timing lanes, so post-training tracking remains the unresolved part; the good B1 score alone cannot qualify a connection.
 
 The wrapper restored `36577ed` at 24 kbit/s, with its expected binary hash and active service verified. Notebook connections are empty, SIPFAXRED call registration is cleared, and the capture, HTTP fixture, trial and diagnostic processes have terminated. No 26.4 changes are committed or left deployed.
+
+
+## Echo-reference experiment on recorded 26.4 kbit/s calls
+
+The accepted native B1 equalizer fit was reproduced independently. Best-lane held-out errors remained about 0.85 and 0.82 normalized units; adding conjugate/image terms or combining nearby sampling phases did not yield a consistent, well-conditioned improvement. These are limited offline model comparisons, not proof that the front end is optimal.
+
+The corresponding transmitted PCM recordings were then retrieved for native processes 10030 and 10352. A TX-to-RX correlation scan over delays 0–8000 samples found the strongest absolute correlation at 1428 samples (178.5 ms) in both calls and both independent 25–35 s and 40–50 s windows. Correlation magnitudes were 0.0196–0.0293. This supports investigating returning transmit audio; it does not identify the physical echo source by itself.
+
+A 65-tap linear echo model spanning delays 1396–1460 samples was fitted on 25–35 s of each call. On the separate 40–50 s interval, subtraction reduced mean-square received energy by 722 and 2022 PCM units squared, respectively. The model was then applied offline to each full recording, including its earlier training interval. Both corrected recordings yielded ten CRC-valid PPP frames with the private four-pair receiver, versus nine and zero before correction. These are noncausal offline experiments because fitting uses samples later than the training interval.
+
+A cross-call control also yielded ten frames on each recording: coefficients learned only from the other call were used for subtraction. The recovered frame hashes exactly matched the respective same-call corrected results. This is stronger evidence than a same-recording fit, but still only two recordings and no live PPP connection. A production canceller must learn and track delay/filter coefficients causally, preserve the modem signal, handle startup and clock drift, and pass live transfer tests. No fixed recording-derived coefficients have been deployed or committed.
+
+The tested 24 kbit/s upstream deployment remains unchanged. All echo fit, replay, cross-call replay and retrieval processes completed. The next implementation target is causal transmit-reference echo cancellation with explicit startup and delay handling, followed by a reversible hardware trial.

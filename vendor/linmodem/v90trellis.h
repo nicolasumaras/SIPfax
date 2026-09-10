@@ -1,17 +1,17 @@
 #ifndef V90TRELLIS_H
 #define V90TRELLIS_H
-/* Experimental four/eight/twelve-point, 16-state V.34 upstream kernel. GPL-2.0.
+/* Experimental four/eight/twelve/twenty-point, 16-state V.34 upstream kernel. GPL-2.0.
  * Caller supplies carrier/gain-aligned pairs and the known V0 inversion bit.
  * Acquisition, superframe synchronization and PPP delivery are external.
  * Four-point native integration is opt-in with SIPFAX_V90_SOFT_RX=1.
- * Eight-point acquisition and native integration are not implemented yet. */
+ * Higher-rate acquisition and native integration live in v90qam8/v90upstream. */
 #include <stdint.h>
 #define V90_TRELLIS_DEPTH 64
 
 typedef struct {
     double metric[16];
     uint8_t previous[V90_TRELLIS_DEPTH][16];
-    uint8_t labels[V90_TRELLIS_DEPTH][16];
+    uint16_t labels[V90_TRELLIS_DEPTH][16];
     uint64_t pairs;
 } V90Trellis;
 void v90_trellis_init(V90Trellis *s);
@@ -33,6 +33,12 @@ int v90_trellis_qam8_pair(V90Trellis *s,double ar,double ai,double br,double bi,
  * Same return contract as qam8_pair. Reset before changing constellation.
  * This kernel alone does not enable 9600-bit/s acquisition or live reception. */
 int v90_trellis_qam12_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *a,unsigned *b);
+/* Twenty-point minimum constellation for 12000/3200, q=0, M=5.
+ * Quarter points (1,1),(-3,1),(1,-3),(-3,-3),(1,5).
+ * Labels use five bits; packed history retains both complete labels.
+ * Same contract as qam12_pair; acquisition/live 12000 reception is separate. */
+int v90_trellis_qam20_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                           unsigned inversion,unsigned *a,unsigned *b);
 /* Acquire the 448-pair J=7 superframe phase from 896..16384 hard pairs.
  * Labels are a|(b<<2). offset is relative to labels[0]. Returns 0 if

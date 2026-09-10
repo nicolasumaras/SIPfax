@@ -1,4 +1,4 @@
-/* V.34 9.3/9.5 inverse for 7200/9600, q=0, all high frames. GPL-2.0. */
+/* V.34 9.3/9.5 inverse for 7200/9600/12000, q=0, all high frames. GPL-2.0. */
 #include <string.h>
 #include <math.h>
 #include "v90qam8.h"
@@ -9,7 +9,7 @@ void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous)
 static int mapping_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t *bits,
                          unsigned m,unsigned k)
 {
-    uint8_t rings[8],decoded[24];uint32_t index;
+    uint8_t rings[8],decoded[30];uint32_t index;
     if(s->shell.m!=m || s->shell.k!=k)return 0;
     for(unsigned i=0;i<8;++i){if(labels[i]>=4*m)return 0;rings[i]=labels[i]>>2;}
     unsigned previous=s->previous;s->previous=labels[6]&3;
@@ -36,6 +36,15 @@ void v90_qam12_frames_init(V90Qam12Frames *s,unsigned previous)
 int v90_qam12_frame(V90Qam12Frames *s,const uint8_t labels[8],uint8_t bits[24])
 {
     return mapping_frame(s,labels,bits,3,12);
+}
+
+void v90_qam20_frames_init(V90Qam20Frames *s,unsigned previous)
+{
+    v90_shell_init(&s->shell,5,18);s->previous=previous&3;
+}
+int v90_qam20_frame(V90Qam20Frames *s,const uint8_t labels[8],uint8_t bits[30])
+{
+    return mapping_frame(s,labels,bits,5,18);
 }
 
 static void point(unsigned label,double *re,double *im)

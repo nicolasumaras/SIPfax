@@ -124,3 +124,13 @@ All 40,667 downstream RTP primary payloads matched across the PBX; upstream
 payloads matched after the 11-packet early-media prefix. No RTP sequence gaps
 or kernel capture drops were recorded. This is a successful sustained test,
 not an error-free or full-conformance result.
+
+## 12,000-bit/s foundation
+
+The twenty-point minimum-constellation kernel now preserves five-bit labels
+for both symbols in each trellis history entry. Independent Figure 5/9 and
+Table 13 tests cover all 16 encoder states, all 20 labels, noise and invalid
+input rejection. The M=5/K=18 mapping-frame inverse recovers 30 scrambled bits;
+tests exhaust all 262,144 valid shell indices and check unused-shell rejection,
+differential-history recovery and smaller-output cross-rate rejection. This
+does not yet enable 12,000-bit/s B1 acquisition or native audio/MP negotiation.

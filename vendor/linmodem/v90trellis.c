@@ -1,4 +1,4 @@
-/* Four/eight/twelve-point V.34/V.90 16-state soft trellis. GPL-2.0. */
+/* Four/eight/twelve/twenty-point V.34/V.90 16-state soft trellis. GPL-2.0. */
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -23,15 +23,15 @@ static int pair_costs(V90Trellis *s,const double ca[4],const double cb[4],
         for(unsigned a=0;a<4;++a)for(unsigned info=0;info<2;++info) {
             unsigned b=(a+2*info+(u^(inversion&1)))&3;
             /* Table13 Y1/Y2 depend on the low two subset bits. For the
-             * eight-point M=2 constellation those bits are the quadrant;
-             * the ring changes only Y4, unused by the 16-state encoder. */
+             * supported q=0 constellations those bits are the quadrant;
+             * ring-dependent upper subset bits do not affect this encoder. */
             unsigned as0=a&1,bs0=b&1,as1=a>>1,bs1=b>>1;
             unsigned y1=(as0&(bs0^1))^as1^bs1,y2=as0;
             unsigned dest=(state>>1)^y1^(y2<<1)^((y2^u)<<2)^(u<<3);
             double cost=s->metric[state]+ca[a]+cb[b];
             if(cost<next[dest]) {
                 next[dest]=cost;s->previous[slot][dest]=(uint8_t)state;
-                s->labels[slot][dest]=(uint8_t)(labels_a[a]|(labels_b[b]<<label_bits));
+                s->labels[slot][dest]=(uint16_t)(labels_a[a]|(labels_b[b]<<label_bits));
             }
         }
     }
@@ -66,8 +66,8 @@ static int qam_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                     unsigned inversion,unsigned rings,unsigned label_bits,
                     unsigned *out_a,unsigned *out_b)
 {
-    static const double re[12]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3};
-    static const double im[12]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1};
+    static const double re[20]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5};
+    static const double im[20]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1};
     if(!isfinite(ar)||!isfinite(ai)||!isfinite(br)||!isfinite(bi)||
        fabs(ar)>1e100||fabs(ai)>1e100||fabs(br)>1e100||fabs(bi)>1e100)return -1;
     double ca[4],cb[4];unsigned la[4],lb[4];
@@ -92,6 +92,12 @@ int v90_trellis_qam12_pair(V90Trellis *s,double ar,double ai,double br,double bi
                           unsigned inversion,unsigned *out_a,unsigned *out_b)
 {
     return qam_pair(s,ar,ai,br,bi,inversion,3,4,out_a,out_b);
+}
+
+int v90_trellis_qam20_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                          unsigned inversion,unsigned *out_a,unsigned *out_b)
+{
+    return qam_pair(s,ar,ai,br,bi,inversion,5,5,out_a,out_b);
 }
 
 unsigned v90_trellis_inversion(unsigned pair,unsigned offset)

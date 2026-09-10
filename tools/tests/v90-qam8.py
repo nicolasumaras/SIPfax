@@ -47,6 +47,7 @@ void *trellis(void){V90Trellis*s=malloc(sizeof(*s));v90_trellis_init(s);return s
 void *frames(unsigned previous){V90Qam8Frames*s=malloc(sizeof(*s));v90_qam8_frames_init(s,previous);return s;}
 void destroy(void*s){free(s);}
 void *frames12(unsigned previous){V90Qam12Frames*s=malloc(sizeof(*s));v90_qam12_frames_init(s,previous);return s;}
+void *frames20(unsigned previous){V90Qam20Frames*s=malloc(sizeof(*s));v90_qam20_frames_init(s,previous);return s;}
 void *b1(void){V90Qam8B1*s=malloc(sizeof(*s));v90_qam8_b1_init(s);return s;}
 unsigned b1_label(V90Qam8B1*s,unsigned i){return s->labels[i];}
 void *stream(void (*cb)(void*,const uint8_t*)) {
@@ -219,6 +220,65 @@ uint64_t count(V90Trellis*s){return s->pairs;}
                 if ready:decoded.append((aa.value,bb.value))
             assert decoded[64:]==labels[64:len(decoded)],(initial,noisy)
             lib.destroy(state)
+    # Figure 5 quarter points, Figure 9 coordinate subsets and full Table 13
+    # independently exercise the five-bit labels needed at 12000/3200.
+    def point20(label):return [1+1j,-3+1j,1-3j,-3-3j,1+5j][label>>2]*(-1j)**(label&3)
+    lib.v90_trellis_qam20_pair.argtypes=lib.v90_trellis_qam12_pair.argtypes
+    seen=set()
+    for initial in range(16):
+        encoder=initial;encoded=[];inversions=[]
+        for i in range(1600):
+            inv=pattern[(i//32)%14] if i%32==0 else 0
+            a=rng.randrange(4);b=(a+2*rng.randrange(2)+((encoder&1)^inv))%4
+            a+=4*rng.randrange(5);b+=4*rng.randrange(5)
+            seen.update((a,b));encoded.append((a,b));inversions.append(inv)
+            v=converter[subset(point20(a))][subset(point20(b))];u=encoder&1
+            encoder=(encoder>>1)^(v&1)^(((v>>1)&1)<<1)^((((v>>1)&1)^u)<<2)^(u<<3)
+        for noisy in [False,True]:
+            state=lib.trellis();decoded=[]
+            for (a,b),inv in zip(encoded,inversions):
+                x,y=point20(a),point20(b)
+                if noisy:
+                    x+=complex(rng.gauss(0,.08),rng.gauss(0,.08))
+                    y+=complex(rng.gauss(0,.08),rng.gauss(0,.08))
+                aa=C.c_uint(99);bb=C.c_uint(99)
+                old=lib.count(state)
+                for bad in [float('nan'),float('inf'),1e200]:
+                    assert lib.v90_trellis_qam20_pair(state,bad,0,0,0,inv,C.byref(aa),C.byref(bb))==-1
+                    assert lib.count(state)==old and aa.value==bb.value==99
+                ready=lib.v90_trellis_qam20_pair(state,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb))
+                if ready:decoded.append((aa.value,bb.value))
+            assert decoded[64:]==encoded[64:len(decoded)],(initial,noisy)
+            lib.destroy(state)
+    assert seen==set(range(20))
+    print('PASS: twenty-point kernel, full-width history, independent subsets, all states, noise and rejection')
+    shells20=sorted(itertools.product(range(5),repeat=8),key=lambda r:
+        (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))
+    lib.frames20.argtypes=[C.c_uint];lib.frames20.restype=C.c_void_p
+    lib.v90_qam20_frame.argtypes=lib.v90_qam12_frame.argtypes=lib.v90_qam8_frame.argtypes
+    previous=0;f=lib.frames20(previous)
+    for index,shell in enumerate(shells20[:1<<18]):
+        expected=[(index>>i)&1 for i in range(18)]+[rng.randrange(2) for _ in range(12)]
+        labels=[]
+        for p in range(4):
+            a=(previous+expected[19+3*p]+2*expected[20+3*p])%4
+            b=(a+2*expected[18+3*p]+rng.randrange(2))%4;previous=a
+            labels.extend([a+4*shell[2*p],b+4*shell[2*p+1]])
+        out=(C.c_uint8*30)()
+        assert lib.v90_qam20_frame(f,(C.c_uint8*8)(*labels),out) and list(out)==expected,index
+    out=(C.c_uint8*30)(*([99]*30))
+    assert not lib.v90_qam20_frame(f,(C.c_uint8*8)(*[4*r+3 for r in shells20[1<<18]]),out)
+    assert list(out)==[99]*30
+    # An unused shell still advances differential history, unlike invalid labels.
+    labels=(C.c_uint8*8)(*([0]*8));out=(C.c_uint8*30)()
+    assert lib.v90_qam20_frame(f,labels,out) and list(out)==[0]*19+[1]+[0]*10
+    invalid=(C.c_uint8*8)(20,0,0,0,0,0,0,0);out=(C.c_uint8*30)(*([99]*30))
+    assert not lib.v90_qam20_frame(f,invalid,out) and list(out)==[99]*30
+    small=(C.c_uint8*24)(*([99]*24))
+    assert not lib.v90_qam12_frame(f,labels,small) and list(small)==[99]*24
+    lib.destroy(f)
+    print('PASS: all 262144 twenty-point shell frames, 30 bits, differential history and rejection bounds')
+
     shells12=sorted(itertools.product(range(3),repeat=8),key=lambda r:
         (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:4096]
     lib.frames12.argtypes=[C.c_uint];lib.frames12.restype=C.c_void_p

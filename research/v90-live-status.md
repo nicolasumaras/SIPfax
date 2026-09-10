@@ -1522,3 +1522,21 @@ message. User has only the current ATA model available. FreePBX endpoint
 23416874 is registered on192.168.1.235:5062, Available and Not in use; second
 analog-port comparison is prepared and requires physically moving notebook
 phone cable. No network/service changes or livecalls this turn.
+
+## Second analog port comparison also fails (2026-09-10 UTC)
+
+User moved notebook phone cable toATAport2. Attempt54d403d8-6e2a-4722-a9d8-ff60dd3e8bfe
+verified in liveAsterisk asPJSIP/23416874->sipfax, confirmingphysicalport change.
+Dial43288terminalFailed678 after training retries; no PPP or internet probe.
+Capture97446began afterinitialcallsetup, stoppedSIGINT,4390packets/0kernel drops.
+ATA10RTCP reports downstreamSSRC973284912 loss0->2; PBX9reports upstream
+SSRC1887604648 loss0 throughout.
+
+Postcall channel1 diagnostics25807terminal, RXlastSSRC973284912 matchescapture:
+RXmaxinterarrival50ms/min0, networkloss2/seqgaps2. VPtype1avg15ms,
+lostsegments26,FIFOdropped16,underflows4,starve6. Similar receive/playout
+impairments occur onbothanalogports; this trial does not support a defect
+isolated toport1. Existing notebook cable remains onport2/line23416874 for
+subsequenttests. No network/server settings changed. Serververifiedidle,
+sipfaxactive. Private work/v90-port2.pcap,v90-port2-rtcp.jsonl,
+ata-port2-retained.txt and attemptdiagnosticsJSON. Allworkers terminal.

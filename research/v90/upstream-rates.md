@@ -5,7 +5,8 @@ The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver; `14400` selects
 the experimental thirty-two-point receiver; `16800` selects the experimental
 fifty-six-point receiver; `19200` selects the experimental ninety-six-point
-receiver with one uncoded bit per symbol.
+receiver with one uncoded bit per symbol; `21600` selects the experimental
+160-point receiver with two uncoded bits per symbol.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
@@ -283,3 +284,25 @@ timing lane rejects one shell versus 140. Before renegotiation, replay yields
 483 frames versus 481 and the best lane rejects 35 shells versus 187. This
 improves receiver recovery in the saved recording; it does not yet prove the
 original downstream CRC cause or sustained hardware reliability.
+
+
+## 21,600-bit/s integration
+
+At 3200 symbols/s the minimum constellation uses M=10/K=26/q=2: 160
+points, eight-bit labels and 54 bits per mapping frame. The trellis retains
+both labels in its existing 16-bit history. Mapping, B1 acquisition, continuous
+PPP delivery and MP rate/capability negotiation preserve both uncoded bits.
+
+The combined clock-drift/distortion test exposed insufficient tracking speed.
+This rate uses a 0.0001 clock integrator gain with the existing phase gain and
+200 ppm frequency bound, plus a 0.05 normalized-LMS step gated at squared
+point distance below 0.5. The confidence radius stays below half the minimum
+constellation spacing. Lower rates keep their existing settings. Separate
+controls with the slower clock loop or slower equalizer lose interior frames;
+the final receiver recovers all expected frames for both clock-offset signs.
+An exploratory joint carrier/equalizer fit was unnecessary and is excluded.
+
+Independent tests cover all 160 labels and trellis states, shell boundaries,
+unused tuples, B1 and source timing, PCM to exact PPP, clock drift, distortion,
+and their combination. This rate is not yet hardware qualified. CT105 remains
+at 19,200 while the carrier-estimation retry runs.

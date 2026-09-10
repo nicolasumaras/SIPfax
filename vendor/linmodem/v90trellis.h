@@ -97,4 +97,7 @@ typedef struct {
 } V90TrellisStream;
 void v90_trellis_stream_init(V90TrellisStream *s);
 void v90_trellis_stream_symbol(V90TrellisStream *s,double re,double im);
+/* 21600/3200 minimum constellation, M=10/q=2, eight-bit labels. */
+int v90_trellis_qam160_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                           unsigned inversion,unsigned *out_a,unsigned *out_b);
 #endif

@@ -8,14 +8,14 @@ import tempfile
 import sys
 from v90_shell_reference import ShellReference
 root=Path(__file__).resolve().parents[2]
-m,k,q_bits=(12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
+m,k,q_bits=(10,26,2) if '--21600' in sys.argv else (12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
 frame_bits=k+12+8*q_bits
 point_count=4*m*(1<<q_bits)
 converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-points=[z*(-1j)**q for z in [1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j][:m*(1<<q_bits)] for q in range(4)]
+points=[z*(-1j)**q for z in [1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j,5+5j,-7+1j,1-7j,-7-3j,-3-7j,-7+5j,5-7j,1+9j,9+1j,-3+9j,9-3j,-7-7j,5+9j,9+5j,-11+1j,1-11j,-7+9j,-11-3j,9-7j,-3-11j,-11+5j,5-11j,9+9j,1+13j,13+1j,-11-7j,-7-11j,-3+13j,13-3j,5+13j,13+5j,-11+9j][:m*(1<<q_bits)] for q in range(4)]
 def subset(z):
     x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
     return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
@@ -35,7 +35,8 @@ unsigned long long rejected(V90Qam8Stream*s){return s->rejected_frames;}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Trellis*s){return s->pairs;}
 ''')
-    if q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init').replace('s,14400','s,19200'))
+    if q_bits==2:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam160Frames').replace('v90_qam32_frames_init','v90_qam160_frames_init').replace('s,14400','s,21600'))
+    elif q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init').replace('s,14400','s,19200'))
     elif m==14:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam56Frames').replace('v90_qam32_frames_init','v90_qam56_frames_init').replace('s,14400','s,16800'))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.trellis.restype=lib.frames.restype=C.c_void_p;lib.frames.argtypes=[C.c_uint];lib.destroy.argtypes=[C.c_void_p]
@@ -59,7 +60,7 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
     assert seen==set(range(point_count))
     out=(C.c_uint8*frame_bits)(*([99]*frame_bits));assert not frame_fn(f,(C.c_uint8*8)(point_count,0,0,0,0,0,0,0),out) and list(out)==[99]*frame_bits
     small=(C.c_uint8*30)(*([99]*30));assert not lib.v90_qam20_frame(f,(C.c_uint8*8)(),small) and list(small)==[99]*30
-    if m in [12,14]:
+    if m in [10,12,14]:
         # The first unused shell is rejected without overwriting output.
         out=(C.c_uint8*frame_bits)(*([99]*frame_bits))
         assert not frame_fn(f,(C.c_uint8*8)(*[4*(r<<q_bits) for r in oracle[1<<k]]),out)
@@ -126,5 +127,5 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
             z=points[label];lib.v90_qam8_stream_symbol(s,z.real,z.imag)
         assert output==source[:33] and positions[0]==len(labels)+8
         lib.destroy(s)
-    print('PASS:',frame_bits*400,'B1, continuous 36-bit frames, gain/carrier/noise, source timing and reacquisition')
+    print('PASS:',frame_bits*400,f'B1, continuous {frame_bits}-bit frames, gain/carrier/noise, source timing and reacquisition')
 print(f'PASS: {point_count} points, all trellis states, noise, {frame_bits}-bit shell/differential mapping, energy-bucket boundaries and rejection bounds')

@@ -23,7 +23,7 @@ static int pair_costs(V90Trellis *s,const double ca[4],const double cb[4],
         for(unsigned a=0;a<4;++a)for(unsigned info=0;info<2;++info) {
             unsigned b=(a+2*info+(u^(inversion&1)))&3;
             /* Table13 Y1/Y2 depend on the low two subset bits. For the
-             * supported q=0 constellations those bits are the quadrant;
+             * supported constellations those bits are the quadrant;
              * ring-dependent upper subset bits do not affect this encoder. */
             unsigned as0=a&1,bs0=b&1,as1=a>>1,bs1=b>>1;
             unsigned y1=(as0&(bs0^1))^as1^bs1,y2=as0;
@@ -66,8 +66,8 @@ static int qam_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                     unsigned inversion,unsigned rings,unsigned label_bits,
                     unsigned *out_a,unsigned *out_b)
 {
-    static const double re[96]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3,5,5,-5,-5,-7,1,7,-1,1,-7,-1,7,-7,-3,7,3,-3,-7,3,7,-7,5,7,-5,5,-7,-5,7,1,9,-1,-9,9,1,-9,-1,-3,9,3,-9,9,-3,-9,3,-7,-7,7,7,5,9,-5,-9,9,5,-9,-5,-11,1,11,-1,1,-11,-1,11};
-    static const double im[96]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5,5,-5,-5,5,1,7,-1,-7,-7,-1,7,1,-3,7,3,-7,-7,3,7,-3,5,7,-5,-7,-7,-5,7,5,9,-1,-9,1,1,-9,-1,9,9,3,-9,-3,-3,-9,3,9,-7,7,7,-7,9,-5,-9,5,5,-9,-5,9,1,11,-1,-11,-11,-1,11,1};
+    static const double re[160]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5,5,1,-5,-1,-3,5,3,-5,5,-3,-5,3,5,5,-5,-5,-7,1,7,-1,1,-7,-1,7,-7,-3,7,3,-3,-7,3,7,-7,5,7,-5,5,-7,-5,7,1,9,-1,-9,9,1,-9,-1,-3,9,3,-9,9,-3,-9,3,-7,-7,7,7,5,9,-5,-9,9,5,-9,-5,-11,1,11,-1,1,-11,-1,11,-7,9,7,-9,-11,-3,11,3,9,-7,-9,7,-3,-11,3,11,-11,5,11,-5,5,-11,-5,11,9,9,-9,-9,1,13,-1,-13,13,1,-13,-1,-11,-7,11,7,-7,-11,7,11,-3,13,3,-13,13,-3,-13,3,5,13,-5,-13,13,5,-13,-5,-11,9,11,-9};
+    static const double im[160]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1,1,-5,-1,5,5,3,-5,-3,-3,-5,3,5,5,-5,-5,5,1,7,-1,-7,-7,-1,7,1,-3,7,3,-7,-7,3,7,-3,5,7,-5,-7,-7,-5,7,5,9,-1,-9,1,1,-9,-1,9,9,3,-9,-3,-3,-9,3,9,-7,7,7,-7,9,-5,-9,5,5,-9,-5,9,1,11,-1,-11,-11,-1,11,1,9,7,-9,-7,-3,11,3,-11,-7,-9,7,9,-11,3,11,-3,5,11,-5,-11,-11,-5,11,5,9,-9,-9,9,13,-1,-13,1,1,-13,-1,13,-7,11,7,-11,-11,7,11,-7,13,3,-13,-3,-3,-13,3,13,13,-5,-13,5,5,-13,-5,13,9,11,-9,-11};
     if(!isfinite(ar)||!isfinite(ai)||!isfinite(br)||!isfinite(bi)||
        fabs(ar)>1e100||fabs(ai)>1e100||fabs(br)>1e100||fabs(bi)>1e100)return -1;
     double ca[4],cb[4];unsigned la[4],lb[4];
@@ -288,4 +288,10 @@ void v90_trellis_stream_symbol(V90TrellisStream *s,double re,double im)
     for(unsigned i=s->acquisition.pair_alignment;i<s->count;++i)
         stream_locked(s,s->re[i],s->im[i]);
     s->count=0;
+}
+
+int v90_trellis_qam160_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                           unsigned inversion,unsigned *out_a,unsigned *out_b)
+{
+    return qam_pair(s,ar,ai,br,bi,inversion,40,8,out_a,out_b);
 }

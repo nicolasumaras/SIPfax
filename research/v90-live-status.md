@@ -1479,3 +1479,32 @@ alternate SIP ATA for a controlled comparison using the same XP modem.
 Private work/ata-16487-retained-diagnostics.txt. No livecalls or settings
 changes this turn; no new blocking-status declaration while comparison
 options remain under investigation.
+
+## Verified10ms packetization trial did not cure training failure (2026-09-10 UTC)
+
+Hypothesis: smaller packets might help ATA's15ms adaptive buffer. Asterisk16
+format_cap.c supports codec:framems. Temporarily changed only63416874 codec
+allow to ulaw:10,alaw:10 in pjsip.endpoint_custom_post.conf, with exact backup
+/tmp/sipfax-before-ptime10.conf and8minute rollbacktimer. PBX has no python3;
+first remote preparation failed before mutation, then localPython/SSH applied.
+Old Asterisk has no `pjsip reload`; first dial57a4e6fd-8418-4020-a80f-bd7c3ba853f2
+was cancelled (terminalFailed) because settings had not loaded. Corrected
+reload/rollback to `module reload res_pjsip.so`, verifiedsuccessful, then fresh
+attempt6956e2fa-926f-4ba9-b885-3f01bb5b2611 tested the loaded setting.
+
+Capture verifies80bytePT0 payloads both directions for secondcall:
+ATA SSRC1490515556, PBXSSRC2059638102. Prefix downstream spacing7.852..12.214ms,
+median9.993ms; no<1ms paired bursts. Thus10ms effect was real, not config-only.
+Call retrained repeatedly and endedFailed. RetainedATA RXSSRC2059638102 matches:
+6068receivedpackets, maxinterarrival60ms, networkloss7/seqgaps6, invalidheader/
+payload/SSRC0, VPtype1avg15ms, droppedsegments29, lostsegments45, underflows5,
+starve11, adaptiveincrease4/decrease14. No evidence of benefit in this trial.
+
+Restored exact original file, cmpverified, module reloaded successfully, timer
+stopped (is-activeunknown after transientunit removal). Capture12960 terminal
+normal150s timeout124,15485captured/0kernel drops; capture spans cancelled and
+freshcall and may omit final packets, useSSRC filtering. Dial78701terminal;
+retaineddiagnostics65842terminal. Server no lm/pppd; sipfaxactive. No temporary
+configuration remains. Private work/v90-ptime10-{prefix,final}.pcap,
+ata-ptime10-retained.txt and attemptdiagnosticsJSON. Source snapshots of public
+Asterisk16 parser/SDP code underwork only. Goal unfinished.

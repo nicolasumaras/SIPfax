@@ -10,6 +10,11 @@ void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous_quadrant);
  * leave output untouched; valid labels still advance differential history so
  * a bad shell does not corrupt the next frame. Invalid labels reset nothing. */
 int v90_qam8_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t bits[18]);
+typedef V90Qam8Frames V90Qam12Frames;
+void v90_qam12_frames_init(V90Qam12Frames *s,unsigned previous_quadrant);
+/* Same frame contract, but M=3/K=12 and 24 scrambled bits for 9600/3200.
+ * Labels are quadrant|(ring<<2), where ring is 0..2. */
+int v90_qam12_frame(V90Qam12Frames *s,const uint8_t labels[8],uint8_t bits[24]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
     uint8_t labels[V90_QAM8_B1_SYMBOLS];

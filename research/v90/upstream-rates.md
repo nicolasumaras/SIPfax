@@ -77,6 +77,6 @@ The next-rate `v90_trellis_qam12_pair` kernel accepts the three-ring, twelve-poi
 minimum constellation for 9,600 bit/s at 3,200 symbols/s. Its independent tests
 compute Figure 9 subsets from coordinates and then apply Table 13, covering all
 16 initial encoder states and noise. Ring 2 repeats a subset class; its ring
-index must not be used directly as a Table 13 subset number. This kernel does
-not yet provide 24-bit mapping frames, rate-specific B1 acquisition or a live
-9,600-bit/s mode. It does not alter the deployed 7,200-bit/s receiver.
+index must not be used directly as a Table 13 subset number. The companion `v90_qam12_frame` now recovers 24 scrambled bits; exhaustive
+tests cover all 4,096 shell indices, differential bits and rejection bounds.
+Rate-specific B1 acquisition and a live 9,600-bit/s mode remain unimplemented. It does not alter the deployed 7,200-bit/s receiver.

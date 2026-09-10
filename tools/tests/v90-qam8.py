@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory() as directory:
 void *trellis(void){V90Trellis*s=malloc(sizeof(*s));v90_trellis_init(s);return s;}
 void *frames(unsigned previous){V90Qam8Frames*s=malloc(sizeof(*s));v90_qam8_frames_init(s,previous);return s;}
 void destroy(void*s){free(s);}
+void *frames12(unsigned previous){V90Qam12Frames*s=malloc(sizeof(*s));v90_qam12_frames_init(s,previous);return s;}
 void *b1(void){V90Qam8B1*s=malloc(sizeof(*s));v90_qam8_b1_init(s);return s;}
 unsigned b1_label(V90Qam8B1*s,unsigned i){return s->labels[i];}
 void *stream(void (*cb)(void*,const uint8_t*)) {
@@ -214,5 +215,30 @@ uint64_t count(V90Trellis*s){return s->pairs;}
                 if ready:decoded.append((aa.value,bb.value))
             assert decoded[64:]==labels[64:len(decoded)],(initial,noisy)
             lib.destroy(state)
+    shells12=sorted(itertools.product(range(3),repeat=8),key=lambda r:
+        (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:4096]
+    lib.frames12.argtypes=[C.c_uint];lib.frames12.restype=C.c_void_p
+    lib.v90_qam12_frame.argtypes=lib.v90_qam8_frame.argtypes
+    previous=0;f=lib.frames12(previous);state=0
+    for index,shell in enumerate(shells12):
+        expected=[(index>>i)&1 for i in range(12)]+[rng.randrange(2) for _ in range(12)]
+        labels=[]
+        for p in range(4):
+            i=4*index+p;inv=pattern[(i//32)%14] if i%32==0 else 0
+            a=(previous+expected[13+3*p]+2*expected[14+3*p])%4
+            b=(a+2*expected[12+3*p]+((state&1)^inv))%4;previous=a
+            x=a+4*shell[2*p];y=b+4*shell[2*p+1];labels.extend([x,y])
+            v=converter[subset(point12(x))][subset(point12(y))];u=state&1
+            state=(state>>1)^(v&1)^(((v>>1)&1)<<1)^((((v>>1)&1)^u)<<2)^(u<<3)
+        packet=(C.c_uint8*8)(*labels);out=(C.c_uint8*24)()
+        assert lib.v90_qam12_frame(f,packet,out) and list(out)==expected,index
+    out=(C.c_uint8*24)(*([99]*24))
+    assert not lib.v90_qam12_frame(f,(C.c_uint8*8)(*([11]*8)),out)
+    assert list(out)==[99]*24
+    # Cross-rate misuse must not overrun the smaller 18-bit destination.
+    small=(C.c_uint8*18)(*([99]*18))
+    assert not lib.v90_qam8_frame(f,(C.c_uint8*8)(),small) and list(small)==[99]*18
+    lib.destroy(f)
+    print('PASS: all 4096 twelve-point shell frames, differential bits and rejection bounds')
     print('PASS: twelve-point kernel, coordinate-derived Figure 9 subsets, Table 13, all states and noise')
 print('PASS: continuous B1/data decoding, carrier offset/gain drift/noise, source positions and reacquisition')

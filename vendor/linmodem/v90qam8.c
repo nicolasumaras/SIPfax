@@ -6,22 +6,36 @@ void v90_qam8_frames_init(V90Qam8Frames *s,unsigned previous)
 {
     v90_shell_init(&s->shell,2,6);s->previous=previous&3;
 }
-int v90_qam8_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t bits[18])
+static int mapping_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t *bits,
+                         unsigned m,unsigned k)
 {
-    uint8_t rings[8],decoded[18];uint32_t index;
-    for(unsigned i=0;i<8;++i){if(labels[i]>7)return 0;rings[i]=labels[i]>>2;}
+    uint8_t rings[8],decoded[24];uint32_t index;
+    if(s->shell.m!=m || s->shell.k!=k)return 0;
+    for(unsigned i=0;i<8;++i){if(labels[i]>=4*m)return 0;rings[i]=labels[i]>>2;}
     unsigned previous=s->previous;s->previous=labels[6]&3;
     if(!v90_shell_decode(&s->shell,rings,&index))return 0;
-    for(unsigned i=0;i<6;++i)decoded[i]=(index>>i)&1;
+    for(unsigned i=0;i<k;++i)decoded[i]=(index>>i)&1;
     for(unsigned pair=0;pair<4;++pair) {
         unsigned a=labels[2*pair]&3,b=labels[2*pair+1]&3;
         unsigned difference=(a+4-previous)&3;
-        decoded[6+3*pair]=((b+4-a)&3)>>1;
-        decoded[7+3*pair]=difference&1;
-        decoded[8+3*pair]=difference>>1;
+        decoded[k+3*pair]=((b+4-a)&3)>>1;
+        decoded[k+1+3*pair]=difference&1;
+        decoded[k+2+3*pair]=difference>>1;
         previous=a;
     }
-    memcpy(bits,decoded,sizeof(decoded));return 1;
+    memcpy(bits,decoded,k+12);return 1;
+}
+int v90_qam8_frame(V90Qam8Frames *s,const uint8_t labels[8],uint8_t bits[18])
+{
+    return mapping_frame(s,labels,bits,2,6);
+}
+void v90_qam12_frames_init(V90Qam12Frames *s,unsigned previous)
+{
+    v90_shell_init(&s->shell,3,12);s->previous=previous&3;
+}
+int v90_qam12_frame(V90Qam12Frames *s,const uint8_t labels[8],uint8_t bits[24])
+{
+    return mapping_frame(s,labels,bits,3,12);
 }
 
 static void point(unsigned label,double *re,double *im)

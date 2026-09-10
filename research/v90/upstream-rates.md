@@ -1,8 +1,8 @@
 # Extending the V.90 upstream receiver
 
 The live `v90upstream.c` / `v90trellis.c` path remains restricted to 4,800 bit/s
-at 3,200 symbols/s. The new `v90shell.c` component is not yet connected to that
-path and does not change the advertised MP rate.
+at 3,200 symbols/s. The new shell mapper and eight-point decoder are not yet
+connected to that path and do not change the advertised MP rate.
 
 At the existing symbol clock, the first extension is 7,200 bit/s: K=6, M=2,
 q=0 and eight constellation points. V.34 defines the ring ordering through its
@@ -16,10 +16,18 @@ V.34 transmitter. It also tests expanded M=18/K=31 counts. The standalone
 sanitizer test covers all supported M/K combinations. These checks validate
 shell arithmetic, not waveform demodulation or PPP reception at a higher rate.
 
+`v90_trellis_qam8_pair` now accepts carrier/gain-aligned eight-point pairs and
+retains ring labels through the 16-state soft trellis. `v90qam8.c` reverses the
+shell and differential mapping into 18 scrambled bits per eight symbols.
+`tools/tests/v90-qam8.py` uses an independent Table 13 transmitter and enumerated
+shell ordering to check all 16 initial states, controlled symbol errors, noise,
+and rejected-frame recovery. Ring decisions use the nearest point within each
+quadrant; this is not joint soft shell decoding.
+
 Remaining integration work:
 
-- Eight-point symbol decisions and the full subset-to-trellis conversion.
-- Mapping-frame alignment, ring-bit recovery and matching B1 acquisition.
+- Eight-point carrier/gain acquisition and tracking.
+- Mapping-frame alignment, matching B1 acquisition, and live bit delivery.
 - Per-rate MP generation and capability masks, followed by hardware PPP tests.
 
 V.90 Table 16 defines upstream rate selection and its capability mask. Higher

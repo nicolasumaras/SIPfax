@@ -1,4 +1,4 @@
-/* Restricted four-point V.34/V.90 16-state soft trellis. GPL-2.0. */
+/* Four/eight-point V.34/V.90 16-state soft trellis. GPL-2.0. */
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -11,30 +11,27 @@ void v90_trellis_init(V90Trellis *s)
     memset(s,0,sizeof(*s));
 }
 
-int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
-                    unsigned inversion,unsigned *out_a,unsigned *out_b)
+static int pair_costs(V90Trellis *s,const double ca[4],const double cb[4],
+                      const unsigned labels_a[4],const unsigned labels_b[4],
+                      unsigned label_bits,unsigned inversion,unsigned *out_a,unsigned *out_b)
 {
-    static const double re[4]={1,0,-1,0},im[4]={0,-1,0,1};
-    double ca[4],cb[4],next[16];
+    double next[16];
     unsigned slot=(unsigned)(s->pairs%V90_TRELLIS_DEPTH);
-    for(unsigned i=0;i<4;++i) {
-        ca[i]=(ar-re[i])*(ar-re[i])+(ai-im[i])*(ai-im[i]);
-        cb[i]=(br-re[i])*(br-re[i])+(bi-im[i])*(bi-im[i]);
-    }
     for(unsigned i=0;i<16;++i)next[i]=DBL_MAX;
     for(unsigned state=0;state<16;++state) {
         unsigned u=state&1;
         for(unsigned a=0;a<4;++a)for(unsigned info=0;info<2;++info) {
             unsigned b=(a+2*info+(u^(inversion&1)))&3;
-            /* Table13 restricted to four quadrants. The middle subset bit
-             * is the real-coordinate bit; no legacy branch table is used. */
+            /* Table13 Y1/Y2 depend on the low two subset bits. For the
+             * eight-point M=2 constellation those bits are the quadrant;
+             * the ring changes only Y4, unused by the 16-state encoder. */
             unsigned as0=a&1,bs0=b&1,as1=a>>1,bs1=b>>1;
             unsigned y1=(as0&(bs0^1))^as1^bs1,y2=as0;
             unsigned dest=(state>>1)^y1^(y2<<1)^((y2^u)<<2)^(u<<3);
             double cost=s->metric[state]+ca[a]+cb[b];
             if(cost<next[dest]) {
                 next[dest]=cost;s->previous[slot][dest]=(uint8_t)state;
-                s->labels[slot][dest]=(uint8_t)(a|(b<<2));
+                s->labels[slot][dest]=(uint8_t)(labels_a[a]|(labels_b[b]<<label_bits));
             }
         }
     }
@@ -49,7 +46,41 @@ int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
         state=s->previous[index][state];
     }
     unsigned index=(slot+1)%V90_TRELLIS_DEPTH,label=s->labels[index][state];
-    *out_a=label&3;*out_b=label>>2;return 1;
+    *out_a=label&((1u<<label_bits)-1);*out_b=label>>label_bits;return 1;
+}
+
+int v90_trellis_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                    unsigned inversion,unsigned *out_a,unsigned *out_b)
+{
+    static const double re[4]={1,0,-1,0},im[4]={0,-1,0,1};
+    static const unsigned labels[4]={0,1,2,3};
+    double ca[4],cb[4];
+    for(unsigned i=0;i<4;++i) {
+        ca[i]=(ar-re[i])*(ar-re[i])+(ai-im[i])*(ai-im[i]);
+        cb[i]=(br-re[i])*(br-re[i])+(bi-im[i])*(bi-im[i]);
+    }
+    return pair_costs(s,ca,cb,labels,labels,2,inversion,out_a,out_b);
+}
+
+int v90_trellis_qam8_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+                         unsigned inversion,unsigned *out_a,unsigned *out_b)
+{
+    static const double re[8]={1,1,-1,-1,-3,1,3,-1};
+    static const double im[8]={1,-1,-1,1,1,3,-1,-3};
+    if(!isfinite(ar)||!isfinite(ai)||!isfinite(br)||!isfinite(bi)||
+       fabs(ar)>1e100||fabs(ai)>1e100||fabs(br)>1e100||fabs(bi)>1e100)return -1;
+    double ca[4],cb[4];unsigned la[4],lb[4];
+    for(unsigned q=0;q<4;++q) {
+        ca[q]=cb[q]=DBL_MAX;la[q]=lb[q]=q;
+        for(unsigned ring=0;ring<2;++ring) {
+            unsigned i=q+4*ring;
+            double a=(ar-re[i])*(ar-re[i])+(ai-im[i])*(ai-im[i]);
+            double b=(br-re[i])*(br-re[i])+(bi-im[i])*(bi-im[i]);
+            if(a<ca[q]){ca[q]=a;la[q]=i;}
+            if(b<cb[q]){cb[q]=b;lb[q]=i;}
+        }
+    }
+    return pair_costs(s,ca,cb,la,lb,3,inversion,out_a,out_b);
 }
 
 unsigned v90_trellis_inversion(unsigned pair,unsigned offset)

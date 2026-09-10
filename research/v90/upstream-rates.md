@@ -132,5 +132,8 @@ for both symbols in each trellis history entry. Independent Figure 5/9 and
 Table 13 tests cover all 16 encoder states, all 20 labels, noise and invalid
 input rejection. The M=5/K=18 mapping-frame inverse recovers 30 scrambled bits;
 tests exhaust all 262,144 valid shell indices and check unused-shell rejection,
-differential-history recovery and smaller-output cross-rate rejection. This
-does not yet enable 12,000-bit/s B1 acquisition or native audio/MP negotiation.
+differential-history recovery and smaller-output cross-rate rejection. Rate-specific
+B1 and continuous 30-bit frame decoding also pass independent carrier/gain/noise
+and reacquisition tests. Carrier slope is estimated from the known B1 before
+replay, avoiding a transient that corrupted outer-point decisions at 12,000.
+Native audio/MP negotiation at that rate remains to be integrated.

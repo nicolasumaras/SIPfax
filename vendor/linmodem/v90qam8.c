@@ -49,20 +49,20 @@ int v90_qam20_frame(V90Qam20Frames *s,const uint8_t labels[8],uint8_t bits[30])
 
 static void point(unsigned label,double *re,double *im)
 {
-    static const double r[12]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3};
-    static const double j[12]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1};
+    static const double r[20]={1,1,-1,-1,-3,1,3,-1,1,-3,-1,3,-3,-3,3,3,1,5,-1,-5};
+    static const double j[20]={1,-1,-1,1,1,3,-1,-3,-3,-1,3,1,-3,3,3,-3,5,-1,-5,1};
     *re=r[label];*im=j[label];
 }
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate)
 {
     /* V.34 10.1.3.1: zero encoders, scrambled ones, last J=7 data frame.
-     * 16 mapping frames, 18 or 24 bits / 8 symbols. No auxiliary channel. */
+     * 16 mapping frames, 18, 24 or 30 bits / 8 symbols. No auxiliary channel. */
     memset(s,0,sizeof(*s));
-    if(rate!=7200 && rate!=9600)return 0;
-    s->m=rate==7200?2:3;s->k=rate==7200?6:12;
+    if(rate!=7200 && rate!=9600 && rate!=12000)return 0;
+    s->m=rate==7200?2:rate==9600?3:5;s->k=rate/400-12;
     unsigned frame_bits=s->k+12;
     V90Shell shell;v90_shell_init(&shell,s->m,s->k);
-    uint8_t bits[384];unsigned state=0,previous=0;
+    uint8_t bits[480];unsigned state=0,previous=0;
     for(unsigned i=0;i<16*frame_bits;++i)
         bits[i]=1^(i>=5?bits[i-5]:0)^(i>=23?bits[i-23]:0);
     for(unsigned f=0;f<16;++f) {
@@ -150,14 +150,16 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
     unsigned a,b;
     /* B1 is the last 64 pairs of J=7. The following data starts at V0[0]. */
     unsigned inv=v90_trellis_inversion((unsigned)((s->pairs+384)%448),0);
-    int ready=s->b1.m==3?
+    int ready=s->b1.m==5?
+        v90_trellis_qam20_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):s->b1.m==3?
         v90_trellis_qam12_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b):
         v90_trellis_qam8_pair(&s->trellis,s->a_re,s->a_im,ar,ai,inv,&a,&b);
     ++s->pairs;s->have_a=0;
     if(ready!=1)return;
     s->labels[s->count++]=(uint8_t)a;s->labels[s->count++]=(uint8_t)b;
     if(s->count==8) {
-        uint8_t bits[24];int valid=s->b1.m==3?
+        uint8_t bits[30];int valid=s->b1.m==5?
+            v90_qam20_frame(&s->frames,s->labels,bits):s->b1.m==3?
             v90_qam12_frame(&s->frames,s->labels,bits):
             v90_qam8_frame(&s->frames,s->labels,bits);
         s->count=0;++s->output_frames;
@@ -165,6 +167,29 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
         if(!valid)++s->rejected_frames;
         if(s->receive_bits)s->receive_bits(s->opaque,valid?bits:NULL);
     }
+}
+/* Estimate carrier slope from the known B1 before replaying it. A single
+ * whole-frame phase estimate leaves a transient large enough to misclassify
+ * outer points at higher rates. Divide out reference energy so shell weights
+ * cannot move the two half-frame time centres. */
+static void b1_carrier(V90Qam8Stream *s,double *gain,double *phase,double *frequency)
+{
+    double re[128],im[128],hr[2]={0,0},hi[2]={0,0};
+    for(unsigned i=0;i<128;++i) {
+        unsigned j=(s->b1.position+i)%128;
+        double rr,ri;point(s->b1.labels[i],&rr,&ri);
+        double energy=rr*rr+ri*ri;
+        re[i]=(s->b1.re[j]*rr+s->b1.im[j]*ri)/energy;
+        im[i]=(s->b1.im[j]*rr-s->b1.re[j]*ri)/energy;
+        hr[i/64]+=re[i];hi[i/64]+=im[i];
+    }
+    *frequency=atan2(hi[1]*hr[0]-hr[1]*hi[0],hr[1]*hr[0]+hi[1]*hi[0])/64;
+    double r=0,j=0;
+    for(unsigned i=0;i<128;++i) {
+        double cs=cos(*frequency*i),sn=sin(*frequency*i);
+        r+=re[i]*cs+im[i]*sn;j+=im[i]*cs-re[i]*sn;
+    }
+    *gain=hypot(r,j)/128;*phase=atan2(j,r);
 }
 int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
 {
@@ -176,9 +201,11 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
     if(s->locked){qam8_locked(s,re,im);return 1;}
     double gain,phase,score;
     if(!v90_qam8_b1_symbol(&s->b1,re,im,&gain,&phase,&score))return 0;
-    v90_carrier_init(&s->carrier,phase,gain);
+    double frequency; b1_carrier(s,&gain,&phase,&frequency);
+    v90_carrier_init(&s->carrier,phase,gain);s->carrier.frequency=frequency;
     v90_trellis_init(&s->trellis);
-    if(s->b1.m==3)v90_qam12_frames_init(&s->frames,0);
+    if(s->b1.m==5)v90_qam20_frames_init(&s->frames,0);
+    else if(s->b1.m==3)v90_qam12_frames_init(&s->frames,0);
     else v90_qam8_frames_init(&s->frames,0);
     s->origin=index+1-V90_QAM8_B1_SYMBOLS;s->pairs=0;s->count=s->have_a=0;
     s->output_frames=s->rejected_frames=0;s->score=score;s->locked=1;

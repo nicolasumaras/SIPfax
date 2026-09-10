@@ -13,7 +13,7 @@ MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
 The lab currently selects the integrated 24,000 receiver (`36577ed`) after CI
-and a successful short hardware test. Its first sustained run is in progress.
+and successful short and sustained hardware tests. Residual errors remain.
 The preceding 19,200 carrier-fit build passed a sustained run with live
 renegotiation recovery. Broader qualification is required before changing
 the code default.
@@ -442,5 +442,17 @@ call yields the same 179 CRC-valid PPP frames with matching frame hashes.
 The integrated `36577ed` hardware call passed authenticated PPP at 24,000 bit/s upstream and native CP 49.333 kbit/s downstream. The verified 32 KiB download took 7.463 seconds; sixteen distinct 1 KiB upstream checks took 1.411–1.459 seconds (median 1.429). All 18 response hashes were independently verified. The call disconnected cleanly after 36.673 seconds with zero Windows CRC/alignment errors. All 3,272 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX. The 13,201-packet capture had zero kernel drops and no RTP sequence gaps.
 
 CT105 now runs `36577ed` at 24,000 upstream. The previous binary and rate
-setting are saved for rollback. A sustained run is in progress; this exact
-build has not yet completed sustained hardware qualification.
+setting are saved for rollback. Its first sustained run has now completed, as described below.
+
+
+The first sustained 24,000-bit/s run on `36577ed` passed all 64 verified 32 KiB downloads (2 MiB) and 64 verified 1 KiB upstream requests over 636.996 seconds, then disconnected cleanly. All 129 response hashes were independently checked. Windows counted 20 CRC errors and zero alignment errors. Native CP remained at 49.333 kbit/s downstream through a completed renegotiation, and verified transfers continued afterward. All 33,290 downstream primary RTP payloads and the forwarded upstream suffix (33,292 packets after eleven startup packets) matched across FreePBX. The 133,709-packet capture had zero kernel drops and no RTP sequence gaps. Post-call ATA counters included 22 lost segments, 21 idle segments, one FIFO drop, one underflow and two starvation events, without event timing. This establishes one sustained run with recovery, not error-free maximum-rate reliability.
+
+A private 26,400 prototype implements M=14/K=30/q=3 with 448 points and
+66-bit frames. Its nine-bit labels use 16-bit arrays and 32-bit packed pair
+history. Independent constellation/trellis/B1 tests, basic PCM and MP tests
+pass, but combined drift/distortion/PCMU reception fails. Joint carrier and
+fifteen-tap equalizer fitting restores the initial negative-drift cases while
+still losing a frame in the following positive-drift case. A separate noisy
+carrier diagnostic shows an eightfold frequency-RMSE improvement under the
+tested distortion, a small regression without it, and about twentyfold local
+fitting cost. This remains a private prototype, not a qualified next rate.

@@ -355,7 +355,9 @@ revision `047d95e`.
 The first phase-noise hardware trial passed authenticated PPP, a verified 32 KiB download in 7.492 seconds and all sixteen 1 KiB upstream payload checks. All uploads completed in 1.478–1.510 seconds (median 1.488), with no long pauses in this call. It disconnected cleanly after 38.215 seconds with zero Windows CRC or alignment errors. Native CP confirmed 49.333 kbit/s downstream. All 3,350 forwarded downstream primary payloads matched; the final server packet followed the caller BYE by 1.271 ms. The upstream suffix also matched. The 13,510-packet capture had zero kernel drops and no RTP sequence gaps, and all 18 response hashes were independently verified. This is one successful short trial; the new revision still requires sustained qualification.
 
 CT105 now runs `816a07a`; the previous binary is saved as
-`lm.pre-phase-noise`. A sustained retry is running.
+`lm.pre-phase-noise`. The sustained retry has completed.
+
+The phase-tracking build `816a07a` passed all 64 verified 32 KiB downloads (2 MiB) and 64 verified 1 KiB upstream requests over 751.781 seconds, then disconnected cleanly. All 129 response hashes were independently checked. Windows counted 60 CRC errors and three alignment errors. Native CP remained at 49.333 kbit/s downstream, including a completed renegotiation near the end. All 39,034 downstream primary RTP payloads and the forwarded upstream suffix (39,036 packets after 11 startup packets) matched across FreePBX. The 156,759-packet capture had zero kernel drops and no RTP sequence gaps. Post-call ATA counters included 23 lost segments, 16 idle segments, one FIFO drop, one underflow and two starvation events, without event timing. The call demonstrates sustained operation but does not establish improved downstream reliability or resolve the cause of the errors.
 
 An exploratory 24,000 profile implements the 256-point M=8/K=24/q=3 mapping,
 B1 and basic PCM path, but still loses frames in extended distorted-clock

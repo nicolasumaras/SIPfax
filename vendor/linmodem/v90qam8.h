@@ -1,4 +1,4 @@
-/* 7200/9600/12000 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
+/* 7200/9600/12000/14400 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
 #ifndef V90QAM8_H
 #define V90QAM8_H
 #include "v90shell.h"
@@ -34,7 +34,7 @@ typedef struct {
     unsigned position,count,m,k;
 } V90Qam8B1;
 void v90_qam8_b1_init(V90Qam8B1 *s);
-/* 7200/9600/12000 at 3200 symbols/s; invalid rate clears state and returns 0. */
+/* 7200/9600/12000/14400 at 3200 symbols/s; invalid rate clears state and returns 0. */
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate);
 /* Feed symbol-spaced matched-filter output. On a match, gain/phase describe
  * received = gain * exp(j*phase) * reference; score is normalized correlation.
@@ -57,7 +57,7 @@ typedef struct {
     /* Includes B1, starting with output_frames=1. NULL bits denotes an
      * invalid shell; framing/descrambling consumers must treat it as erasure.
      * output_symbol identifies the final symbol of the decoded frame.
-     * Frame length is b1.k+12 bits (18/24/30 for 7200/9600/12000). */
+     * Frame length is b1.k+12 bits (18/24/30/36 for 7200/9600/12000/14400). */
     void (*receive_bits)(void *,const uint8_t *bits);
 } V90Qam8Stream;
 void v90_qam8_stream_init(V90Qam8Stream *s);

@@ -307,7 +307,7 @@ uint64_t count(V90Trellis*s){return s->pairs;}
     print('PASS: twelve-point kernel, coordinate-derived Figure 9 subsets, Table 13, all states and noise')
     lib.stream_rate.argtypes=[C.c_uint,callback_type];lib.stream_rate.restype=C.c_void_p
     lib.b1_rate.argtypes=[C.c_uint];lib.b1_rate.restype=C.c_void_p
-    for rate in [0,4800,7201,9599,9601,11999,12001,14400]:assert not lib.b1_rate(rate)
+    for rate in [0,4800,7201,9599,9601,11999,12001,14399,14401]:assert not lib.b1_rate(rate)
     for rate,k,shells,point_for_rate in [(9600,12,shells12,point12),(12000,18,shells20,point20)]:
         frame_bits=k+12
         register=0;ones12=[]

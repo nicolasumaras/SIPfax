@@ -2,7 +2,8 @@
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
-the twelve-point receiver; `12000` selects the experimental twenty-point receiver.
+the twelve-point receiver; `12000` selects the experimental twenty-point receiver; `14400` selects
+the experimental thirty-two-point receiver.
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
@@ -188,5 +189,9 @@ has a soft trellis kernel and a 36-bit mapping-frame inverse. Independent
 Figure 5/9 and Table 13 tests cover all states, all labels and noisy pairs.
 A half-tuple enumeration oracle covers every energy-bucket boundary and random
 24-bit shell indices without storing all 16 million eight-tuples. Its ordering
-is cross-checked exhaustively for M=1/2/3. B1 and native audio/MP integration
-for 14,400 remain unimplemented; the deployed receiver is unchanged.
+is cross-checked exhaustively for M=1/2/3. Rate-specific B1, continuous
+36-bit decoding and native audio/MP integration now pass independent tests,
+including carrier offset/gain changes, reacquisition, fractional timing,
+both signs of 100 ppm clock drift and simulated intersymbol interference.
+Hardware interoperability at 14,400 is untested; the deployed receiver remains
+at 12,000 pending completion of its sustained test.

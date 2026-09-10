@@ -14,11 +14,14 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rate=12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
-k,m={7200:(6,2),9600:(12,3),12000:(18,5)}[rate]
+rate=14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
+k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8)}[rate]
 frame_bits=k+12
-rings=sorted(itertools.product(range(m),repeat=8),key=lambda r:
- (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:1<<k]
+from v90_shell_reference import ShellReference
+if rate==14400:rings=ShellReference(m)
+else:
+    rings=sorted(itertools.product(range(m),repeat=8),key=lambda r:
+     (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:1<<k]
 def frame(payload):
     crc=0xffff
     for value in payload:
@@ -57,7 +60,7 @@ for f in range(len(bits)//frame_bits):
         a=(previous+v[k+1+3*p]+2*v[k+2+3*p])%4
         b=(a+2*v[k+3*p]+((state&1)^inv))%4;previous=a
         x=a+4*shell[2*p];y=b+4*shell[2*p+1]
-        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j][q>>2])*(-1j)**(q&3) for q in [x,y]]
+        points=[([1+1j,-3+1j,1-3j,-3-3j,1+5j,5+1j,-3+5j,5-3j][q>>2])*(-1j)**(q&3) for q in [x,y]]
         symbols.extend(points)
         t=converter[subset(points[0])][subset(points[1])];u=state&1
         state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)

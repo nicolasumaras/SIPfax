@@ -24,6 +24,10 @@ with tempfile.TemporaryDirectory() as td:
 #include "v90qam8.h"
 void*trellis(void){V90Trellis*s=malloc(sizeof(*s));v90_trellis_init(s);return s;}
 void*frames(unsigned previous){V90Qam32Frames*s=malloc(sizeof(*s));v90_qam32_frames_init(s,previous);return s;}
+void*stream(void (*cb)(void*,const uint8_t*)) {V90Qam8Stream*s=malloc(sizeof(*s));v90_qam_stream_init_rate(s,14400);s->receive_bits=cb;return s;}
+unsigned label(V90Qam8Stream*s,unsigned n){return s->b1.labels[n];}
+unsigned long long output_symbol(V90Qam8Stream*s){return s->output_symbol;}
+unsigned long long rejected(V90Qam8Stream*s){return s->rejected_frames;}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Trellis*s){return s->pairs;}
 ''')
@@ -64,4 +68,44 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
                 if lib.v90_trellis_qam32_pair(s,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb)):decoded.append((aa.value,bb.value))
             assert decoded[64:]==pairs[64:len(decoded)],(initial,noisy)
             lib.destroy(s)
+    cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8))
+    lib.stream.argtypes=[cbtype];lib.stream.restype=C.c_void_p
+    lib.label.argtypes=[C.c_void_p,C.c_uint]
+    for name in ['output_symbol','rejected']:
+        getattr(lib,name).argtypes=[C.c_void_p];getattr(lib,name).restype=C.c_ulonglong
+    lib.v90_qam8_stream_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double]
+    register=0;bits=[]
+    for plain in [1]*576+[rng.randrange(2) for _ in range(36*700)]:
+        b=plain^((register>>22)&1);register=(register<<1)&0x7fffff
+        if b:register^=1|(1<<18)
+        bits.append(b)
+    source=[bits[i:i+36] for i in range(0,len(bits),36)];labels=[];encoder=previous=0
+    for n,bits in enumerate(source):
+        rings=oracle[sum(bits[i]<<i for i in range(24))]
+        for p in range(4):
+            pair=4*n+p+384;inv=pattern[(pair//32)%14] if pair%32==0 else 0
+            a=(previous+bits[25+3*p]+2*bits[26+3*p])%4
+            b=(a+2*bits[24+3*p]+((encoder&1)^inv))%4;previous=a
+            a+=4*rings[2*p];b+=4*rings[2*p+1];labels.extend([a,b])
+            y=converter[subset(points[a])][subset(points[b])];u=encoder&1
+            encoder=(encoder>>1)^(y&1)^(((y>>1)&1)<<1)^((((y>>1)&1)^u)<<2)^(u<<3)
+    import cmath
+    for frequency in [-1,0,1]:
+        output=[];positions=[]
+        def receive(_,bits):output.append(list(bits[:36]) if bits else None);positions.append(lib.output_symbol(s))
+        cb=cbtype(receive);s=lib.stream(cb)
+        assert [lib.label(s,i) for i in range(128)]==labels[:128]
+        for i,label in enumerate(labels):
+            z=points[label]*(1+.06*i/len(labels))*cmath.exp(1j*(.7+2*cmath.pi*frequency*i/3200))
+            z+=complex(rng.gauss(0,.02),rng.gauss(0,.02))
+            assert lib.v90_qam8_stream_symbol(s,z.real,z.imag)==int(i>=127)
+        assert output==source[:len(output)] and len(output)==(len(labels)-129)//8,frequency
+        assert positions==[8*(i+1)-1 for i in range(len(output))] and lib.rejected(s)==0
+        assert lib.v90_qam8_stream_symbol(s,float('nan'),0)==-1
+        output.clear();positions.clear()
+        for label in labels[:400]:
+            z=points[label];lib.v90_qam8_stream_symbol(s,z.real,z.imag)
+        assert output==source[:33] and positions[0]==len(labels)+8
+        lib.destroy(s)
+    print('PASS: 14400 B1, continuous 36-bit frames, gain/carrier/noise, source timing and reacquisition')
 print('PASS: 32 points, all trellis states, noise, 36-bit shell/differential mapping, all energy-bucket boundaries and rejection bounds')

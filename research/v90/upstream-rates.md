@@ -1,8 +1,9 @@
 # Extending the V.90 upstream receiver
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
-`SIPFAX_V90_UPSTREAM_RATE=7200` setting now selects the eight-point receiver and
-advertises only 7,200 bit/s in MP. Unset or unsupported values select 4,800.
+`SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
+the twelve-point receiver. MP advertises only the configured rate. Unset or
+unsupported values select 4,800. The 9,600 mode has synthetic validation only.
 The lab server now explicitly selects 7,200 after the short hardware trials
 below; broader qualification is required before changing the code default.
 
@@ -38,8 +39,8 @@ the affected lane’s PPP framing/descrambler, which then self-synchronizes.
 
 Remaining integration work:
 
-- Hardware 7,200-bit/s training, authenticated PPP, and bidirectional payload tests.
-- Adaptive timing/equalization and loss-of-lock detection beyond invalid inputs.
+- Sustained hardware qualification of timing recovery and 9,600-bit/s calls.
+- Adaptive equalization and loss-of-lock detection beyond invalid inputs.
 - Higher rates and fallback after this first eight-point path is qualified.
 
 V.90 Table 16 defines upstream rate selection and its capability mask. Higher
@@ -81,7 +82,9 @@ index must not be used directly as a Table 13 subset number. The companion `v90_
 tests cover all 4,096 shell indices, differential bits and rejection bounds.
 Rate-specific B1 and continuous symbol decoding now pass independent 9,600-bit/s
 tests, including gain/carrier changes and reacquisition. The native audio/MP
-path does not yet enable 9,600-bit/s calls. It does not alter the deployed 7,200-bit/s receiver.
+path now enables experimental 9,600-bit/s calls. Independent PCM tests recover
+exact PPP frames, including delayed E, both signs of 100 ppm clock error,
+fractional timing and CRC rejection. Hardware interoperability is untested. It does not alter the deployed 7,200-bit/s receiver.
 
 A subsequent sustained 7,200-upstream call completed 62 alternating 32 KiB
 checksummed downloads and 1 KiB upstream requests. Download 63 timed out at the

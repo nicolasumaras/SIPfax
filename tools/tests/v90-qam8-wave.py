@@ -14,8 +14,11 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rings=sorted(itertools.product(range(2),repeat=8),key=lambda r:
- (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:64]
+rate=9600 if '--9600' in sys.argv else 7200
+k,m=(12,3) if rate==9600 else (6,2)
+frame_bits=k+12
+rings=sorted(itertools.product(range(m),repeat=8),key=lambda r:
+ (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:1<<k]
 def frame(payload):
     crc=0xffff
     for value in payload:
@@ -32,10 +35,10 @@ for packet in [expected[0],bad,*expected[1:]]:
 clock_drift='--clock-drift' in sys.argv
 if clock_drift:
     wire*=8;expected*=8
-plain=[1]*288+[1]*180
+plain=[1]*(16*frame_bits)+[1]*180
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 plain.extend([1]*360)
-plain.extend([1]*((-len(plain))%18))
+plain.extend([1]*((-len(plain))%frame_bits))
 # GPA encoder, continuous from reset B1 into data.
 register=0;bits=[]
 for b in plain:
@@ -43,16 +46,20 @@ for b in plain:
     if out:register^=1|(1<<18)
     bits.append(out)
 state=previous=0;symbols=[];pattern=[int(x) for x in '01110111111110']
-for f in range(len(bits)//18):
-    v=bits[18*f:18*f+18];shell=rings[sum(v[i]<<i for i in range(6))]
+def subset(z):
+    x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
+    return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
+for f in range(len(bits)//frame_bits):
+    v=bits[frame_bits*f:frame_bits*f+frame_bits];shell=rings[sum(v[i]<<i for i in range(k))]
     for p in range(4):
         pair=4*f+p+384
         inv=pattern[(pair//32)%14] if pair%32==0 else 0
-        a=(previous+v[7+3*p]+2*v[8+3*p])%4
-        b=(a+2*v[6+3*p]+((state&1)^inv))%4;previous=a
+        a=(previous+v[k+1+3*p]+2*v[k+2+3*p])%4
+        b=(a+2*v[k+3*p]+((state&1)^inv))%4;previous=a
         x=a+4*shell[2*p];y=b+4*shell[2*p+1]
-        symbols.extend([([1+1j,-3+1j][q>>2])*(-1j)**(q&3) for q in [x,y]])
-        t=converter[x][y];u=state&1
+        points=[([1+1j,-3+1j,1-3j][q>>2])*(-1j)**(q&3) for q in [x,y]]
+        symbols.extend(points)
+        t=converter[subset(points[0])][subset(points[1])];u=state&1
         state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3)
 def pulse(t):
     beta=.1
@@ -92,7 +99,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
     lib.phase4_create.argtypes=[cbtype];lib.phase4_create.restype=C.c_void_p
     lib.phase4_run.argtypes=lib.run.argtypes
     for name in ['rate','acquired','destroy','phase4_acquired']:getattr(lib,name).argtypes=[C.c_void_p]
-    os.environ['SIPFAX_V90_UPSTREAM_RATE']='7200'
+    os.environ['SIPFAX_V90_UPSTREAM_RATE']=str(rate)
     rng=np.random.default_rng(9072)
     for fraction,ppm in ([(.25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]):
         base=np.zeros(int(len(symbols)*2.5)+250,dtype=complex)
@@ -105,7 +112,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
         cb=cbtype(lambda _,p,n:received.append(bytes(p[:n])))
         s=lib.create(cb)
         try:
-            assert lib.rate(s)==7200
+            assert lib.rate(s)==rate
             # Irregular input chunks must not affect filter or decoder state.
             for start in range(0,len(pcm),137):
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
@@ -118,4 +125,4 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
             assert received==expected, 'Pre-E replay changed PPP data'
         finally:lib.destroy(s)
-print('PASS: clock drift '+str(clock_drift)+'; 7200 PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+print('PASS: clock drift '+str(clock_drift)+'; '+str(rate)+' PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

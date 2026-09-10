@@ -6,10 +6,10 @@
 static void mp_build(V90Phase4 *s)
 {
     memset(s->mp,0,sizeof(s->mp));memset(s->mp,1,17);
-    s->mp[25]=1; /* Development upstream receiver: 4800 bit/s, 16-state trellis. */
-    if(s->upstream.rate==7200)s->mp[24]=1;
-    /* Advertise exactly the configured receiver rate. */
-    s->mp[s->upstream.rate==7200?37:36]=1;s->mp[33]=s->mp_ack;
+    unsigned rate=s->upstream.rate==9600?4:s->upstream.rate==7200?3:2;
+    for(unsigned i=0;i<4;++i)s->mp[24+i]=(rate>>i)&1;
+    /* Advertise exactly the configured receiver rate, with 16-state trellis. */
+    s->mp[34+rate]=1;s->mp[33]=s->mp_ack;
     unsigned crc=0xffff;
     for(unsigned j=18;j<69;++j) {
         if(j%17==0)continue;

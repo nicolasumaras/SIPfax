@@ -1,4 +1,4 @@
-/* Experimental upstream V.34 in V.90: 4800 four-point / 7200 eight-point.
+/* Experimental upstream V.34 in V.90: 4800 four-point / 7200 eight-point / 9600 twelve-point.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
@@ -15,11 +15,11 @@ void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
     const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
-    s->rate=rate && !strcmp(rate,"7200")?7200:4800;
-    if(s->rate==7200)for(unsigned i=0;i<V90_UP_PHASES;++i) {
+    s->rate=rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
+    if(s->rate!=4800)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
         l->next_symbol=i;
-        v90_qam8_stream_init(&l->stream);
+        v90_qam_stream_init_rate(&l->stream,s->rate);
         l->stream.opaque=l;l->stream.receive_bits=qam_bits;
     }
     /* V.34 10.1.3.1: one frame of scrambled ones, zero encoder state,
@@ -107,7 +107,7 @@ static void qam_bits(void *opaque,const uint8_t *bits)
     }
     if(!bits)return;
     l->lane.source_sample=(long)(l->symbol_time[l->stream.output_symbol%256]/4);
-    for(unsigned i=0;i<18;++i)bit(l->up,&l->lane,bits[i]);
+    for(unsigned i=0;i<l->stream.b1.k+12;++i)bit(l->up,&l->lane,bits[i]);
 }
 static unsigned delta(double ar,double ai,double br,double bi)
 {
@@ -150,7 +150,7 @@ static void filtered_at(V90Upstream *s,double time,double *re,double *im)
 }
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
-    if(s->rate==7200) {
+    if(s->rate!=4800) {
         s->filtered_re[time%32]=re;s->filtered_im[time%32]=im;
         for(unsigned phase=0;phase<V90_UP_PHASES;++phase) {
             V90UpQamLane *l=&s->qam[phase];V90Qam8Stream *q=&l->stream;

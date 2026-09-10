@@ -10,9 +10,9 @@ receiver with one uncoded bit per symbol; `21600` selects the experimental
 MP advertises only the configured rate. Unset or
 unsupported values select 4,800. Hardware has verified 7,200 and 9,600 modes;
 12,000 initially failed its hardware upload, then passed after B1 equalization.
-The lab currently selects the experimental adaptive 19,200 receiver after its
-first successful hardware test. Its first sustained run subsequently failed;
-the carrier-fit revision subsequently passed a sustained run with live
+The lab currently selects the experimental 21,600 receiver after its first
+successful short hardware test. Upstream throughput still needs improvement.
+The preceding 19,200 carrier-fit build passed a sustained run with live
 renegotiation recovery. Broader qualification is required before changing
 the code default.
 
@@ -307,5 +307,11 @@ An exploratory joint carrier/equalizer fit was unnecessary and is excluded.
 
 Independent tests cover all 160 labels and trellis states, shell boundaries,
 unused tuples, B1 and source timing, PCM to exact PPP, clock drift, distortion,
-and their combination. This rate is not yet hardware qualified. CT105 remains
-at 19,200 after the carrier-estimation retry passed.
+and their combination.
+
+The first 21,600-bit/s hardware call authenticated PPP, fetched an external page, verified a 32 KiB download in 9.874 seconds and all sixteen distinct 1 KiB upstream payloads, then disconnected cleanly after 73.776 seconds. Windows reported zero CRC and alignment errors. Native CP confirmed 49.333 kbit/s downstream. All 5,129 downstream primary RTP payloads and the forwarded upstream suffix matched across FreePBX; the 20,649-packet capture had zero kernel drops and no RTP sequence gaps. All 18 response hashes were independently verified. Upstream checks took 1.480–11.083 seconds, slower than the previous 19,200 short test, so this establishes connectivity rather than a throughput improvement.
+
+Offline replay decodes 188 valid PPP frames. A slower clock-loop control decodes 193 and reduces the best timing lane's rejected shells from 23 to eight, but fails the independent combined clock-drift/distortion test. Reducing equalizer adaptation instead yields only 172 frames. The next step is to reconcile drift acquisition speed with timing-noise tolerance; neither control is a qualified replacement. Sustained 21,600 testing remains pending.
+
+CT105 retains the experimental 21,600 build `d87f907`, with the validated
+19,200 carrier-fit binary saved as `lm.pre-21600`.

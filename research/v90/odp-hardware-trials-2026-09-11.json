@@ -1,0 +1,44 @@
+[
+  {
+    "profile": "3200_control",
+    "attempt": "167933d8-b444-4bd0-b6dd-d4d215b49455",
+    "transfer_hashes": 18,
+    "final_status": "Disconnected",
+    "statistics": {
+      "nativeError": 0,
+      "bytesSent": 31566,
+      "bytesReceived": 43205,
+      "framesSent": 178,
+      "framesReceived": 162,
+      "crcErrors": 0,
+      "timeoutErrors": 0,
+      "alignmentErrors": 0,
+      "hardwareOverruns": 0,
+      "framingErrors": 0,
+      "bufferOverruns": 0,
+      "linkBitsPerSecond": 49296,
+      "durationMilliseconds": 35321
+    }
+  },
+  {
+    "profile": "3000_preemphasis2",
+    "attempt": "dd3b863e-bb4d-4098-92e3-6d5656076646",
+    "transfer_hashes": 18,
+    "final_status": "Disconnected",
+    "statistics": {
+      "nativeError": 0,
+      "bytesSent": 31983,
+      "bytesReceived": 43202,
+      "framesSent": 179,
+      "framesReceived": 162,
+      "crcErrors": 0,
+      "timeoutErrors": 0,
+      "alignmentErrors": 0,
+      "hardwareOverruns": 0,
+      "framingErrors": 0,
+      "bufferOverruns": 0,
+      "linkBitsPerSecond": 49296,
+      "durationMilliseconds": 38756
+    }
+  }
+]

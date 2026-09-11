@@ -21,6 +21,8 @@ typedef struct {
     uint8_t buffered[V90_LAPM_BUFFER_BITS];
     unsigned id,history_position,history_count,buffered_count,active;
     unsigned odp_pending,odp_reported,trailing_marks;
+    unsigned post_bits,post_zeros,post_transitions,post_flags,post_shift,post_previous;
+    unsigned hdlc_frames,hdlc_valid_frames;
 } V90LapmCandidate;
 struct V90LapmSelect {
     V90LapmCandidate candidate[V90_UP_CANDIDATES];

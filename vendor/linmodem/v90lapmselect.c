@@ -1,4 +1,5 @@
 /* Select one ordered upstream stream only after a CRC-valid V.42 XID. GPL-2.0. */
+#include <stdio.h>
 #include <string.h>
 #include "v90lapmselect.h"
 
@@ -14,6 +15,13 @@ static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
 {
     V90LapmCandidate *c=opaque;
     V90LapmSelect *s=c->owner;
+    if(len>=0){
+        c->hdlc_frames++;
+        if(ok)c->hdlc_valid_frames++;
+        if(c->hdlc_frames<=10 || ok)
+            fprintf(stderr,"[v42] candidate %u HDLC frame: len=%d crc=%s\n",
+                    c->id,len,ok?"valid":"invalid");
+    }
     /* XID is always CRC-16 during parameter negotiation (V.42 7.6.2). */
     if(!ok || len<3 || (frame[1]&0xec)!=0xac || frame[2]!=0x82 ||
        !c->active || s->selected>=0)return;
@@ -71,6 +79,9 @@ void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
         return;
     }
     if(c->buffered_count>=V90_LAPM_BUFFER_BITS){
+        fprintf(stderr,"[v42] candidate %u buffer expired: bits=%u zeros=%u transitions=%u flags=%u frames=%u valid=%u\n",
+                id,c->post_bits,c->post_zeros,c->post_transitions,c->post_flags,
+                c->hdlc_frames,c->hdlc_valid_frames);
         s->overflows++;reset_candidate(c);return;
     }
     c->buffered[c->buffered_count++]=(uint8_t)bit;
@@ -80,6 +91,13 @@ void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
                 c->odp_pending=0;c->odp_reported=1;
                 if(s->odp)s->odp(s->opaque,id,c->buffered,c->buffered_count);
             }else{reset_candidate(c);return;}
+    }
+    if(c->odp_reported){
+        if(c->post_bits && bit!=c->post_previous)c->post_transitions++;
+        if(!bit)c->post_zeros++;
+        c->post_previous=(unsigned)bit;c->post_bits++;
+        c->post_shift=((c->post_shift>>1)|((unsigned)bit<<7))&0xff;
+        if(c->post_shift==0x7e)c->post_flags++;
     }
     hdlc_rx_put_bit(&c->hdlc,bit);
 }

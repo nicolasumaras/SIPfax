@@ -1,10 +1,14 @@
-# Live V.90 development — 2026-09-08
+# Live V.90 development — current status and historical record
 
 Goal: actual V.90 answering service and PPP internet, initially one notebook, future concurrent calls. Do not treat V.22bis success or SM_V90 as completion.
 
 ## Current deployment
 
-`5151eb5` is deployed on CT105 with 26.4 kbit/s upstream and automatic initial echo-delay acquisition. The latest sustained PPP test passed 129 verified response hashes over 656.014 seconds, recovering downstream from 49.333 to 48 kbit/s with 28 CRC and two alignment errors. See the final section for evidence and remaining work; earlier sections are chronological development history.
+CT105's retained baseline is native `9be7827`, with a 28.8 kbit/s upstream ceiling, both supported symbol rates and automatic initial echo-delay acquisition. Authenticated PPP internet and bidirectional hash-verified transfers work on the XP notebook / ATA187 path. See [current receiver qualification](v90/upstream-rates.md) for source/binary provenance and current test outcomes.
+
+The opt-in ODP receiver with configurable index-2 pre-emphasis is under qualification. The 48-frame prediction candidate (`8aa8c5e`) passed two consecutive short 3000/28800 calls at 49.333 kbit/s downstream with no startup fallback, 18 hashes per call and zero reported modem errors. The candidate also passed 129 sustained hashes over 629.806 seconds, with eight CRC errors, no alignment errors and 35 downstream TCP retransmitted segments. Earlier sustained testing on the shorter predictor had 19 CRC/two alignment errors and 66 retransmitted segments. These results do not establish sustained reliability or full conformance.
+
+The remainder is chronological history. Statements such as “not implemented”, “internet unproven”, and older deployment identifiers describe the dated stage in which they were recorded, not current capability.
 
 ## Verified baseline
 CT105 on Proxmox 192.168.1.20, service 192.168.1.25. FreePBX .29 routes 12345678. ATA187 .235 ports 63416874/23416874 registered. Notebook .217:4782 DialUpLab reports SoftV90 Data Fax Modem with SmartCP. API supports automated calls; no user intervention required. API secret is outside this document.

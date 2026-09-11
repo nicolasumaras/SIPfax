@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for test in v8-cj v8-role-menu v90-cp v90-dil v90-training-profile v90-s-detect v90-s-profile v90-startup v90-startup-profile v90-rate-selection v90-reneg-training v90-shell v90-mapping v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
+          for test in v42-detect v8-cj v8-role-menu v90-cp v90-dil v90-training-profile v90-s-detect v90-s-profile v90-startup v90-startup-profile v90-rate-selection v90-reneg-training v90-shell v90-mapping v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
       - name: Test 3200-symbol low carrier

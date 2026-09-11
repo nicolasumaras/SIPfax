@@ -82,7 +82,8 @@ static void selected(void *opaque,unsigned candidate)
     bool detect=s->protocol.detect;s->protocol.detect=false;
     v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
     s->selected_candidate=candidate;s->selection_count++;
-    fprintf(stderr,"[v42] selected CRC-valid LAPM candidate %u\n",candidate);
+    fprintf(stderr,"[v42] selected LAPM candidate %u after %s\n",candidate,
+            s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
 }
 
 static int supported_adp_bit(unsigned n)

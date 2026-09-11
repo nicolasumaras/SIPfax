@@ -8,7 +8,22 @@ static void reset_candidate(V90LapmCandidate *c)
     memset(&c->detection,0,sizeof(c->detection));
     c->history_position=c->history_count=c->buffered_count=c->active=0;
     c->odp_pending=c->odp_reported=c->trailing_marks=0;
+    c->post_bits=c->post_zeros=c->post_transitions=c->post_flags=0;
+    c->post_shift=c->post_previous=c->flag_run=c->last_flag_bit=0;
+    c->hdlc_frames=c->hdlc_valid_frames=0;
     hdlc_rx_restart(&c->hdlc);
+}
+
+static void commit_candidate(V90LapmCandidate *c,int flags)
+{
+    V90LapmSelect *s=c->owner;
+    if(s->selected>=0)return;
+    s->selected=(int)c->id;s->selections++;
+    s->selection_by_flags=(unsigned)flags;
+    if(flags)s->flag_selections++;
+    if(s->selection)s->selection(s->opaque,c->id);
+    if(s->output)for(unsigned i=0;i<c->buffered_count;i++)
+        s->output(s->opaque,c->buffered[i]);
 }
 
 static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
@@ -25,11 +40,7 @@ static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
     /* XID is always CRC-16 during parameter negotiation (V.42 7.6.2). */
     if(!ok || len<3 || (frame[1]&0xec)!=0xac || frame[2]!=0x82 ||
        !c->active || s->selected>=0)return;
-    s->selected=(int)c->id;
-    s->selections++;
-    if(s->selection)s->selection(s->opaque,c->id);
-    if(s->output)for(unsigned i=0;i<c->buffered_count;i++)
-        s->output(s->opaque,c->buffered[i]);
+    commit_candidate(c,0);
 }
 
 void v90_lapm_select_init(V90LapmSelect *s,void *opaque,
@@ -48,7 +59,7 @@ void v90_lapm_select_init(V90LapmSelect *s,void *opaque,
 void v90_lapm_select_reset(V90LapmSelect *s)
 {
     if(s->selected>=0 && s->output)s->output(s->opaque,-1);
-    s->selected=-1;
+    s->selected=-1;s->selection_by_flags=0;
     for(unsigned i=0;i<V90_UP_CANDIDATES;i++)reset_candidate(&s->candidate[i]);
 }
 
@@ -97,7 +108,12 @@ void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
         if(!bit)c->post_zeros++;
         c->post_previous=(unsigned)bit;c->post_bits++;
         c->post_shift=((c->post_shift>>1)|((unsigned)bit<<7))&0xff;
-        if(c->post_shift==0x7e)c->post_flags++;
+        if(c->post_shift==0x7e){
+            c->post_flags++;
+            c->flag_run=(c->last_flag_bit && c->post_bits-c->last_flag_bit==8)?c->flag_run+1:1;
+            c->last_flag_bit=c->post_bits;
+            if(c->flag_run>=V90_LAPM_FLAG_EVIDENCE){commit_candidate(c,1);return;}
+        }
     }
     hdlc_rx_put_bit(&c->hdlc,bit);
 }

@@ -32,8 +32,16 @@ static void feed_xid(V90LapmSelect *s,unsigned candidate,int corrupt)
     assert(hdlc_tx_flags(&tx,5)==0);
     assert(hdlc_tx_frame(&tx,xid,sizeof(xid))==0);
     if(corrupt)assert(hdlc_tx_corrupt_frame(&tx)==0);
-    for(unsigned i=0;i<1000 && s->selected<0;i++)
+    /* Stop before ten trailing flags can independently satisfy the
+       protocol-phase evidence rule. */
+    for(unsigned i=0;i<130 && s->selected<0;i++)
         v90_lapm_select_bit(s,candidate,hdlc_tx_get_bit(&tx),500+i);
+}
+static void feed_flags(V90LapmSelect *s,unsigned candidate,unsigned count)
+{
+    static const unsigned flag[8]={0,1,1,1,1,1,1,0};
+    for(unsigned n=0;n<count;n++)for(unsigned i=0;i<8;i++)
+        v90_lapm_select_bit(s,candidate,(int)flag[i],3000+8*n+i);
 }
 int main(void)
 {
@@ -50,9 +58,16 @@ int main(void)
     v90_lapm_select_bit(&s,7,1,2001);assert(output_bits==before+1);
     v90_lapm_select_bit(&s,7,-1,2002);
     assert(s.selected<0 && output_invalid==1 && s.invalidations==1);
+    /* Continuous flags are the protocol-phase indication in V.42 7.2.1.3.
+       Require a sustained run on the same ODP-qualified candidate. */
     feed_odp(&s,9);
-    for(unsigned i=0;i<V90_LAPM_BUFFER_BITS;i++)v90_lapm_select_bit(&s,9,1,3000+i);
-    assert(s.overflows==1 && !s.candidate[9].active);
+    feed_flags(&s,9,V90_LAPM_FLAG_EVIDENCE-1);assert(s.selected<0);
+    feed_flags(&s,9,1);
+    assert(s.selected==9 && chosen==9 && selection_events==2 && s.flag_selections==1);
+    v90_lapm_select_bit(&s,9,-1,4000);assert(s.selected<0 && output_invalid==2);
+    feed_odp(&s,10);
+    for(unsigned i=0;i<V90_LAPM_BUFFER_BITS;i++)v90_lapm_select_bit(&s,10,1,5000+i);
+    assert(s.overflows==1 && !s.candidate[10].active);
     v42_free(answerer);
     return 0;
 }

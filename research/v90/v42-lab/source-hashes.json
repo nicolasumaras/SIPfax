@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/freeswitch/spandsp",
+  "revision": "8f1e1646bdec99eac5fd2cd92c35563f736b9b89",
+  "files": {
+    "alloc.c": "b0278126f64d125b034788eea829d04cbc5121fb1d01356c40308b40e76e552b",
+    "async.c": "e7b6a9a2f30f794ef0a55d9634a8311694398dc84c1ddc09b1695e68b61f5ee1",
+    "bit_operations.c": "36ebaad1464ba39b9aa30077b0c3d5858ebb7f75462bc7671d1d587d7cb5b16a",
+    "crc.c": "467f634d9bde5a1963f8723ef52941e3ec467ae59ebb63fdd4c0809a52a040d8",
+    "hdlc.c": "0146be26e2c12e3f44e27283d9fbd4fa6f10f6107aac4062502d075159bb3c71",
+    "logging.c": "1d7c8c6b74c4fafd5b918f3b2e89d7c300455f6fa3b75b7af2a4189ee9c7cd03",
+    "spandsp/alloc.h": "6d1915f2fd4691a1003b00a73cf9baec2e88716a1cc3ce1fcc650d1f6d5e70cb",
+    "spandsp/async.h": "123a0922c7f935691f80092ccf1331c2104408b9dbf261a8d34aab525b188f31",
+    "spandsp/bit_operations.h": "9a5ea73d420d74b2216f6a7724e3201c6a1c9bcf66c16238d3ab7f8b87d39336",
+    "spandsp/crc.h": "38b7542de7ee70f158944dd807909ce582048199a99d2993b56caaa65d7bca2e",
+    "spandsp/hdlc.h": "ae8fdc679d81bdc8ef420f5aa161fa3b97991b937c0350a5ffe9789299b05166",
+    "spandsp/logging.h": "f45d92d76eec1173d003e3c4a5a731a82e4e41ce0c68e56f91e1a6a6028130bb",
+    "spandsp/private/async.h": "20c1019527534ddeefed5ae7085984edb60f93f52cb1da2a7ee9dfad964eb44b",
+    "spandsp/private/hdlc.h": "67e8ecca74b3af9573e94b246a6104a1fd839e84b46eca0d37e7dc12e7586c0d",
+    "spandsp/private/logging.h": "1c76c7223b4bdbc997aa3d41c269aca92f7266ad4665d57515f68fdd48c057ee",
+    "spandsp/private/v42.h": "d068565850b3ebf309d5d3b7fcca5c22fbb53ad2cdf78fefe7878090ba15e41e",
+    "spandsp/stdbool.h": "dd928d474f7d1b83528c43331c7193694a0d80905d5739b2a3fb50c99a1de385",
+    "spandsp/telephony.h": "8b9b436a4ffb89f3e8a6bd96114fb45115bffe1585863d9d35a6d1e1292025d0",
+    "spandsp/unaligned.h": "f321eedec51b6804798c44b598ce0df5cf5025f6dc5e396a7ca81e55bdf792eb",
+    "spandsp/v42.h": "f856f5858a5b0333e10d917acb5aedc0c3771e8aa2c4d3ff21a7f443e8422fcc",
+    "v42.c": "654eda248762a5f84806c098d9632e77206b160f9e8278bc273b5a82507ccb69"
+  }
+}

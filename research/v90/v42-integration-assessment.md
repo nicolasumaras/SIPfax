@@ -12,3 +12,10 @@ Concrete integration checks:
 - First build an independent two-peer harness with asymmetric clocks, verified bidirectional payloads, deterministic corrupted/dropped frames, retransmission/duplicate checks, bounded memory and busy/backpressure tests. Then integrate synchronous bits before the existing UART parser and after the V.90 descrambler, with a corresponding downstream bit source, retaining asynchronous fallback and clean retrain behavior.
 
 No V.42/LAPM implementation was enabled or deployed during this assessment. The existing optional E/NUL decline handshake is not LAPM.
+
+
+## Isolated qualification result
+
+The pinned reference was built from the seven required C modules without installing a system dependency. A two-peer lab found an unsolicited-final-bit defect: the RR/RNR response helper sends F=1 even when P=0. This contradicts V.42 8.4.2 and stalls the clean unequal-rate case. Correcting the response to echo the incoming P bit fixes that regression.
+
+The corrected implementation passes 44/46 expanded cases covering exact bidirectional data, final acknowledgements, unequal clocks, propagation delay, backpressure, variable frame sizes and corrupted bits/bursts. Two fixed-frame cases with dense continuous periodic faults at long delay remain incomplete; both recover when the faults stop. See [the pinned lab, procedure and limitations](v42-lab/README.md). The runner returns failure for the incomplete corrected cases. None of this enables LAPM on the live service.

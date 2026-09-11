@@ -1,4 +1,4 @@
-/* Streaming 3200-baud/1920Hz V.90 upstream Ja receiver. GPL-2.0.
+/* Streaming 3000/3200-baud V.90 upstream Ja/CP receiver. GPL-2.0.
  * Ten quarter-sample timing hypotheses; accept only CRC-validated descriptors.
  */
 #include <math.h>
@@ -7,8 +7,19 @@
 #include "v90training.h"
 void v90_training_init(V90Training *s)
 {
-    memset(s,0,sizeof(*s));
-    const double beta=.1,sps=2.5;
+    v90_training_init_profile(s,3200,1);
+}
+int v90_training_init_profile(V90Training *s,unsigned symbol_rate,unsigned high_carrier)
+{
+    if(!s || (symbol_rate!=3000 && symbol_rate!=3200) || high_carrier>1)return 0;
+    memset(s,0,sizeof(*s));s->symbol_rate=symbol_rate;
+    s->carrier=symbol_rate==3000?(high_carrier?2000:1800):(high_carrier?1920:12800.0/7);
+    s->symbol_period=32000.0/symbol_rate;
+    /* The 3200 low carrier needs finer timing diversity through mu-law;
+     * retain the existing high-carrier acquisition path exactly. */
+    s->phase_count=symbol_rate==3200 && !high_carrier?V90_RX_MAX_PHASES:V90_RX_PHASES;
+    for(unsigned i=0;i<s->phase_count;++i)s->next_symbol[i]=i*s->symbol_period/s->phase_count;
+    const double beta=.1,sps=8000.0/symbol_rate;
     for(int fraction=0;fraction<4;++fraction)for(int k=0;k<V90_RX_TAPS;++k) {
         double t=(k-(V90_RX_TAPS-1)/2-fraction*.25)/sps,v;
         if(fabs(t)<1e-9)v=1-beta+4*beta/M_PI;
@@ -17,6 +28,7 @@ void v90_training_init(V90Training *s)
         else v=(sin(M_PI*t*(1-beta))+4*beta*t*cos(M_PI*t*(1+beta)))/(M_PI*t*(1-16*beta*beta*t*t));
         s->taps[fraction][k]=v;
     }
+    return 1;
 }
 static void bit(V90Training *s,V90JaLane *lane,unsigned b)
 {
@@ -49,9 +61,9 @@ static void bit(V90Training *s,V90JaLane *lane,unsigned b)
     if(s->cp_mode && lane->have_data_cp && lane->ones==20)s->e_seen=1;
     if(lane->ones>20)lane->ones=20;
 }
-static void symbol(V90Training *s,long time,double re,double im)
+static void lane_symbol(V90Training *s,unsigned index,double re,double im)
 {
-    V90JaLane *lane=&s->lanes[time%V90_RX_PHASES];
+    V90JaLane *lane=&s->lanes[index];
     if(lane->have_previous) {
         double dot=re*lane->previous_re+im*lane->previous_im;
         double cross=im*lane->previous_re-re*lane->previous_im;
@@ -61,10 +73,23 @@ static void symbol(V90Training *s,long time,double re,double im)
     }
     lane->previous_re=re;lane->previous_im=im;lane->have_previous=1;
 }
+static void symbol(V90Training *s,long time,double re,double im)
+{
+    if(s->symbol_rate==3200 && s->phase_count==V90_RX_PHASES){lane_symbol(s,(unsigned)(time%V90_RX_PHASES),re,im);return;}
+    s->filtered_re[time%32]=re;s->filtered_im[time%32]=im;
+    for(unsigned i=0;i<s->phase_count && (!s->found || s->cp_mode);++i){
+        double next=s->next_symbol[i];if(next>time)continue;
+        long index=(long)floor(next);double fraction=next-index;
+        unsigned a=(unsigned)index%32,b=(a+1)%32;
+        lane_symbol(s,i,s->filtered_re[a]+fraction*(s->filtered_re[b]-s->filtered_re[a]),
+                        s->filtered_im[a]+fraction*(s->filtered_im[b]-s->filtered_im[a]));
+        s->next_symbol[i]+=s->symbol_period;
+    }
+}
 int v90_training_receive(V90Training *s,const int16_t *pcm,int count)
 {
     for(int n=0;n<count && (!s->found || s->cp_mode);++n,++s->samples) {
-        double phase=2*M_PI*1920*s->samples/8000.0;
+        double phase=2*M_PI*s->carrier*s->samples/8000.0;
         s->re[s->position]=pcm[n]*cos(phase);s->im[s->position]=-pcm[n]*sin(phase);
         /* Preserve fractional matched-filter response for Ja and CP, as
            in the upstream data receiver. Stop immediately on a valid Ja. */

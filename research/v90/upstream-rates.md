@@ -43,7 +43,11 @@ All 22 basic 3000-symbol/s PCM profiles (4800–28800, both 1800/2000 Hz carrier
 
 All 29 native tests, the legacy 28800/3200 seed-98017 direct/delayed-E matrix, native build and CT105 profile-initialization/PCM ASan/UBSan checks pass. CI adds the basic profiles, targeted stress regressions and memory checks. Production is unchanged.
 
-Next: propagate symbol rate/carrier through Phase 3 training, Phase 4 and E resets, then INFO1a/INFO1d negotiation. The training receiver still assumes 3200/1920 and startup accepts only INFO1a upstream code 4. No live 3000-symbol/s capability is advertised yet. This module alone is not 3000-symbol/s reception or hardware qualification.
+Ja/CP training reception now has an explicit 3000/3200-symbol profile and carrier initializer. The matched filter uses the selected spacing and carrier; 3000 timing hypotheses interpolate adjacent quarter-sample filter outputs. Legacy 3200/high-carrier sampling is retained. Invalid profile initialization leaves state unchanged.
+
+Independent tests pass 160 linear-PCM and 160 mu-law cases across both symbol rates/carriers, four fractional offsets and ±100 ppm, with carrier offset/noise. They compare complete decoded descriptors, reject corrupted CRCs, accept E only after valid data CP, and reject E after CPt or corrupted CP. One mu-law Ja case at 3200/low carrier initially failed; adding half-quarter-sample timing hypotheses for that profile (20 instead of 10 lanes) closes it. This change leaves the legacy high-carrier timing path unchanged. All 30 native tests, native build and CT105 expanded-history/profile-validation ASan/UBSan checks pass.
+
+Next: parameterize S/Sbar detection and propagate the selected profile through Phase 4 and E resets, then INFO1a/INFO1d negotiation. Startup still accepts only INFO1a upstream code 4 and initializes the default profile. No live 3000-symbol/s capability is advertised yet. This module alone is not 3000-symbol/s reception or hardware qualification.
 
 ## Historical development record
 

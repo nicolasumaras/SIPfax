@@ -1775,3 +1775,18 @@ The RTP capture contained 130539 packets with zero kernel drops or sequence gaps
 After the trial restored the baseline and disconnected, `dcb450f` was deployed at upstream 28800 with automatic echo acquisition. Service activity, exact binary SHA-256 `a885a92e8db167b78dad585ce8c6b67ee8c35bc1f229bec687f2a4c981bad761`, persisted configuration and FreePBX readiness were verified. The prior `5151eb5` binary and 26400/auto configuration remain in `lm.pre-28800-dcb450f` and `/tmp/v90-upstream-before-28800-dcb450f.conf` for rollback. Notebook idle and cleared SIPFAXRED state were verified. Trial, fixture, both captures, retrieval and deployment handles are terminal.
 
 The two hardware calls and passed CI qualify this profile for continued development on the tested notebook/ATA path. Broader reliability, full symbol-rate coverage, maximum-rate operation, ongoing echo tracking, fallback and concurrent calls remain incomplete. The newer 31.2 source has local test evidence but is not deployed; its CI and CT105/hardware qualification are separate work.
+
+
+## First 31.2 kbit/s hardware test: not qualified
+
+CI run 34553127618 passed for `b1bb937`. CT105 built binary SHA-256 `dae4f809ff8c0cd0554da33ec81b321a025056922f17d776e525692f18eb90bd`. CT105 ASan/UBSan feedback-history and reacquisition checks passed. An isolated replay recovered 192 expected frames across 489 input blocks; total receiver time was 644.865 ms and peak processing time was 13.993 ms for one 20 ms block. A prior replay overlapping another build/check measured 659.407 ms total and 13.791 ms peak; neither measurement is a hard real-time guarantee.
+
+Hardware attempt `740bbe37-2da1-4342-acbe-0c5618c60797` used verified native PID14032, configured 31200/auto. Windows reported error 721 before PPP connected. No successful transfer or valid upstream PPP frame was recorded. Native downstream CP was 49.333 kbit/s; upstream E/B1 were detected at Phase4 time 4.049125/4.089125 seconds, B1 correlation 0.9739. Echo acquisition selected delay 1428 at sample 96480. The later S/Sbar at 46.920/46.9375 seconds accompanied hangup.
+
+The 13208-packet capture had zero kernel drops or RTP sequence gaps. All 3273 downstream primary payloads matched exactly, and all 3275 forwarded upstream payloads matched after eleven ATA startup packets. Packet preservation does not prove correct analog playout or receiver decoding.
+
+The raw receive and transmit audio was retained privately. Offline causal echo replay reproduced the live acquisition delay and lock sample exactly. Replaying the corrected recording with initial phase gains 0.005, 0.01, 0.02, 0.05, 0.1 and 0.15, or frequency-integrator gains 0.00005 and 0.0001, recovered zero CRC-valid PPP frames. Replays configured for 28.8, 26.4 and 24 kbit/s also recovered none. These changes were confined to temporary replay builds.
+
+A protocol review found that INFO1d still hard-codes projected maximum rate 2 (4.8 kbit/s) for 3200 symbols/s, whereas MP now requests rate 13. This mismatch also existed on earlier working profiles, so it is not a proven explanation for this failure. INFO0d already advertises large-constellation support. The next investigation is to make per-call Phase2/MP/receiver rate selection consistent with the peer's capabilities, then retest rather than infer success from synthetic frames.
+
+The wrapper restored `dcb450f` at 28800/auto. Service activity, binary hash, persistent configuration, notebook idle and cleared SIPFAXRED state were verified. CI watch, runner, fixture, capture, retrieval, CT105 check and replay jobs are terminal. 31.2 kbit/s remains undeployed and unqualified on hardware.

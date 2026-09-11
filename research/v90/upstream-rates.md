@@ -1,5 +1,28 @@
 # Extending the V.90 upstream receiver
 
+## Current qualification and next implementation gate (2026-09-11)
+
+CT105 is running `dcb450f`, upstream 28800 bit/s with automatic initial echo acquisition. Its verified binary SHA256 is `a885a92e8db167b78dad585ce8c6b67ee8c35bc1f229bec687f2a4c981bad761`. The short hardware call passed 18 transfer hashes; the sustained call passed 129 targets without request retries over 621 seconds, with downstream CP remaining 49.333 kbit/s. Residual modem errors occurred. See the dated entries in [live status](../v90-live-status.md) for captures and qualification limits. Later sections below are historical development records, not the current deployment inventory.
+
+The development branch includes 31200 bit/s and consistent per-call INFO1d/MP rate selection, but two hardware trials at 31200 failed before PPP. A 28800 control with the corrected negotiation passed. Offline changes to B1 training span, feedback delay, acquisition threshold, timing-loop terms, and frozen equalizer/carrier combinations have not recovered usable PPP from those failed recordings. Freezing equalizer adaptation preserves constellation energy but still recovers no CRC-valid frames, so energy collapse alone is not the root-cause explanation. These experiments are not deployed.
+
+### Required symbol-rate coverage
+
+V.90 clause 5.2 requires the **digital modem** to receive both 3000 and 3200 upstream symbols/s. Clause 6.2 allows the **analogue modem** to omit 3000. The server implements the digital role: the analogue-role exception does not remove its 3000-symbol/s requirement. Support for 3429 symbols/s is optional; 31.2/33.6 kbit/s upstream are also optional under clause 6.1. This distinction changes implementation priority, without discarding the existing higher-rate investigation or broader project scope.
+
+Primary specifications: [V.90 (09/98), clauses 5.2 and 6.1–6.2](https://www.itu.int/rec/dologin_pub.asp?id=T-REC-V.90-199809-I!!PDF-E&lang=e&type=items), [V.34 (02/98), clause 9 and Tables 7–10](https://www.itu.int/rec/dologin_pub.asp?id=T-REC-V.34-199802-I!!PDF-E&lang=e&type=items).
+
+The next implementation gate is a parameterized 3000-symbol/s receiver, independently tested before advertising that capability:
+
+- Represent symbol rate, carrier and framing separately from bit rate. The current receiver fixes a 1920 Hz carrier and ten quarter-sample units per symbol; 3000 needs its specified carrier and fractional sampling interval.
+- Implement the 3000-symbol/s mapping schedule, including high/low bit allocation and shell parameters. V.34 Table 7 uses J=7 and P=15, versus P=16 at 3200. A 3000 data frame/B1 contains 120 symbols; the current B1 length and inversion-cycle assumptions are 128 symbols and 448 pairs.
+- Carry the peer-selected symbol rate and carrier from startup into Phase 4 and receive state, with consistent INFO0d/INFO1d and MP negotiation. Do not advertise unimplemented receive modes.
+- Verify independent bit-exact framing, B1 acquisition, carrier/timing offsets, delayed-E replay, bounds and lower-rate regressions, then run a reversible hardware negotiation and bidirectional PPP transfer test where the peer supports this mode.
+
+Broader reliability, fallback, echo tracking and future concurrent calls remain separate unfinished work. The successful single-call deployment does not prove full V.90 conformance.
+
+## Historical development record
+
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental
 `SIPFAX_V90_UPSTREAM_RATE=7200` selects the eight-point receiver; `9600` selects
 the twelve-point receiver; `12000` selects the experimental twenty-point receiver; `14400` selects

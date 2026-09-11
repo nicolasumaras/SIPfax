@@ -576,3 +576,12 @@ The integrated default and seeds 43127, 62091 and 98017 pass all 192 expected fr
 CT105 ASan/UBSan feedback history/reacquisition checks pass, including 28.8 half-symbol input. A cached PCMU benchmark recovered 192 frames across 529 blocks, with 547.155 ms total receiver time and a 12.966 ms peak for one 20 ms audio block. This is a workload measurement, not a hard real-time guarantee.
 
 Hardware qualification is outstanding. The deployed runtime remains `5151eb5`, upstream 26400 with automatic initial echo acquisition. No 28.8 hardware success is claimed.
+
+
+## 31.2 kbit/s source qualification
+
+The development receiver now includes a configured 31200 bit/s profile at 3200 symbols/s: M=10, K=26, q=5, 1280 points, 78-bit mapping frames and eleven-bit trellis labels. Packed pair history remains within 32 bits. Independent MP decoding verifies rate 13, capability bit 47 and CRC; the symbol rate is unchanged.
+
+The initial 0.05 timing phase gain passed the default, 43127 and 62091 waveform matrices, but seed 98017 lost one frame at phase 0.5/+100 ppm in both direct and delayed-E reception. Using 0.02 from startup only for 31.2 kbit/s closes that failure. The final default and all three seeded matrices recover all 192 expected frame hashes in every phase/clock case, in both receiver modes. The frequency integrator and lower-rate phase gains are unchanged.
+
+All 1280 constellation points, all trellis states, shell boundaries, continuous 78-bit frames, carrier/noise, source timing and reacquisition pass the independent symbol/mapping tests. The native synthetic/fixture suite, MP negotiation checks, 26.4/28.8 mapping regressions and the 28.8 seed-98017 waveform regression pass locally. CI adds all four 31.2 waveform matrices and memory-safety coverage for the extended feedback history. CT105 timing/memory checks and hardware qualification remain outstanding. This source work does not alter the ongoing 28.8 hardware trial or establish deployed 31.2 support.

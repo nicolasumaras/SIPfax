@@ -28,9 +28,9 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rate=28800 if "--28800" in sys.argv else 26400 if "--26400" in sys.argv else 24000 if '--24000' in sys.argv else 21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
-k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10),24000:(24,8),26400:(30,14),28800:(28,12)}[rate]
-q_bits=4 if rate==28800 else 3 if rate>=24000 else 2 if rate==21600 else 1 if rate==19200 else 0
+rate=31200 if "--31200" in sys.argv else 28800 if "--28800" in sys.argv else 26400 if "--26400" in sys.argv else 24000 if '--24000' in sys.argv else 21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
+k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10),24000:(24,8),26400:(30,14),28800:(28,12),31200:(26,10)}[rate]
+q_bits=5 if rate==31200 else 4 if rate==28800 else 3 if rate>=24000 else 2 if rate==21600 else 1 if rate==19200 else 0
 frame_bits=k+12+8*q_bits
 from v90_shell_reference import ShellReference
 if rate>=14400:rings=ShellReference(m)
@@ -148,7 +148,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             center=100+fraction+2.5*i*(1+ppm/1e6)
             for n in range(math.ceil(center-40),math.floor(center+40)+1):base[n]+=z*pulse((n-center)/2.5)
         samples=np.arange(len(base));carrier=np.exp(1j*(.61+2*np.pi*1920.3*samples/8000))
-        wave=np.rint((500 if rate==28800 else 650 if rate==26400 else 900 if rate>=16800 else 1800)*(base*carrier).real+rng.normal(0,1,len(base)))
+        wave=np.rint((400 if rate==31200 else 500 if rate==28800 else 650 if rate==26400 else 900 if rate>=16800 else 1800)*(base*carrier).real+rng.normal(0,1,len(base)))
         assert np.max(abs(wave))<32768,'synthetic PCM clipping'
         pcm=wave.astype(np.int16)
         if '--pcmu' in sys.argv:

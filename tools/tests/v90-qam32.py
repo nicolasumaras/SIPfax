@@ -8,7 +8,7 @@ import tempfile
 import sys
 from v90_shell_reference import ShellReference
 root=Path(__file__).resolve().parents[2]
-m,k,q_bits=(12,28,4) if "--28800" in sys.argv else (14,30,3) if "--26400" in sys.argv else (8,24,3) if '--24000' in sys.argv else (10,26,2) if '--21600' in sys.argv else (12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
+m,k,q_bits=(10,26,5) if "--31200" in sys.argv else (12,28,4) if "--28800" in sys.argv else (14,30,3) if "--26400" in sys.argv else (8,24,3) if '--24000' in sys.argv else (10,26,2) if '--21600' in sys.argv else (12,28,1) if '--19200' in sys.argv else (14,30,0) if '--16800' in sys.argv else (8,24,0)
 frame_bits=k+12+8*q_bits
 point_count=4*m*(1<<q_bits)
 converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
@@ -44,7 +44,8 @@ unsigned long long rejected(V90Qam8Stream*s){return s->rejected_frames;}
 void destroy(void*s){free(s);}
 unsigned long long count(V90Trellis*s){return s->pairs;}
 ''')
-    if "--28800" in sys.argv:w.write_text(w.read_text().replace("V90Qam32Frames","V90Qam768Frames").replace("v90_qam32_frames_init","v90_qam768_frames_init").replace("s,14400","s,28800"))
+    if "--31200" in sys.argv:w.write_text(w.read_text().replace("V90Qam32Frames","V90Qam1280Frames").replace("v90_qam32_frames_init","v90_qam1280_frames_init").replace("s,14400","s,31200"))
+    elif "--28800" in sys.argv:w.write_text(w.read_text().replace("V90Qam32Frames","V90Qam768Frames").replace("v90_qam32_frames_init","v90_qam768_frames_init").replace("s,14400","s,28800"))
     elif "--26400" in sys.argv:w.write_text(w.read_text().replace("V90Qam32Frames","V90Qam448Frames").replace("v90_qam32_frames_init","v90_qam448_frames_init").replace("s,14400","s,26400"))
     elif q_bits==3:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam256Frames').replace('v90_qam32_frames_init','v90_qam256_frames_init').replace('s,14400','s,24000'))
     elif q_bits==2:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam160Frames').replace('v90_qam32_frames_init','v90_qam160_frames_init').replace('s,14400','s,21600'))
@@ -101,7 +102,7 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
                 ready=pair_fn(s,x.real,x.imag,y.real,y.imag,inv,C.byref(aa),C.byref(bb))
                 if ready:decoded.append((aa.value,bb.value))
                 pa=C.c_uint(999);pb=C.c_uint(999);width=(point_count-1).bit_length()
-                for age,bits in [(64,width),(0,1),(0,11),(count+1,width)]:
+                for age,bits in [(64,width),(0,1),(0,12),(count+1,width)]:
                     assert lib.peek(s,age,bits,C.byref(pa),C.byref(pb))==0 and pa.value==pb.value==999
                 early=lib.peek(s,8,width,C.byref(pa),C.byref(pb))
                 assert early==int(count>=8)

@@ -8,7 +8,7 @@
 int main(void)
 {
     V90Qam8Stream *s=malloc(sizeof(*s));assert(s);
-    const unsigned rates[]={14400,16800,19200,21600,24000,26400,28800};
+    const unsigned rates[]={14400,16800,19200,21600,24000,26400,28800,31200};
     for(unsigned rate=0;rate<sizeof(rates)/sizeof(rates[0]);++rate) {
         assert(v90_qam_stream_init_rate(s,rates[rate]));
         for(unsigned repeat=0;repeat<3;++repeat) {
@@ -23,7 +23,7 @@ int main(void)
         }
     }
     /* The PCM frontend supplies an earlier midpoint before every symbol. */
-    for(unsigned rate=26400;rate<=28800;rate+=2400) {
+    for(unsigned rate=26400;rate<=31200;rate+=2400) {
         assert(v90_qam_stream_init_rate(s,rate));s->have_mid=1;
         for(unsigned repeat=0;repeat<3;++repeat) {
             double previous_r=0,previous_i=0;

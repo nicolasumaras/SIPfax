@@ -15,9 +15,11 @@ parser=argparse.ArgumentParser(add_help=False)
 parser.add_argument('--symbol-rate',type=int,choices=[3000,3200],default=3200)
 parser.add_argument('--low-carrier',action='store_true')
 parser.add_argument('--seed',type=int,default=None)
-parser.add_argument('--odp-prefix',action='store_true',help='Precede PPP with 1.2 s of V.42 detection and 4.5 s idle')
+parser.add_argument('--odp-prefix',action='store_true',help='Precede PPP with 1.2 s of V.42 detection')
+parser.add_argument('--odp-idle-ms',type=int,default=4500,help='Idle after detection (0..5000 ms)')
 parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
+if not 0<=options.odp_idle_ms<=5000:parser.error('ODP idle must be 0..5000 ms')
 baud=options.symbol_rate
 failures=[]
 def verify_frames(received, fraction, ppm, mode):
@@ -73,7 +75,7 @@ if options.odp_prefix:
     for n in range(round(rate*1.2/24)):
         value=0x11 if n%2==0 else 0x91
         plain.extend([0]+[(value>>i)&1 for i in range(8)]+[1]*15)
-    plain.extend([1]*round(rate*4.5))
+    plain.extend([1]*round(rate*options.odp_idle_ms/1000))
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 # Flush the rate-dependent trellis lookahead with real idle symbols.
 plain.extend([1]*(20*frame_bits))
@@ -147,6 +149,7 @@ unsigned acquired(V90Upstream*s){return s->b1_seen;}
 unsigned odp(V90Upstream*s){return s->odp_seen;}
 unsigned assistance(V90Upstream*s){unsigned n=0;for(unsigned i=0;i<10;++i)n+=s->qam[i].stream.odp.used;return n;}
 static V90ODPTrainer predictor;static V90Mapping predictor_mapping;
+unsigned predictor_horizon(void){return V90_ODP_PREDICTION_FRAMES;}
 void predictor_reset(unsigned rate,unsigned baud){memset(&predictor,0,sizeof(predictor));if(!v90_mapping_init(&predictor_mapping,rate,baud))abort();}
 void predictor_frame(unsigned f,const uint16_t*labels,const uint8_t*bits,unsigned n){v90_odp_observe(&predictor,&predictor_mapping,f,labels,bits,n);}
 int predictor_label(unsigned long long n){unsigned label=0;return v90_odp_label(&predictor,n,&label)?(int)label:-1;}
@@ -183,15 +186,17 @@ unsigned phase4_odp(V90Phase4*s){return s->upstream.odp_seen;}
         lib.predictor_label.argtypes=[C.c_ulonglong];lib.predictor_label.restype=C.c_int
         lib.predictor_reset(rate,baud)
         assert lib.predictor_label(0)==-1 and lib.predictor_label(2**64-1)==-1
+        horizon=lib.predictor_horizon()
+        assert 16<=horizon<=64
         cursor=checked=0;last_predictions=[]
         odp_end=rate//25+180+round(rate*1.2/24)*24
         for f,size in enumerate(frame_sizes):
-            if cursor+size>=odp_end-2000:break
+            if cursor+size+sum(frame_sizes[f+1:f+1+horizon])>=odp_end:break
             raw=np.ascontiguousarray(bits[cursor:cursor+size],dtype=np.uint8)
             lab=np.ascontiguousarray(symbol_labels[8*f:8*f+8],dtype=np.uint16)
             lib.predictor_frame(f,lab.ctypes.data,raw.ctypes.data,size);cursor+=size
             last_predictions=[]
-            for n in range(8*(f+1),8*(f+25)):
+            for n in range(8*(f+1),8*(f+1+horizon)):
                 predicted=lib.predictor_label(n)
                 if predicted>=0:
                     assert predicted==symbol_labels[n], ('causal prediction',f,n,predicted,symbol_labels[n])

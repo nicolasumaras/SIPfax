@@ -29,7 +29,7 @@ void v90_odp_observe(V90ODPTrainer*p,const V90Mapping*m,unsigned long long frame
   unsigned y1=((a&1)&((b&1)^1))^(a>>1)^(b>>1),y2=a&1;
   state=(state>>1)^y1^(y2<<1)^((y2^u)<<2)^(u<<3);
  }
- for(unsigned f=1;f<=24;++f){
+ for(unsigned f=1;f<=V90_ODP_PREDICTION_FRAMES;++f){
   unsigned n=v90_mapping_frame_bits(m,frame+f),k=m->k-(n<m->b);
   unsigned char v[78],rings[8];unsigned index=0;
   for(unsigned i=0;i<n;++i,++at){

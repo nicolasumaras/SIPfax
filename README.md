@@ -18,9 +18,10 @@ The first supported baseline follows the LKMA-168 decision:
 
 The native C backend in `vendor/linmodem` answers Windows XP hardware modems
 through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
-The retained CT105 baseline has passed a sustained call at 49.333 kbit/s downstream
-and 28.8 kbit/s upstream, with 129 verified transfer hashes without request retries.
-Residual modem errors occurred; this is qualification on one tested path.
+The deployed CT105 build has passed a sustained call at 49.333 kbit/s downstream
+and 26.4 kbit/s upstream after automatic startup recovery, with 129 verified
+transfer hashes, no retries and zero reported modem errors. This is qualification
+on one tested path. The prior build also passed a sustained 28.8 kbit/s upstream call.
 
 The development receiver implements 3000-symbol/s upstream profiles from 4.8 to
 28.8 kbit/s and 3200-symbol/s profiles through 31.2 kbit/s. Startup follows the
@@ -33,7 +34,8 @@ Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no vali
 PPP frame arrives within five seconds plus two round-trip delays. It preserves the
 reduced ceiling through retraining, stops at 4.8 kbit/s, and does not apply after
 valid data has arrived on the call. One hardware call successfully recovered from
-3000/28.8 to 3000/26.4 on the same call. Sustained recovery qualification is pending.
+3000/28.8 to 3000/26.4 on the same call. A sustained recovery call also passed 129 transfer checks; a post-deployment call
+verified recovery with normal symbol-rate negotiation.
 See [receiver qualification](research/v90/upstream-rates.md) and the
 [live development record](research/v90-live-status.md) for evidence and remaining
 work. These results do not imply full V.90 conformance or concurrent-call support.
@@ -69,7 +71,7 @@ Hardware qualification uses these service environment settings:
 | `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
 | `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |
 | `SIPFAX_V90_UPSTREAM_RATE` | `4800` | `28800` initial upstream ceiling |
-| `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | `3000` for the current recovery trial; `3200` can also restrict offers |
+| `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | unset in deployment; `3000` or `3200` restricts qualification offers |
 | `SIPFAX_V90_LINE_ECHO` | off | `auto` initial echo-delay acquisition |
 | `SIPFAX_V90_SOFT_RX` | `0` | `1` soft-decision 4.8 kbit/s path |
 | `SIPFAX_RTP_PLAYOUT_MS` | `0` | `60` |

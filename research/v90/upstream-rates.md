@@ -96,6 +96,15 @@ A second trial capped at `53334`, attempt `f49bf5ae-3c09-44ab-ab01-1b1b96ff6469`
 
 Both calls disconnected cleanly; their temporary override was removed and the active service returned to the qualified 49334 ceiling. Raw RX/TX and RTP captures are retained privately; all trial/fixture/capture processes are terminal. Next is sustained qualification at 53.333 kbit/s. The 56 kbit/s stall remains recorded as a failure.
 
+
+### Sustained 53.333 ceiling trial (2026-09-11)
+
+Attempt `79c76f40-2547-4b29-bde9-04dd6ffa17e6` completed all 129 target hashes in 129 attempts on one PPP connection, with no failed application requests. The call began with CP 53.333 kbit/s, recovered upstream from 28800 to 26400 at 3200 symbols/s, and renegotiated downstream to 50.667 kbit/s at Phase4 time 229.730375 seconds. Final PPP duration was 768.014 seconds, with 83 CRC and eight alignment errors. Windows continued reporting the original connection speed; the native CP records establish the rate change.
+
+The 163191-packet RTP capture had zero capture drops/gaps. All 40633 downstream primary payloads matched; 40646-to-40635 upstream payloads matched after the eleven-packet startup suffix. The TCP capture contained 4682 packets and all 129 expected flows in order, with 230 retransmitted downstream segments. This proves complete transfers through downstream renegotiation, not error-free sustained 53.333 operation.
+
+For the same transfer workload, the recent 49.333-ceiling recovery run completed in 581.627 seconds with zero modem errors and no downstream TCP retransmissions. The higher-ceiling run was about 32% longer. This is a comparison of two observed calls, not a general causal benchmark. Keep the deployment ceiling at 49334. The temporary override was removed, the active service verified, and all trial/capture/fixture processes are terminal. Raw audio, RTP and TCP evidence are retained privately.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

@@ -27,7 +27,9 @@ Broader reliability, fallback, echo tracking and future concurrent calls remain 
 
 The new module is linked into the native build but is not yet connected to the streaming receiver or advertised during negotiation. Independent tests use published Tables 8/10 and the legacy shell encoder to verify 7497 mapping frames across 23 profiles, including all 15/16-frame schedules, superframe transitions, large frame indices, exact bit counts, low-frame insertion and buffer/label rejection. CT105 ASan/UBSan checks pass; the clean native build passes with the CI compiler flags. The local sanitizer runtime libraries were missing, so sanitizer validation was performed in CT105's isolated temporary directory. Production was not changed.
 
-Next: parameterize B1 length, trellis/inversion framing and symbol/carrier timing, then connect the new mapping module and per-call symbol-rate selection. This module alone is not 3000-symbol/s reception or hardware qualification.
+The profile-based B1 generator now emits 120 labels at 3000 symbols/s and 128 at 3200. It maintains GPA scrambling across low/high frames, omits inserted bits from the scrambler input count, resets differential and 16-state trellis encoders, and applies inversion as the last J=7 data frame. A profile-based inversion helper covers subsequent data and counter wraparound. Independent tests compare every B1 label against a separate GPA recurrence, legacy shell mapper and geometric subset-conversion table for all 23 profiles. Bounds/rejection checks pass with ASan/UBSan on CT105; the native build passes. Streaming acquisition still uses the original 128-symbol path.
+
+Next: parameterize streaming B1 acquisition/equalizer training and symbol/carrier timing, then connect the new mapping module and per-call symbol-rate selection. This module alone is not 3000-symbol/s reception or hardware qualification.
 
 ## Historical development record
 

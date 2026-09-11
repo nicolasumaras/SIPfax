@@ -36,6 +36,8 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
  lib.destroy.argtypes=[C.c_void_p];lib.params.argtypes=[C.c_void_p,C.POINTER(C.c_uint)]
  lib.carrier.argtypes=[C.c_void_p,C.c_uint];lib.carrier.restype=C.c_double
  lib.v90_mapping_frame_bits.argtypes=[C.c_void_p,C.c_ulonglong]
+ lib.v90_mapping_inversion.argtypes=[C.c_void_p,C.c_ulonglong]
+ lib.v90_mapping_b1.argtypes=[C.c_void_p,C.POINTER(C.c_uint16),C.c_uint]
  lib.v90_mapping_decode.argtypes=[C.c_void_p,C.c_ulonglong,C.c_uint,C.POINTER(C.c_uint16),C.POINTER(C.c_uint8),C.c_uint,C.POINTER(C.c_uint)]
  class Legacy(C.Structure):
   _fields_=[('M',C.c_int),('g2_tab',C.c_int*137),('g4_tab',C.c_int*137),('z8_tab',C.c_int*138)]
@@ -63,6 +65,39 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
       field=oracle.g2_tab if width==2 else oracle.g4_tab
       for a,v in enumerate(counts):field[a]=v
     for a,v in enumerate(counts):oracle.z8_tab[a+1]=oracle.z8_tab[a]+v
+    pattern=[int(x) for x in '01110111111110']
+    for pair in list(range(28*p*3))+[2**64-1]:
+     pos=(pair+24*p)%(28*p)
+     assert lib.v90_mapping_inversion(s,pair)==(pattern[pos//(2*p)] if pos%(2*p)==0 else 0)
+    # Independent GPA recurrence, legacy shell encoder, geometric subset table.
+    scrambled=[]
+    for i in range(rate//25):scrambled.append(1^(scrambled[i-5] if i>=5 else 0)^(scrambled[i-23] if i>=23 else 0))
+    quarter=[complex(x,y) for x in range(-63,66,4) for y in range(-63,66,4)]
+    quarter.sort(key=lambda z:(int(z.real)**2+int(z.imag)**2,-z.imag))
+    converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
+     [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
+     [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
+     [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
+    def subset(label):
+     z=quarter[label>>2]*(-1j)**(label&3)
+     x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
+     return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
+    reference=[];cursor=state=prev=0
+    for f in range(p):
+     actual_k=k-(schedule[f]<b);v=scrambled[cursor:cursor+schedule[f]];cursor+=schedule[f]
+     rings=(C.c_int*8)();lib.legacy_encode(C.byref(oracle),sum(v[z]<<z for z in range(actual_k)),rings)
+     for pair in range(4):
+      at=actual_k+(3+2*q)*pair;a=(prev+v[at+1]+2*v[at+2])%4
+      bb=(a+2*v[at]+((state&1)^int(f==0 and pair==0)))%4
+      qa=sum(v[at+3+z]<<z for z in range(q));qb=sum(v[at+3+q+z]<<z for z in range(q))
+      x=a+4*((rings[2*pair]<<q)|qa);y=bb+4*((rings[2*pair+1]<<q)|qb)
+      reference.extend([x,y]);t=converter[subset(x)][subset(y)];u=state&1
+      state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3);prev=a
+    generated=(C.c_uint16*130)(*([65535]*130))
+    assert lib.v90_mapping_b1(s,generated,8*p)==8*p
+    assert list(generated)[:8*p]==reference and list(generated)[8*p:]==[65535]*(130-8*p)
+    generated[:]=[65535]*130
+    assert not lib.v90_mapping_b1(s,generated,8*p-1) and list(generated)==[65535]*130
     previous=0
     for frame in range(7*p*3):
      n=schedule[frame%p];actual_k=k-(n<b)
@@ -94,4 +129,4 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
    finally:lib.destroy(s)
  for rate,baud in [(0,3000),(4801,3000),(31200,3000),(33600,3200),(4800,3429)]:assert not lib.create(rate,baud)
  assert not lib.v90_mapping_frame_bits(None,0)
- print('PASS:',cases,'independent mapping frames; 23 profiles, published schedules, boundaries and rejection')
+ print('PASS:',cases,'independent mapping frames; 23 profiles, published schedules, independent B1 labels, inversion, boundaries and rejection')

@@ -19,4 +19,10 @@ unsigned v90_mapping_frame_bits(const V90Mapping *s,unsigned long long frame);
 unsigned v90_mapping_decode(const V90Mapping *s,unsigned long long frame,
     unsigned previous,const uint16_t labels[8],uint8_t *bits,unsigned capacity,
     unsigned *next_previous);
+/* B1 begins at the last data frame of a J=7 superframe. Pair zero is the
+ * first B1 pair; this function also covers subsequent data and wraparound. */
+unsigned v90_mapping_inversion(const V90Mapping *s,unsigned long long pair);
+/* Generate one B1 frame of scrambled ones with zeroed GPA/differential/
+ * 16-state trellis encoders. Returns 8*P labels, or zero without output writes. */
+unsigned v90_mapping_b1(const V90Mapping *s,uint16_t *labels,unsigned capacity);
 #endif

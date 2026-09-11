@@ -24,6 +24,16 @@ int main(void)
                 for(unsigned j=0;j<78;++j)assert(out[j]==0xa5);
                 assert(previous==99);
             }
+            uint16_t training[128];memset(training,0xff,sizeof(training));
+            assert(v90_mapping_b1(&s,training,8*s.p)==8*s.p);
+            for(unsigned i=0;i<8*s.p;++i)assert(training[i]<(4*s.m<<s.q));
+            for(unsigned i=8*s.p;i<128;++i)assert(training[i]==UINT16_MAX);
+            memset(training,0xff,sizeof(training));
+            assert(!v90_mapping_b1(&s,training,8*s.p-1));
+            for(unsigned i=0;i<128;++i)assert(training[i]==UINT16_MAX);
+            assert(v90_mapping_inversion(&s,0)==1);
+            assert(v90_mapping_inversion(&s,2*s.p)==0);
+            assert(v90_mapping_inversion(&s,UINT64_MAX)<=1);
             assert(v90_mapping_frame_bits(&s,UINT64_MAX)>0);
         }
     assert(!v90_mapping_init(NULL,4800,3000));

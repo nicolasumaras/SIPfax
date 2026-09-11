@@ -528,3 +528,20 @@ ten valid PPP frames after correction. The standalone CT105 benchmark peaked
 at 0.450 ms per search step; this is an observed timing, not a deadline guarantee.
 Live automatic-mode hardware qualification is still pending. The deployed
 `117ae76` remains in fixed-delay mode until that qualification.
+
+
+## Sustained automatic-delay qualification and deployment
+
+Revision `5151eb5` passed hardware attempt `44d5a229-929a-4750-8909-20e3a3877c44`. The live native process (11928) had the expected binary SHA-256 `b612a0c47def22ebc07fcf30d52515af3ba7f852df1f6d1bc7665cdee581487b`, upstream 26400 and echo mode `auto`.
+
+All 129 response hashes were independently verified: 64 downloads of 32 KiB (2 MiB total), 64 upstream checks of 1 KiB (64 KiB total), and final PASS. The internet probe also succeeded. The connection lasted 656.014 seconds and disconnected cleanly. Windows reported 28 CRC and two alignment errors, with zero timeout, framing, buffer or hardware overrun errors. Its last counters were 193403 bytes sent and 2291939 received; these include protocol traffic.
+
+Automatic acquisition selected 1428 samples at sample 96640 (12.08 seconds). An independent raw-audio 12–14-second correlation audit found the same delay, correlation -0.601796. The previous short automatic-mode call selected 1468 samples. This demonstrates initial acquisition across two live calls, not continuous tracking or universal path coverage.
+
+Downstream CP initially negotiated 49.333 kbit/s. A completed renegotiation at 370.600–372.637 seconds reduced downstream to 48 kbit/s; transfers continued and error counters subsequently stayed at 28/2. Initial upstream B1 correlation was 0.9826 and recovered B1 correlation 0.9701. The final S/Sbar at 666.255 seconds accompanied hangup and was not another completed renegotiation. This run is successful sustained PPP with recovery, not error-free operation at 49.333 kbit/s.
+
+The capture had 137535 packets, zero kernel drops and no RTP sequence gaps. All 34241 downstream primary payloads matched through FreePBX/RED; all 34243 forwarded upstream payloads matched after eleven ATA startup packets. The notebook was idle and SIPFAXRED registration was cleared after hangup. Trial, capture, HTTP fixture and retrieval processes are terminal.
+
+After the reversible trial restored `117ae76`, `5151eb5` was deployed with upstream 26400 and automatic echo acquisition. Service activity, binary hash, configuration and FreePBX availability were verified. Rollback retains `117ae76` as `lm.pre-auto-5151eb5` and its fixed-mode configuration in `/tmp/v90-upstream-before-auto-5151eb5.conf`.
+
+Remaining work includes higher upstream rates and symbol-rate coverage, error-rate reduction and broader reliability tests, ongoing echo-delay tracking, V.34 fallback and future concurrent calls. Additional synthetic-seed losses remain unresolved. The V.90 goal is still active and PR29 remains draft.

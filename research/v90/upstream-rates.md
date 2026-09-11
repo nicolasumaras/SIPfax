@@ -761,3 +761,23 @@ Replacing only the trellis input pairs during known B1 with their exact referenc
 Causal echo replay at NLMS steps 0, 0.0005, 0.001, 0.002 and 0.005 never recovers initial LCP in either failed recording. Disabling adaptation also loses both passing controls; the deployed 0.0005 and 0.001 recover 17/20 frames; 0.002 yields 15/0 and 0.005 yields 0/0. Using a transmit reference quantized through the same PCMU encode/decode mapping preserves the 17/20 control counts at 0.0005 and 0.001 but still recovers neither failure. Faster echo convergence or this reference substitution alone therefore has no demonstrated repair benefit. Aggregate results are retained in `receiver-experiments-2026-09-11.json`; private audio and decoded payloads are excluded.
 
 Next hardware experiment: the existing INFO1d implementation always requests flat transmit pre-emphasis. V.90 section 6.4 and Table 9 provide for analogue transmit pre-emphasis selected by the digital modem; V.34 section 5.4 Tables 3/4 define indices 0–10. Unlike receiver-only gain changes, this changes the caller's transmitted spectrum. A bounded, reversible 3000-symbol/s test with a supported nonzero index can establish whether transmit spectral shaping helps this path. No such setting has yet been applied or qualified.
+
+### Transmit pre-emphasis hardware trials (2026-09-11)
+
+Three reversible 3000/high trials based on native `9be7827` tested pre-emphasis index 2, index 8, and index 2 combined with half-symbol NLMS step 0.02 limited to 3000/28800. Each wrapper restored the installed `9be7827` binary and normal configuration; the final active service, binary hash and 28800/49334 ceilings were reverified. All calls, fixture and capture processes are terminal. No experimental preference or adaptation change was deployed. Full CI run 34567715643 passed for deployed `9be7827`.
+
+Both pre-emphasis-only builds passed 512 negotiation cases, including the requested filter field, CRC and retrain preservation. The combined build passed the targeted 3000/28800 PCMU random-payload waveform test (seed 98017). Its first temporary test invocation could not find the independent shell reference module; rerunning with the existing tests directory on PYTHONPATH passed. Transmit recordings independently demodulated to the complete expected 109-bit INFO1d with a valid CRC for indices 2 and 8; matching scores were 0.999960 and 0.999870. This verifies the outgoing request, not the analogue modem's exact spectral response.
+
+All three live calls selected 3000/high/28800 but produced no recognized initial PPP before recovery, then retrained once to 26400 and passed internet access and all 18 transfer hashes. Each recorded one Windows alignment error, zero CRC errors and zero other errors. Downstream CP remained 148000/3 bit/s.
+
+| Variant | Attempt | PPP duration | Capture packets | Downstream exact payloads | Upstream source / forwarded |
+|---|---|---:|---:|---:|---:|
+| Index 2 | f0c9965b-4bea-4435-81ca-e15362639a57 | 55.410 s | 17004 | 4219 | 4232 / 4221 |
+| Index 8 | dc1b2d9a-8374-4e1d-8680-8572e94ff36c | 56.030 s | 17133 | 4250 | 4264 / 4252 |
+| Index 2 + slow adaptation | 127996c1-11e1-4d65-9b01-72159a142c2f | 56.041 s | 17128 | 4249 | 4262 / 4251 |
+
+Every capture had zero kernel drops and RTP sequence gaps. Forwarded primary payloads match exactly, with upstream startup suffixes of eleven, twelve and eleven packets respectively. Aggregate hardware results are in `preemphasis-trials-2026-09-11.json`; raw recordings remain private.
+
+In the 15–32-second replay, the index-2 B1 audit's best lane had held-out MSE 0.540 and zero wrong interior labels; index 8 had MSE 1.082 and thirteen wrong interior labels. Both baseline replays recovered zero frames. Slower adaptation steps 0.02/0.05/0.1 recovered two LCP Configure-Requests from the index-2 recording, none from index 8 or the previous failed flat-pre-emphasis recording, and preserved the 17/20 passing-control frame counts. Despite that offline lead, the combined live trial still failed to start at 28800. These selected settings do not establish that every pre-emphasis index is ineffective.
+
+Next diagnosis: determine from recorded signals whether the interval after B1, before the first PPP request, is predictable scrambled idle data. If verified, it may provide more supervised equalizer training than the 40 ms B1 window. Do not assume that idle persists for a fixed duration or force known labels across unknown traffic.

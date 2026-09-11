@@ -46,6 +46,21 @@ static void status(void *opaque,int code)
     }
 }
 
+static void selected_frame_status(void *opaque,const uint8_t *frame,int length,int ok)
+{
+    V90LapmLink *s=opaque;
+    if(length<0)return;
+    s->selected_frames++;if(ok)s->selected_valid_frames++;
+    if(s->selected_frames<=10){
+        unsigned addr=length>0?frame[0]:0;
+        unsigned control=length>1?frame[1]:0;
+        unsigned info0=length>2?frame[2]:0;
+        fprintf(stderr,"[v42] selected stream HDLC frame: len=%d crc=%s"
+                       " addr=%02x control=%02x info0=%02x\n",
+                length,ok?"valid":"invalid",addr,control,info0);
+    }
+}
+
 static void odp(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count)
 {
     V90LapmLink *s=opaque;
@@ -66,21 +81,22 @@ static void selected_output(void *opaque,int bit)
         s->protocol.tx_bit_rate=rate;
         s->connected=s->detected=s->selection_count=0;
         s->selected_candidate=(unsigned)-1;s->adp_bits=0;s->restarts++;
+        hdlc_rx_restart(&s->selected_hdlc);
         return;
     }
+    hdlc_rx_put_bit(&s->selected_hdlc,bit);
     v42_rx_bit(&s->protocol,bit);
 }
 
 static void selected(void *opaque,unsigned candidate)
 {
     V90LapmLink *s=opaque;
-    /* The selector has independently validated the originator's XID. Move the
-       reference answerer out of detection before replaying that frame. This
-       lets the runtime repeat ADPs until protocol evidence arrives, as
-       recommended by V.42 Appendix III.1, without losing an early XID. */
+    /* ODP plus a valid XID or continuous flags establishes one ordered
+       protocol stream. Leave detection before replaying its bounded tail. */
     int rate=s->protocol.tx_bit_rate;
     bool detect=s->protocol.detect;s->protocol.detect=false;
     v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
+    hdlc_rx_restart(&s->selected_hdlc);
     s->selected_candidate=candidate;s->selection_count++;
     fprintf(stderr,"[v42] selected LAPM candidate %u after %s\n",candidate,
             s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
@@ -104,6 +120,7 @@ void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,
     s->protocol.tx_bit_rate=tx_bit_rate;
     v42_set_status_callback(&s->protocol,status,s);
     v42_restart(&s->protocol);
+    hdlc_rx_init(&s->selected_hdlc,false,false,1,selected_frame_status,s);
     v90_lapm_select_init(&s->selector,s,odp,selected_output,selected);
     s->enabled=s->initialized=1;
 }
@@ -115,7 +132,7 @@ int v90_lapm_link_tx_bit(void *opaque)
     if(s->detected && !s->selection_count){
         int bit=supported_adp_bit(s->adp_bits++);
         if(s->adp_bits==360)
-            fprintf(stderr,"[v42] transmitted ten ADPs; continue until valid XID\n");
+            fprintf(stderr,"[v42] transmitted ten ADPs; continue until protocol evidence\n");
         return bit;
     }
     return v42_tx_bit(&s->protocol);

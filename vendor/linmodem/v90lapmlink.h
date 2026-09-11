@@ -23,6 +23,7 @@ typedef int (*v90_lapm_put_func)(void *opaque,const uint8_t *data,int length);
 typedef struct {
     v42_state_t protocol;
     V90LapmSelect selector;
+    hdlc_rx_state_t selected_hdlc;
     void *opaque;
     v90_lapm_get_func dte_get;
     v90_lapm_put_func dte_put;
@@ -30,6 +31,7 @@ typedef struct {
     unsigned pending_head,pending_count;
     unsigned enabled,initialized,detected,connected,disconnected,errors;
     unsigned selected_candidate,selection_count,restarts,overflow,adp_bits;
+    unsigned selected_frames,selected_valid_frames;
 } V90LapmLink;
 
 void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,

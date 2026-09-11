@@ -72,6 +72,8 @@ Hardware qualification uses these service environment settings:
 | `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |
 | `SIPFAX_V90_UPSTREAM_RATE` | `4800` | `28800` initial upstream ceiling |
 | `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | unset in deployment; `3000` or `3200` restricts qualification offers |
+| `SIPFAX_V90_PREEMPHASIS_3000` | `0` (flat) | `2` in the successful 3000/28800 trial |
+| `SIPFAX_V90_ODP_TRAINING` | off | `1` enables experimental detection-pattern equalizer training |
 | `SIPFAX_V90_LINE_ECHO` | off | `auto` initial echo-delay acquisition |
 | `SIPFAX_V90_SOFT_RX` | `0` | `1` soft-decision 4.8 kbit/s path |
 | `SIPFAX_RTP_PLAYOUT_MS` | `0` | `60` |
@@ -81,7 +83,12 @@ The initial training setting accepts 255–2000 ms, rounded down to a complete
 six-sample frame; invalid values use the default. The independent renegotiation
 setting accepts 0–2000 ms with the same rounding; it defaults to 255 ms.
 The symbol-rate restriction accepts `3000` or `3200`; other values allow both
-implemented rates. Offers still respect the caller’s carrier capabilities. Automatic
+implemented rates. Offers still respect the caller’s carrier capabilities.
+The 3000-symbol pre-emphasis option accepts the exact decimal strings `0` through
+`10`; invalid values select flat pre-emphasis. It affects only offered
+3000-symbol profiles and is retained through retrains. ODP training is enabled
+only by the exact value `1`; it predicts equalizer targets from validated V.42
+detection traffic and does not implement modem error correction. Automatic
 echo mode acquires an initial delay; continuous delay tracking remains unfinished.
 Service environment changes require a restart
 when no call is active. A stored `modem.command` takes precedence over its

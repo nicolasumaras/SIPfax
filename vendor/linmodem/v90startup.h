@@ -24,6 +24,7 @@ typedef struct {
     unsigned char info1d[109];
     unsigned upstream_max_rate,upstream_data_rate,peer_large_constellations;
     unsigned peer_carriers,forced_symbol_rate,upstream_symbol_rate,upstream_high_carrier;
+    unsigned preemphasis_3000;
     unsigned upstream_rate_limit,have_upstream_data;
     V90Training training;
     int training_active,training_tx_active;

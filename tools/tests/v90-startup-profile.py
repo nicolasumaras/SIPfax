@@ -38,7 +38,7 @@ unsigned get(V90Startup*s,int k){switch(k){
  case 4:return s->upstream_data_rate;case 5:return s->upstream_high_carrier;
  case 6:return s->phase4.rx.symbol_rate;case 7:return s->phase4.upstream.symbol_rate;
  case 8:return s->phase4.upstream.rate;case 9:return s->phase4.upstream.high_carrier;
- case 10:return s->phase4_active;default:return 0;}}
+ case 10:return s->phase4_active;case 11:return s->preemphasis_3000;default:return 0;}}
 void enter_phase4(V90Startup*s){
  int16_t in=0,out=0;s->training.found=1;s->uinfo=90;
  v90_startup_process(s,&out,&in,1);
@@ -56,45 +56,52 @@ void retrain(V90Startup*s){begin_retrain(s,"profile test");}
     lib.offer.argtypes=lib.mp.argtypes=[C.c_void_p,C.POINTER(C.c_ubyte)]
     lib.wire.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_int,C.c_int]
     count=0
-    for forced in [None,'3000','3200','invalid']:
-      for mask in range(16):
-       for large in [0,1]:
-        for code in [2,3,4,5]:
-            os.environ['SIPFAX_V90_UPSTREAM_RATE']='31200'
-            if forced is None:os.environ.pop('SIPFAX_V90_UPSTREAM_SYMBOL_RATE',None)
-            else:os.environ['SIPFAX_V90_UPSTREAM_SYMBOL_RATE']=forced
-            s=lib.create()
-            try:
-                b=frame(29);field(b,15,4,mask);b[25]=large;b+=crc(b[12:29])+[1]*4
-                pcm=wave(b);lib.wire(s,pcm,len(pcm),0);assert lib.get(s,0)==1
-                offer=(C.c_ubyte*109)();lib.offer(s,offer);offer=list(offer)
-                assert offer[89:105]==crc(offer[12:89])
-                rates=[]
-                for i,baud in enumerate([3000,3200]):
-                    carriers=(mask>>(2*i))&3;enabled=carriers and (forced not in ['3000','3200'] or int(forced)==baud)
-                    expected=(12 if baud==3000 or not large else 13) if enabled else 0
-                    offset=52+9*i;rates.append(expected)
-                    assert number(offer,offset+5,4)==expected
-                    assert offer[offset]==int(bool(enabled and carriers&2))
-                    assert number(offer,offset+1,4)==0
-                assert not any(offer[25:52]+offer[70:79])
-                b=frame(50);field(b,25,7,90);field(b,34,3,code);field(b,37,3,6);b+=crc(b[12:50])+[1]*4
-                damaged=b.copy();damaged[34]^=1
-                pcm=wave(damaged);lib.wire(s,pcm,len(pcm),1)
-                assert lib.get(s,1)==0,'CRC-damaged INFO1a enabled training'
-                pcm=wave(b);lib.wire(s,pcm,len(pcm),1)
-                accepted=code in [3,4] and rates[code-3]>0
-                assert lib.get(s,1)==int(accepted),(forced,mask,large,code)
-                if accepted:
-                    baud=3000 if code==3 else 3200;rate=rates[code-3]*2400;high=offer[52+9*(code-3)]
-                    assert [lib.get(s,k) for k in [2,3,4,5]]==[baud,baud,rate,high]
-                    lib.enter_phase4(s)
-                    assert [lib.get(s,k) for k in [6,7,8,9,10]]==[baud,baud,rate,high,1]
-                    mp=(C.c_ubyte*102)();lib.mp(s,mp);mp=list(mp)
-                    assert number(mp,24,4)==rate//2400
-                    assert mp[36:50]==[int(i==rate//2400-2) for i in range(14)]
-                os.environ['SIPFAX_V90_UPSTREAM_RATE']='4800';os.environ['SIPFAX_V90_UPSTREAM_SYMBOL_RATE']='3200'
-                lib.retrain(s);after=(C.c_ubyte*109)();lib.offer(s,after);assert list(after)==offer
-                count+=1
-            finally:lib.destroy(s)
+    for invalid in ['', '-1','11','999999999999999999999','02',' 2','2x']:
+        os.environ['SIPFAX_V90_PREEMPHASIS_3000']=invalid
+        s=lib.create();assert lib.get(s,11)==0;lib.destroy(s)
+    for configured in [None,'2','10']:
+     for forced in [None,'3000','3200','invalid']:
+       for mask in range(16):
+        for large in [0,1]:
+         for code in [2,3,4,5]:
+             os.environ['SIPFAX_V90_UPSTREAM_RATE']='31200'
+             if forced is None:os.environ.pop('SIPFAX_V90_UPSTREAM_SYMBOL_RATE',None)
+             else:os.environ['SIPFAX_V90_UPSTREAM_SYMBOL_RATE']=forced
+             if configured is None:os.environ.pop('SIPFAX_V90_PREEMPHASIS_3000',None)
+             else:os.environ['SIPFAX_V90_PREEMPHASIS_3000']=configured
+             s=lib.create()
+             try:
+                 b=frame(29);field(b,15,4,mask);b[25]=large;b+=crc(b[12:29])+[1]*4
+                 pcm=wave(b);lib.wire(s,pcm,len(pcm),0);assert lib.get(s,0)==1
+                 offer=(C.c_ubyte*109)();lib.offer(s,offer);offer=list(offer)
+                 assert offer[89:105]==crc(offer[12:89])
+                 rates=[]
+                 for i,baud in enumerate([3000,3200]):
+                     carriers=(mask>>(2*i))&3;enabled=carriers and (forced not in ['3000','3200'] or int(forced)==baud)
+                     expected=(12 if baud==3000 or not large else 13) if enabled else 0
+                     offset=52+9*i;rates.append(expected)
+                     assert number(offer,offset+5,4)==expected
+                     assert offer[offset]==int(bool(enabled and carriers&2))
+                     assert number(offer,offset+1,4)==(int(configured or '0') if enabled and baud==3000 else 0)
+                 assert not any(offer[25:52]+offer[70:79])
+                 b=frame(50);field(b,25,7,90);field(b,34,3,code);field(b,37,3,6);b+=crc(b[12:50])+[1]*4
+                 damaged=b.copy();damaged[34]^=1
+                 pcm=wave(damaged);lib.wire(s,pcm,len(pcm),1)
+                 assert lib.get(s,1)==0,'CRC-damaged INFO1a enabled training'
+                 pcm=wave(b);lib.wire(s,pcm,len(pcm),1)
+                 accepted=code in [3,4] and rates[code-3]>0
+                 assert lib.get(s,1)==int(accepted),(forced,mask,large,code)
+                 if accepted:
+                     baud=3000 if code==3 else 3200;rate=rates[code-3]*2400;high=offer[52+9*(code-3)]
+                     assert [lib.get(s,k) for k in [2,3,4,5]]==[baud,baud,rate,high]
+                     lib.enter_phase4(s)
+                     assert [lib.get(s,k) for k in [6,7,8,9,10]]==[baud,baud,rate,high,1]
+                     mp=(C.c_ubyte*102)();lib.mp(s,mp);mp=list(mp)
+                     assert number(mp,24,4)==rate//2400
+                     assert mp[36:50]==[int(i==rate//2400-2) for i in range(14)]
+                 os.environ['SIPFAX_V90_UPSTREAM_RATE']='4800';os.environ['SIPFAX_V90_UPSTREAM_SYMBOL_RATE']='3200'
+                 os.environ['SIPFAX_V90_PREEMPHASIS_3000']='9'
+                 lib.retrain(s);after=(C.c_ubyte*109)();lib.offer(s,after);assert list(after)==offer
+                 count+=1
+             finally:lib.destroy(s)
 print(f'PASS: {count} wire negotiation cases, carrier offers, selected training/Phase4/MP profiles, CRC rejection, rejected modes and retrain preservation')

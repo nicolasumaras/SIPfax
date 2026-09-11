@@ -38,16 +38,17 @@ void v90_info0d(unsigned char b[62], int alaw)
     field(b, 42, 16, crc_bits(b+12, 30));
     memset(b+58, 1, 4);
 }
-static void info1d_profiles(unsigned char b[109],unsigned rate,unsigned carriers,unsigned forced)
+static void info1d_profiles(unsigned char b[109],unsigned rate,unsigned carriers,unsigned forced,unsigned preemphasis_3000)
 {
     static const unsigned char sync[8]={0,1,1,1,0,0,1,0};
     memset(b,0,109); memset(b,1,4); memcpy(b+4,sync,8);
-    /* Table 9: offer only peer-supported carriers, with flat pre-emphasis.
+    /* Table 9: offer only peer-supported carriers. Pre-emphasis defaults to flat.
        3000's implemented constellation profiles end at 28800 bit/s. */
     for(unsigned i=0;i<2;++i) {
         unsigned baud=i?3200:3000,mask=(carriers>>(2*i))&3,offset=52+9*i;
         if(!mask || (forced && forced!=baud))continue;
         b[offset]=!!(mask&2);
+        if(baud==3000)field(b,offset+1,4,preemphasis_3000);
         unsigned maximum=baud==3000 && rate>28800?28800:rate;
         field(b,offset+5,4,maximum/2400);
     }
@@ -56,7 +57,7 @@ static void info1d_profiles(unsigned char b[109],unsigned rate,unsigned carriers
 }
 void v90_info1d(unsigned char b[109])
 {
-    info1d_profiles(b,v90_upstream_configured_rate(),8,0);
+    info1d_profiles(b,v90_upstream_configured_rate(),8,0,0);
 }
 static void select_upstream_rate(V90Startup *s)
 {
@@ -64,7 +65,7 @@ static void select_upstream_rate(V90Startup *s)
     unsigned limit=s->peer_large_constellations?31200:28800;
     s->upstream_data_rate=s->upstream_max_rate<limit?s->upstream_max_rate:limit;
     if(s->upstream_rate_limit && s->upstream_data_rate>s->upstream_rate_limit)s->upstream_data_rate=s->upstream_rate_limit;
-    info1d_profiles(s->info1d,s->upstream_data_rate,s->peer_carriers,s->forced_symbol_rate);
+    info1d_profiles(s->info1d,s->upstream_data_rate,s->peer_carriers,s->forced_symbol_rate,s->preemphasis_3000);
 }
 static int select_upstream_profile(V90Startup *s)
 {
@@ -89,6 +90,10 @@ void v90_startup_init(V90Startup *s, int alaw)
     s->tx_symbol = -1;
     s->tx_sign = 1;
     v90_info0d(s->info0d, alaw);
+    const char *preemphasis=getenv("SIPFAX_V90_PREEMPHASIS_3000");
+    if(preemphasis && preemphasis[0]>='0' && preemphasis[0]<='9' && !preemphasis[1])
+        s->preemphasis_3000=(unsigned)(preemphasis[0]-'0');
+    else if(preemphasis && !strcmp(preemphasis,"10"))s->preemphasis_3000=10;
     s->upstream_max_rate=v90_upstream_configured_rate();
     s->upstream_rate_limit=s->upstream_max_rate;
     const char *baud=getenv("SIPFAX_V90_UPSTREAM_SYMBOL_RATE");
@@ -181,11 +186,11 @@ static void begin_retrain(V90Startup *s, const char *reason)
 {
     long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
     unsigned maximum=s->upstream_max_rate,large=s->peer_large_constellations;
-    unsigned carriers=s->peer_carriers,forced=s->forced_symbol_rate;
+    unsigned carriers=s->peer_carriers,forced=s->forced_symbol_rate,preemphasis=s->preemphasis_3000;
     unsigned limit=s->upstream_rate_limit,data=s->have_upstream_data || (s->phase4_active && s->phase4.upstream.lcp_seen);
     v90_startup_init(s,law);
     s->upstream_max_rate=maximum;s->peer_large_constellations=large;
-    s->peer_carriers=carriers;s->forced_symbol_rate=forced;s->upstream_rate_limit=limit;s->have_upstream_data=data;select_upstream_rate(s);
+    s->peer_carriers=carriers;s->forced_symbol_rate=forced;s->upstream_rate_limit=limit;s->have_upstream_data=data;s->preemphasis_3000=preemphasis;select_upstream_rate(s);
     s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
     s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
     fprintf(stderr,"[v90p2] %s retrain %u at %.6fs; silence70ms then Tone B\n",

@@ -1703,3 +1703,29 @@ The new TCP capture contained 4629 packets with zero kernel drops. Its 130 TCP f
 Packet-clock fits over the steady portion of this capture gave ATA input -0.924 ppm and server output -0.240 ppm relative to the same capture clock, a difference below 1 ppm. The source pacer uses nominal packet durations, but this measurement does not support a large RTP clock-rate mismatch on this call. It does not prove continuous analog DAC playout, so no pacing change is justified from this evidence alone.
 
 The wrapper restored `5151eb5`; service activity, binary hash, FreePBX readiness, notebook disconnection and cleared SIPFAXRED state were verified. Trial, fixture, both captures and retrieval/analysis jobs are terminal. The next comparison is the same recovery diagnostic on that qualified baseline with TCP and RTP captures. `0207a6d` has not replaced it, and a clean sustained qualification remains outstanding.
+
+
+# Baseline comparison: sustained PPP transfer
+
+The deployed `5151eb5` receiver completed all 129 target checks in 625.589 seconds on one PPP connection, with no failed requests or retries. All response hashes were independently verified: 2 MiB of target downloads, 64 KiB of target uploads, and the final result check. The notebook disconnected cleanly afterward.
+
+| Measurement | Baseline `5151eb5` | Candidate `0207a6d` recovery run |
+|---|---:|---:|
+| Successful target checks | 129 | 129 |
+| Failed HTTP requests | 0 | 1 |
+| HTTP attempts | 129 | 130 |
+| PPP duration | 625.589 s | 746.994 s |
+| Windows CRC / alignment errors | 16 / 4 | 55 / 8 |
+| Native downstream rate | 49.333 → 48 kbit/s | 49.333 → 48 kbit/s |
+
+These are individual runs, not a controlled statistical demonstration that the candidate causes more errors. The baseline also recorded modem errors despite completing every transfer. Both runs used configured 26.4 kbit/s upstream and automatic initial echo acquisition.
+
+Baseline attempt `1b7c8acc-097f-40eb-b54c-99fdeec1364b` used native PID12980 and verified binary SHA-256 `b612a0c47def22ebc07fcf30d52515af3ba7f852df1f6d1bc7665cdee581487b`. Echo acquisition selected 1428 samples at sample 96640. On the native Phase4 clock, renegotiation began at 363.600 seconds and recovered B1 at 365.629 seconds; B1 correlations were 0.9784 initially and 0.9817 afterward. The final S/Sbar accompanied hangup. Native and Windows timestamps have different origins.
+
+The RTP capture contained 131430 packets with zero kernel drops and no sequence gaps. All 32720 downstream payloads matched exactly; all 32722 forwarded upstream payloads matched after eleven ATA startup packets. This verifies packet transport, not analog DAC continuity.
+
+The TCP capture contained 4496 packets with zero kernel drops. Its 129 flows include server SYNs and match the 129 probe kinds in order. There were 66 downstream segments overlapping earlier transmitted sequence ranges; all application requests nevertheless completed with the expected hashes.
+
+The baseline remains deployed. Service activity, exact binary hash, FreePBX availability, notebook disconnection and cleared SIPFAXRED state were verified. The runner, HTTP fixture, captures and retrieval jobs are terminal. The candidate remains available for further trials; clean sustained qualification is still outstanding.
+
+The next receiver investigation is startup distortion in the isolated 28.8 kbit/s prototype. Earlier provisional feedback improved one cached linear-PCM fixture but failed the full PCMU timing matrix and was reverted. No 28.8 kbit/s prototype code has been deployed.

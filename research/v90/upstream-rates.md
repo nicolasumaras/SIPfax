@@ -57,6 +57,18 @@ Independent wire tests pass 512 combinations of carrier masks, configured symbol
 
 The first forced 3000/high call at 28800, `04fee980-b04c-4c6b-8dde-f198e4c7bac5`, accepted the profile and decoded CP at 49.333 kbit/s, then E at 4.104875 seconds and B1 correlation 0.9717 at 4.144875 seconds. It decoded zero valid PPP frames and ended with Windows error 721. The 13224-packet capture had zero drops/gaps; 3277 downstream payloads matched exactly, and 3290-to-3279 upstream payloads matched after the eleven-packet startup suffix. This rules out observed RTP loss/payload changes in that capture, not all analogue/DAC impairment. Raw RX/TX recordings are retained privately. Next is a lower-rate 3000 control and offline decoding diagnosis. Both wrappers restored `dcb450f` at 28800/auto; hardware qualification of 3000 remains incomplete.
 
+
+### Live 3000-symbol/s rate controls
+
+The same `7ba92b5` binary subsequently passed two forced 3000/high-carrier calls:
+
+- 7200 bit/s: attempt `b0c65de1-f282-4fa3-b236-e15afc4980fe`, 18 independently verified transfer hashes and internet access over 65.604 seconds, zero Windows modem errors. Native CP was 49.333 kbit/s downstream, B1 correlation 0.9787. Capture: 19047 packets, zero capture drops/gaps; 4728 downstream primary payloads matched, and 4741-to-4730 upstream payloads matched after the eleven-packet startup suffix.
+- 26400 bit/s: attempt `f6c0539d-456f-4622-b6ee-55f140196adb`, 18 verified transfer hashes and internet access over 36.843 seconds, zero Windows modem errors. Native CP was 49.333 kbit/s downstream, B1 correlation 0.9679. Capture: 13257 packets, zero capture drops/gaps; 3285 downstream primary payloads matched, and 3298-to-3287 upstream payloads matched after the eleven-packet startup suffix.
+
+Both calls ended with a clean disconnect and restored the verified `dcb450f` production baseline. Raw RX/TX and RTP captures are retained privately. An offline replay with automatic initial echo correction recovers 179 CRC-valid candidate frames from the 26400 recording and none from the failed 28800 recording. This localizes the observed failure beyond general 3000-symbol/s negotiation/framing, but does not establish a specific equalizer, constellation or physical-channel cause.
+
+The highest failing profiles at 3000/28800 and 3200/31200 both use q=5; this is a diagnostic lead, not proof of an encoder/decoder defect. The current startup deadline guards missing B1 only, so a detected B1 followed by zero valid PPP frames waits for the caller timeout. A bounded recovery/downshift policy and continued high-rate receiver diagnosis are next. Short-call success does not qualify sustained 3000 operation or all mandatory rates.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

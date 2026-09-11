@@ -168,7 +168,7 @@ jobs:
           /tmp/v90-equalizer-length-sanitize
       - name: Sanitize provisional feedback history
         run: |
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-feedback-sanitize.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c -lm -o /tmp/v90-feedback-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-feedback-sanitize.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-feedback-sanitize
           /tmp/v90-feedback-sanitize
       - name: Test experimental soft receiver lifecycle
         run: |

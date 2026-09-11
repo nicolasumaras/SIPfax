@@ -1,0 +1,492 @@
+[
+  {
+    "causal_prediction": false,
+    "cases": [
+      {
+        "case": "v90-preemph2-first",
+        "frames": 0,
+        "initial_lcp_seen": false,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 0
+      },
+      {
+        "case": "v90-3000-7ba92b5-first",
+        "frames": 0,
+        "initial_lcp_seen": false,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 0
+      },
+      {
+        "case": "v90-efc00dc-3000",
+        "frames": 0,
+        "initial_lcp_seen": false,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 0
+      },
+      {
+        "case": "v90-3000-26400-7ba92b5",
+        "frames": 17,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 3
+      },
+      {
+        "case": "v90-efc00dc-auto",
+        "frames": 20,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 3
+      }
+    ]
+  },
+  {
+    "causal_prediction": true,
+    "cases": [
+      {
+        "case": "v90-preemph2-first",
+        "frames": 2,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            2,
+            82
+          ],
+          [
+            309,
+            3330
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 2
+      },
+      {
+        "case": "v90-3000-7ba92b5-first",
+        "frames": 2,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            312,
+            3336
+          ],
+          [
+            286,
+            3378
+          ]
+        ],
+        "lcp_configure_requests": 2
+      },
+      {
+        "case": "v90-efc00dc-3000",
+        "frames": 0,
+        "initial_lcp_seen": false,
+        "lane_counts": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        "lcp_configure_requests": 0
+      },
+      {
+        "case": "v90-3000-26400-7ba92b5",
+        "frames": 17,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            465,
+            3786
+          ],
+          [
+            465,
+            3786
+          ],
+          [
+            460,
+            3786
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            455,
+            3786
+          ]
+        ],
+        "lcp_configure_requests": 3
+      },
+      {
+        "case": "v90-efc00dc-auto",
+        "frames": 20,
+        "initial_lcp_seen": true,
+        "lane_counts": [
+          [
+            454,
+            3698
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            451,
+            3698
+          ]
+        ],
+        "lcp_configure_requests": 3
+      }
+    ]
+  }
+]

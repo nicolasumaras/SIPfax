@@ -43,7 +43,7 @@ typedef struct {int M,g2_tab[137],g4_tab[137],z8_tab[138];} V34DSPState;
 '''+legacy+'''
 void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2])rings,index);}
 ''')
- subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(native),str(w),str(native/'v90mapping.c'),str(native/'v90shell.c'),str(native/'v90qam8.c'),str(native/'v90trellis.c'),str(native/'v90equalizer.c'),'-lm','-o',str(so)],check=True)
+ subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(native),str(w),str(native/'v90mapping.c'),str(native/'v42detect.c'),str(native/'v90odp.c'),str(native/'v90shell.c'),str(native/'v90qam8.c'),str(native/'v90trellis.c'),str(native/'v90equalizer.c'),'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_uint,C.c_uint];lib.create.restype=C.c_void_p
  callback=C.CFUNCTYPE(None,C.POINTER(C.c_uint8),C.c_uint)
  lib.stream_create.argtypes=[C.c_uint,C.c_uint,callback];lib.stream_create.restype=C.c_void_p

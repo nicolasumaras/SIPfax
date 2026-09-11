@@ -24,7 +24,7 @@ unsigned level(V90Phase4 *s,unsigned frame,unsigned index){return v90_pcm_level(
 unsigned size(V90Phase4 *s,unsigned frame){return s->encoder.m[frame];}
 unsigned k(V90Phase4 *s){return s->encoder.k;}
 ''')
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/n) for n in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/n) for n in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c','v90phase4.c','v90pcm.c','v90cp.c','v90dil.c','v90training.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     lib.configured.argtypes=[C.c_char_p]
     for value,expected in [(None,340),(b'255',340),(b'1500',2000),(b'2000',2666),(b'254',340),(b'2001',340),(b'-1',340),(b'junk',340),(b'999999999999999999999999999',340)]:

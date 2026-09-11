@@ -88,7 +88,7 @@ for b in plain:
     if out:register^=1|(1<<18)
     bits.append(out)
 quarter=[complex(x,y) for x in range(-63,66,4) for y in range(-63,66,4)];quarter.sort(key=lambda z:(abs(z)**2,-z.imag));
-state=previous=0;symbols=[];pattern=[int(x) for x in '01110111111110']
+state=previous=0;symbols=[];symbol_labels=[];pattern=[int(x) for x in '01110111111110']
 def subset(z):
     x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
     return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
@@ -105,6 +105,7 @@ for f,size in enumerate(frame_sizes):
         b=(a+2*v[g]+((state&1)^inv))%4;previous=a
         qa=sum(v[g+3+j]<<j for j in range(q_bits));qb=sum(v[g+3+q_bits+j]<<j for j in range(q_bits))
         x=a+4*((shell[2*p]<<q_bits)|qa);y=b+4*((shell[2*p+1]<<q_bits)|qb)
+        symbol_labels.extend([x,y])
         points=[(quarter[q>>2])*(-1j)**(q&3) for q in [x,y]]
         symbols.extend(points)
         t=converter[subset(points[0])][subset(points[1])];u=state&1
@@ -144,6 +145,12 @@ void destroy(void*s){free(s);}
 unsigned rate(V90Upstream*s){return s->rate;}
 unsigned acquired(V90Upstream*s){return s->b1_seen;}
 unsigned odp(V90Upstream*s){return s->odp_seen;}
+unsigned assistance(V90Upstream*s){unsigned n=0;for(unsigned i=0;i<10;++i)n+=s->qam[i].stream.odp.used;return n;}
+static V90ODPTrainer predictor;static V90Mapping predictor_mapping;
+void predictor_reset(unsigned rate,unsigned baud){memset(&predictor,0,sizeof(predictor));if(!v90_mapping_init(&predictor_mapping,rate,baud))abort();}
+void predictor_frame(unsigned f,const uint16_t*labels,const uint8_t*bits,unsigned n){v90_odp_observe(&predictor,&predictor_mapping,f,labels,bits,n);}
+int predictor_label(unsigned long long n){unsigned label=0;return v90_odp_label(&predictor,n,&label)?(int)label:-1;}
+
 void *phase4_create(void (*cb)(void*,const uint8_t*,unsigned)) {
  V90Phase4*s=malloc(sizeof(*s));v90_phase4_init(s,0,78);
  s->cpt.drn=9;s->cpt.sr=1;s->cpt.lookahead=1;s->cpt.count=1;s->cpt.filter[0]=63;
@@ -161,13 +168,39 @@ unsigned phase4_odp(V90Phase4*s){return s->upstream.odp_seen;}
     if baud==3000 or options.low_carrier:
         w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,%d,%d))abort();'%(rate,baud,not options.low_carrier)).replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,%d,%d,%d))abort();'%(rate,baud,not options.low_carrier)))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
-        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
+        *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)
     lib.create.argtypes=[cbtype];lib.create.restype=C.c_void_p
     lib.run.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint]
     lib.phase4_create.argtypes=[cbtype];lib.phase4_create.restype=C.c_void_p
     lib.phase4_run.argtypes=lib.run.argtypes
-    for name in ['rate','acquired','destroy','phase4_acquired','odp','phase4_odp']:getattr(lib,name).argtypes=[C.c_void_p]
+    for name in ['rate','acquired','destroy','phase4_acquired','odp','phase4_odp','assistance']:getattr(lib,name).argtypes=[C.c_void_p]
+    if options.odp_prefix:
+        # The expected labels come from this independent transmitter, never
+        # from the predictor's encoder or decoded receiver output.
+        lib.predictor_reset.argtypes=[C.c_uint,C.c_uint]
+        lib.predictor_frame.argtypes=[C.c_uint,C.c_void_p,C.c_void_p,C.c_uint]
+        lib.predictor_label.argtypes=[C.c_ulonglong];lib.predictor_label.restype=C.c_int
+        lib.predictor_reset(rate,baud)
+        assert lib.predictor_label(0)==-1 and lib.predictor_label(2**64-1)==-1
+        cursor=checked=0;last_predictions=[]
+        odp_end=rate//25+180+round(rate*1.2/24)*24
+        for f,size in enumerate(frame_sizes):
+            if cursor+size>=odp_end-2000:break
+            raw=np.ascontiguousarray(bits[cursor:cursor+size],dtype=np.uint8)
+            lab=np.ascontiguousarray(symbol_labels[8*f:8*f+8],dtype=np.uint16)
+            lib.predictor_frame(f,lab.ctypes.data,raw.ctypes.data,size);cursor+=size
+            last_predictions=[]
+            for n in range(8*(f+1),8*(f+25)):
+                predicted=lib.predictor_label(n)
+                if predicted>=0:
+                    assert predicted==symbol_labels[n], ('causal prediction',f,n,predicted,symbol_labels[n])
+                    checked+=1;last_predictions.append(n)
+        assert checked>1000, 'Causal label test never acquired detection'
+        assert last_predictions and lib.predictor_label(last_predictions[-1]+1)==-1
+        lib.predictor_reset(rate,baud)
+        assert all(lib.predictor_label(n)==-1 for n in last_predictions)
+        print('PASS:',checked,'independent future labels, prediction horizon and reset')
     os.environ['SIPFAX_V90_UPSTREAM_RATE']=str(rate)
     rng=np.random.default_rng(9072 if options.seed is None else options.seed)
     cases=[(f,p) for f in [0,.25,.5,.75] for p in [-100,100]] if "--timing-sweep" in sys.argv else [( .25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]
@@ -191,7 +224,10 @@ unsigned phase4_odp(V90Phase4*s){return s->upstream.odp_seen;}
             for start in range(0,len(pcm),137):
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
             assert lib.acquired(s)
-            if options.odp_prefix:assert lib.odp(s), "ODP prefix was not recognized"
+            if options.odp_prefix:
+                assert lib.odp(s), "ODP prefix was not recognized"
+                if os.environ.get('SIPFAX_V90_ODP_TRAINING')=='1':assert lib.assistance(s)>0, 'Training option was not exercised'
+                else:assert lib.assistance(s)==0, 'Training was enabled without opt-in'
             verify_frames(received,fraction,ppm,'direct')
         finally:lib.destroy(s)
         received.clear();s=lib.phase4_create(cb)

@@ -46,6 +46,6 @@ int main(void){
  puts("PASS: opt-in, B1, T400 boundaries, DTE preservation, full ADP reply, early LCP and established-call retrain");
 }
 ''')
-    files=['v90training','v90dil','v90cp','v90pcm','v90upstream','v90trellis','v90qam8','v90equalizer','v90shell','v90mapping','v90train_tx','v42detect']
+    files=['v90training','v90dil','v90cp','v90pcm','v90upstream','v90trellis','v90qam8','v90equalizer','v90shell','v90mapping','v90train_tx','v42detect','v90odp']
     exe=d/'check';subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/f'{f}.c') for f in files],'-lm','-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

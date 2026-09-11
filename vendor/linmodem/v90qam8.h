@@ -3,6 +3,7 @@
 #define V90QAM8_H
 #include "v90shell.h"
 #include "v90mapping.h"
+#include "v90odp.h"
 #include "v90trellis.h"
 #include "v90equalizer.h"
 typedef struct { V90Shell shell; unsigned previous,q; } V90Qam8Frames;
@@ -87,6 +88,8 @@ typedef struct {
     V90Qam8B1 b1;
     V90Mapping mapping;
     unsigned label_bits,frame_bits;
+    unsigned odp_training_enabled;
+    V90ODPTrainer odp;
     /* Optional half-symbol input, supplied before each symbol by the PCM
      * frontend. B1 history is aligned with b1.position. */
     double mid_re,mid_im,mid_b1_re[128],mid_b1_im[128];

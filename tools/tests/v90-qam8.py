@@ -63,7 +63,7 @@ uint64_t count(V90Trellis*s){return s->pairs;}
 ''')
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror',
         '-I'+str(root/'vendor/linmodem'),str(w),
-        *[str(root/'vendor/linmodem'/x) for x in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c']],
+        *[str(root/'vendor/linmodem'/x) for x in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c']],
         '-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.trellis.restype=lib.frames.restype=C.c_void_p
     lib.frames.argtypes=[C.c_uint];lib.destroy.argtypes=[C.c_void_p]

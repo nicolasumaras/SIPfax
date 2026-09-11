@@ -50,11 +50,11 @@ jobs:
           done
       - name: Sanitize startup profile negotiation
         run: |
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c -lm -o /tmp/v90-startup-profile-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-startup-profile-sanitize
           /tmp/v90-startup-profile-sanitize
       - name: Sanitize startup PPP downshift
         run: |
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-downshift.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c -lm -o /tmp/v90-startup-downshift
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-downshift.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-startup-downshift
           /tmp/v90-startup-downshift
       - name: Test 3000-symbol rate renegotiation
         run: |
@@ -62,7 +62,7 @@ jobs:
           python3 tools/tests/v90-reneg-training.py --3000 --low-carrier
       - name: Sanitize Phase4 profile retention
         run: |
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-phase4-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c -lm -o /tmp/v90-phase4-profile-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-phase4-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-phase4-profile-sanitize
           /tmp/v90-phase4-profile-sanitize
       - name: Test training profiles through mu-law
         run: python3 tools/tests/v90-training-profile.py --pcmu
@@ -75,6 +75,7 @@ jobs:
           set -e
           for baud in 3000 3200; do
             python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads
+            SIPFAX_V90_ODP_TRAINING=1 python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads
           done
           for rate in 4800 7200 9600 12000 14400 16800 19200 21600 24000 26400 28800; do
             python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu
@@ -86,7 +87,7 @@ jobs:
           done
       - name: Sanitize PCM profile initialization
         run: |
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-upstream-profile-sanitize.c vendor/linmodem/v90upstream.c vendor/linmodem/v90qam8.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v42detect.c -lm -o /tmp/v90-upstream-profile-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-upstream-profile-sanitize.c vendor/linmodem/v90upstream.c vendor/linmodem/v90qam8.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-upstream-profile-sanitize
           /tmp/v90-upstream-profile-sanitize
       - name: Test upstream clock recovery
         run: |
@@ -159,7 +160,7 @@ jobs:
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize
           /tmp/v90-shell-sanitize
-          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-mapping-sanitize.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c vendor/linmodem/v90qam8.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c -lm -o /tmp/v90-mapping-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-mapping-sanitize.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c vendor/linmodem/v90shell.c vendor/linmodem/v90qam8.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c -lm -o /tmp/v90-mapping-sanitize
           /tmp/v90-mapping-sanitize
       - name: Sanitize variable B1 equalizer lengths
         run: |

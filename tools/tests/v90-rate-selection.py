@@ -32,7 +32,7 @@ void receive_e(V90Startup*s){s->phase4.rx.e_seen=1;v90_phase4_next(&s->phase4,0)
 void retrain(V90Startup*s){begin_retrain(s,"rate selection test");}
 unsigned explicit_rate(unsigned rate){V90Upstream*s=malloc(sizeof(*s));v90_upstream_init_rate(s,rate);unsigned got=s->rate;free(s);return got;}
 ''')
-    files=['v90training.c','v90dil.c','v90cp.c','v90pcm.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90train_tx.c']
+    files=['v90training.c','v90dil.c','v90cp.c','v90pcm.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c','v90train_tx.c']
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/p) for p in files],'-lm','-o',str(libpath)],check=True)
     lib=C.CDLL(str(libpath));lib.create.restype=C.c_void_p
     for name in ['destroy','received','selected','phase4','receiver','receive_e','retrain']:getattr(lib,name).argtypes=[C.c_void_p]

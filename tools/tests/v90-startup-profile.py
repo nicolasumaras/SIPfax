@@ -48,7 +48,7 @@ void enter_phase4(V90Startup*s){
 void mp(V90Startup*s,unsigned char*b){mp_build(&s->phase4);memcpy(b,s->phase4.mp,102);}
 void retrain(V90Startup*s){begin_retrain(s,"profile test");}
 ''')
-    files=['v90training','v90dil','v90cp','v90pcm','v90upstream','v90trellis','v90qam8','v90equalizer','v90shell','v90mapping','v42detect','v90train_tx']
+    files=['v90training','v90dil','v90cp','v90pcm','v90upstream','v90trellis','v90qam8','v90equalizer','v90shell','v90mapping','v42detect','v90odp','v90train_tx']
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/f'{f}.c') for f in files],'-lm','-o',str(d/'test.so')],check=True)
     lib=C.CDLL(str(d/'test.so'));lib.create.restype=C.c_void_p
     for name in ['destroy','enter_phase4','retrain']:getattr(lib,name).argtypes=[C.c_void_p]

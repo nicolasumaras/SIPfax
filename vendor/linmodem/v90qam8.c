@@ -1,5 +1,7 @@
 /* V.34 9.3/9.5 inverse for q=0/1/2/3/4/5, all high mapping frames. GPL-2.0. */
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 #include "v90qam8.h"
 #include "v90mapping.h"
@@ -186,6 +188,8 @@ int v90_qam_stream_init_profile(V90Qam8Stream *s,unsigned rate,unsigned symbol_r
     memset(s,0,sizeof(*s));
     if(!v90_mapping_init(&s->mapping,rate,symbol_rate) ||
        !v90_qam_b1_init_profile(&s->b1,rate,symbol_rate))return 0;
+    const char *odp=getenv("SIPFAX_V90_ODP_TRAINING");
+    s->odp_training_enabled=odp && !strcmp(odp,"1");
     s->label_bits=2;while((1u<<s->label_bits)<(4*s->b1.m<<s->b1.q))++s->label_bits;
     return 1;
 }
@@ -271,6 +275,17 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
             memcpy(training.re,s->history_re[h],sizeof(training.re));
             memcpy(training.im,s->history_im[h],sizeof(training.im));
             double r,i;point(j?early_b:early_a,&r,&i);
+            unsigned predicted;
+            if(s->odp_training_enabled && v90_odp_label(&s->odp,n,&predicted)){
+                double pr,pi,yr=0,yi=0;point(predicted,&pr,&pi);
+                for(unsigned t=0;t<training.taps;++t){
+                    yr+=training.cr[t]*training.re[t]-training.ci[t]*training.im[t];
+                    yi+=training.cr[t]*training.im[t]+training.ci[t]*training.re[t];
+                }
+                /* A confirmed ODP can end before the trellis catches up.
+                   Never train toward a prediction far from the received point. */
+                if((yr-pr)*(yr-pr)+(yi-pi)*(yi-pi)<16){r=pr;i=pi;}
+            }
             if(v90_equalizer_adapt(&training,r,i,s->equalizer.taps==V90_EQ_HALF_TAPS?.2:.1)) {
                 memcpy(s->equalizer.cr,training.cr,sizeof(training.cr));
                 memcpy(s->equalizer.ci,training.ci,sizeof(training.ci));
@@ -292,6 +307,11 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
         s->count=0;++s->output_frames;
         s->output_symbol=s->origin+2*(s->pairs-(V90_TRELLIS_DEPTH-1))-1;
         if(!valid)++s->rejected_frames;
+        if(s->odp_training_enabled){
+            unsigned before=s->odp.updates;
+            v90_odp_observe(&s->odp,&s->mapping,s->output_frames-1,s->labels,valid?bits:NULL,s->frame_bits);
+            if(!before && s->odp.updates)fprintf(stderr,"[v90odp] causal prediction acquired at mapping frame %llu\n",(unsigned long long)s->output_frames-1);
+        }
         if(s->receive_bits)s->receive_bits(s->opaque,valid?bits:NULL);
     }
 }
@@ -422,6 +442,7 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
     else if(s->b1.m==3)v90_qam12_frames_init(&s->frames,0);
     else v90_qam8_frames_init(&s->frames,0);
     s->origin=index+1-s->b1.length;s->pairs=0;s->count=s->have_a=0;
+    memset(&s->odp,0,sizeof(s->odp));
     s->output_frames=s->rejected_frames=0;s->score=score;s->locked=1;
     for(unsigned i=0;i<s->b1.length;++i) {
         unsigned j=(s->b1.position+i)%s->b1.length;

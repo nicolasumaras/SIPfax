@@ -47,7 +47,7 @@ void run(V90Upstream*s,const short*x,unsigned n){for(unsigned i=0;i<n;++i)v90_up
 unsigned lcp(V90Upstream*s){return s->lcp_seen;}
 void destroy(void*s){free(s);}
 ''')
-  so=d/'x.so';subprocess.run(['gcc','-O2','-shared','-fPIC','-I'+str(root),str(d/'q.c'),str(d/'w.c'),*[str(root/f) for f in ['v90upstream.c','v90trellis.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c']],'-lm','-o',str(so)],check=True)
+  so=d/'x.so';subprocess.run(['gcc','-O2','-shared','-fPIC','-I'+str(root),str(d/'q.c'),str(d/'w.c'),*[str(root/f) for f in ['v90upstream.c','v90trellis.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c']],'-lm','-o',str(so)],check=True)
   lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint);lib.create.argtypes=[C.c_uint,C.c_uint,C.c_uint,cbtype];lib.create.restype=C.c_void_p;lib.run.argtypes=[C.c_void_p,C.c_void_p,C.c_uint];lib.destroy.argtypes=[C.c_void_p];lib.lcp.argtypes=[C.c_void_p]
   rows=[]
   for rate,baud,name,start,recording in cases:

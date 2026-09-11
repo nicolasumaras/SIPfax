@@ -38,7 +38,7 @@ void destroy(void *s){free(s);}
     if baud==3000 or not high:
         wrapper.write_text(wrapper.read_text().replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,v90_upstream_configured_rate(),%d,%d))abort();'%(baud,high)))
     src=root/'vendor/linmodem';so=Path(tmp)/'test.so'
-    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(src),str(wrapper),*[str(src/f) for f in ['v90pcm.c','v90training.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(src),str(wrapper),*[str(src/f) for f in ['v90pcm.c','v90training.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.run.argtypes=[C.c_void_p,ptr,ptr,C.c_uint];lib.get.argtypes=[C.c_void_p,C.c_uint];lib.destroy.argtypes=[C.c_void_p]

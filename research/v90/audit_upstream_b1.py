@@ -49,7 +49,7 @@ long first_frame_sample(void){return first_frame;}
 long b1_sample(void){return live->b1_sample;}
 void destroy(void*s){free(s);}
 ''')
- subprocess.run(['gcc','-shared','-fPIC','-O2','-I'+str(root),str(w),str(q),*[str(root/f) for f in ['v90upstream.c','v90trellis.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c']],'-lm','-o',str(so)],check=True)
+ subprocess.run(['gcc','-shared','-fPIC','-O2','-I'+str(root),str(w),str(q),*[str(root/f) for f in ['v90upstream.c','v90trellis.c','v90equalizer.c','v90shell.c','v90mapping.c','v42detect.c','v90odp.c']],'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_uint,C.c_uint];lib.create.restype=C.c_void_p
  lib.run.argtypes=[C.c_void_p,C.c_void_p,C.c_uint];lib.destroy.argtypes=[C.c_void_p];lib.reference.argtypes=[C.c_void_p,C.POINTER(C.c_uint16)]
  lib.get.argtypes=[C.c_uint,C.POINTER(C.c_uint16),C.POINTER(C.c_double),C.POINTER(C.c_double)]

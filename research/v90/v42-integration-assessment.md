@@ -30,3 +30,7 @@ With all three corrections, 45/46 primary cases pass and all 46 run without sani
 ## Receive envelopes and XID serialization
 
 The lab now rejects incomplete frame headers and malformed XID group/TLV envelopes before protocol state can change. Fourteen explicit invalid inputs pass unchanged-state checks, including an empty frame that reproduces a heap-buffer-overflow in the previous reference. Independent wire fixtures detect and verify a missing pointer advance after HDLC options; both compression-disabled and compression-advertisement encodings now match the expected bytes. Corrected cases run without sanitizer findings, including the longer recovery diagnostic. Parameter-specific widths/values, broader malformed inputs, outage handling and hardware integration remain open. These changes remain isolated from production.
+
+## Negotiated directions and lifetime
+
+Independent asymmetric fixtures now verify peer-TX/local-RX mapping, selected response values, standard defaults for missing parameters, persistence through SABME and restoration of preferences on modem restart. Four new complete data-transfer cases with unequal frame sizes and windows pass, expanding primary transfer coverage to 49/50 within the deadline. The original dense-error deadline failure remains visible. Invalid parameter values, out-of-range responses, optional-function handling and outage behavior still need qualification before native integration.

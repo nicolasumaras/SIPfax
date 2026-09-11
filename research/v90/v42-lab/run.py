@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+from negotiation_patch import apply as patch_negotiation
 
 HERE = Path(__file__).resolve().parent
 PATCH_FROM = 'LAPM_S_RNR  :  LAPM_S_RR, 1);\n}'
@@ -52,6 +53,8 @@ def main():
         if patched.count(old) != 1:
             ap.error('Expected XID serializer field was not found')
         patched = patched.replace(old, old+'\n    buf += 4;', 1)
+    pre_negotiation = patched
+    patched = patch_negotiation(patched)
     results = []
     with tempfile.TemporaryDirectory(prefix='sipfax-v42-lab-') as td:
         build = Path(td)
@@ -59,7 +62,9 @@ def main():
             ('upstream', original, []),
             ('final-bit-only', final_bit_only, []),
             ('pre-framing', pre_framing, []),
+            ('pre-negotiation', pre_negotiation, []),
             ('corrected', patched, []),
+            ('negotiated-limits', patched, ['-DNEGOTIATED_LIMITS']),
             ('variable', patched, ['-DVARIABLE_FRAMES']),
             ('recovery', patched, ['-DERROR_STOP_SECONDS=30']),
             ('long-stress', patched, ['-DTEST_SECONDS=600', '-DERROR_STOP_SECONDS=600']),
@@ -74,6 +79,18 @@ def main():
                        *[str(source/(n+'.c')) for n in MODULES if n != 'v42'],
                        '-o', str(binary)]
             subprocess.run(command, check=True)
+            if variant in ('pre-negotiation', 'corrected'):
+                negotiation_binary = build / (variant+'-negotiation')
+                negotiation_command = [str(HERE/'negotiation.c') if arg == str(HERE/'check.c') else
+                                       str(negotiation_binary) if arg == str(binary) else arg for arg in command]
+                subprocess.run(negotiation_command, check=True)
+                trial = subprocess.run([str(negotiation_binary)], capture_output=True, text=True, timeout=30)
+                results.append({'variant': variant+'-negotiation', 'parameters': {},
+                                'exit_code': trial.returncode,
+                                'results': [json.loads(line) for line in trial.stdout.splitlines()],
+                                'diagnostics': trial.stderr.splitlines()})
+                if variant == 'pre-negotiation':
+                    continue
             if variant in ('pre-framing', 'corrected'):
                 frame_binary = build / (variant+'-frames')
                 frame_command = [str(HERE/'frames.c') if arg == str(HERE/'check.c') else
@@ -91,6 +108,9 @@ def main():
                 cases = [(0, 0, 1, 0, 0, 0), (0, 1, 1, 0, 0, 0)]
             elif variant == 'final-bit-only':
                 cases = [(11000, 1, 1, delay, 1, 0) for delay in (80, 120)]
+            elif variant == 'negotiated-limits':
+                cases = [(0, 1, 1, 0, 0, 0), (0, 1, 1, 80, 1, 0),
+                         (50021, 1, 1, 40, 1, 0), (0, 1, 0, 40, 0, 0)]
             elif variant == 'long-stress':
                 cases = [(11000, 1, 1, 120, 1, 0)]
             elif variant == 'recovery':
@@ -113,11 +133,12 @@ def main():
     report = {'source_revision': manifest['revision'],
               'patch': 'Echo P in response F (8.4.2); replace T403 with T401 when sending an I frame (8.4.1); bound the detection shift register to ten bits; validate complete XID envelopes before dispatch; advance past serialized HDLC options.',
               'scope': 'Two reference peers, 65536 exact bytes each direction; primary deadline 120 simulated seconds; long-stress diagnostic retains continuous errors up to 600 seconds; no hardware or full conformance claim.',
+              'negotiation_patch': 'Map peer TX to local RX; negotiate relative to standard defaults; reply with selected values; preserve parameters through link establishment; restore preferences on modem restart.',
               'sanitizers': args.sanitizers,
               'cases': results}
     args.output.write_text(json.dumps(report, indent=2)+'\n')
     # Report actual failures instead of redefining them as passing regressions.
-    failures = [r for r in results if r['variant'] not in ('upstream', 'final-bit-only', 'pre-framing-frames') and r['exit_code']]
+    failures = [r for r in results if r['variant'] not in ('upstream', 'final-bit-only', 'pre-framing-frames', 'pre-negotiation-negotiation') and r['exit_code']]
     if failures:
         print(f'{len(failures)} corrected cases remain incomplete; see report.')
         return 1

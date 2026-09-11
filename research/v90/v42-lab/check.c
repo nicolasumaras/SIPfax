@@ -36,7 +36,14 @@ int main(int argc,char**argv){
  unsigned delay=argc>4?atoi(argv[4]):0,busy=argc>5?atoi(argv[5]):0,burst=argc>6?atoi(argv[6]):0;
  unsigned complete_sample=0;
  struct peer p[2]={{.side=0},{.side=1}};unsigned acc[2]={0},bits[2]={0},flips[2]={0},rates[2]={86400,asymmetric?148000:86400};
- for(unsigned i=0;i<2;i++){p[i].v=v42_init(NULL,i==0,detect,source,sink,p+i);if(!p[i].v)return 3;p[i].v->config.comp=0;p[i].v->tx_bit_rate=rates[i]/3;v42_set_status_callback(p[i].v,status,p+i);v42_restart(p[i].v);}
+ for(unsigned i=0;i<2;i++){p[i].v=v42_init(NULL,i==0,detect,source,sink,p+i);if(!p[i].v)return 3;p[i].v->config.comp=0;p[i].v->tx_bit_rate=rates[i]/3;v42_set_status_callback(p[i].v,status,p+i);
+#ifdef NEGOTIATED_LIMITS
+p[i].v->config.v42_tx_n401=i?64:112;
+p[i].v->config.v42_rx_n401=i?96:80;
+p[i].v->config.v42_tx_window_size_k=i?3:9;
+p[i].v->config.v42_rx_window_size_k=i?5:4;
+#endif
+v42_restart(p[i].v);}
  for(sample=0;sample<8000*TEST_SECONDS;sample++){
   if(busy){if(sample==5*8000)v42_set_local_busy_status(p[0].v,true);if(sample==7*8000)v42_set_local_busy_status(p[0].v,false);if(sample==9*8000)v42_set_local_busy_status(p[1].v,true);if(sample==11*8000)v42_set_local_busy_status(p[1].v,false);}
   for(unsigned i=0;i<2;i++){acc[i]+=rates[i];while(acc[i]>=24000){acc[i]-=24000;unsigned before_vs=p[i].v->lapm.vs;int bit=v42_tx_bit(p[i].v);if(p[i].v->lapm.vs!=before_vs && (p[i].v->bit_timer<=0 || p[i].v->bit_timer>p[i].v->tx_bit_rate))timer_violation++;bits[i]++;if(corrupt && sample>8000*3 && sample<8000*ERROR_STOP_SECONDS && bits[i]%(corrupt+i*997)==0){bit^=1;flips[i]++;}if(burst && sample>8000*3 && bits[i]%(50000+i*997)<burst){bit=1;flips[i]++;}
@@ -52,6 +59,11 @@ int main(int argc,char**argv){
  printf("{\"acknowledgement_timer_violations\":%u}\n",timer_violation);
  unsigned ok=p[0].received==TOTAL&&p[1].received==TOTAL&&!busy_violation&&!timer_violation;
  for(unsigned i=0;i<2;i++)ok=ok && p[i].v->lapm.va==p[i].v->lapm.vs && p[i].up==1 && p[i].down==0 && p[i].errors==0 && !strcmp(lapm_status_to_str(p[i].v->lapm.state),"LAPM_DATA");
+#ifdef NEGOTIATED_LIMITS
+ unsigned matched=p[0].v->lapm.tx_n401==112 && p[0].v->lapm.rx_n401==80 && p[0].v->lapm.tx_window_size_k==9 && p[0].v->lapm.rx_window_size_k==4 && p[1].v->lapm.tx_n401==80 && p[1].v->lapm.rx_n401==112 && p[1].v->lapm.tx_window_size_k==4 && p[1].v->lapm.rx_window_size_k==9;
+ printf("{\"negotiated_limits_match\":%s}\n",matched?"true":"false");
+ ok=ok && matched;
+#endif
  for(unsigned i=0;i<2;i++)v42_free(p[i].v);
  return ok?0:1;
 }

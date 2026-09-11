@@ -6,17 +6,19 @@
     "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
     "UBSAN_OPTIONS": "halt_on_error=1"
   },
-  "primary_cases": 46,
-  "passed": 45,
+  "primary_cases": 50,
+  "passed": 49,
   "delivery_deadline_failures": 1,
   "sanitizer_findings": 0,
   "original_detection_finding": "left shift of negative value -1",
   "correction": "Keep only nine previous bits before shifting in the next bit; detector inspects ten bits.",
-  "scope": "46 primary corrected transfer cases, 600-second diagnostic, two wire fixtures and 14 invalid inputs. The known primary deadline failure remains reported; original baselines intentionally retain faults.",
+  "scope": "50 primary corrected transfer cases, long-stress diagnostic, two wire fixtures, 14 invalid inputs and five negotiation assertions. The original dense-error primary deadline failure remains reported.",
   "framing_checks": {
     "exact_wire_fixtures": 2,
     "invalid_frames_ignored_without_state_change": 14,
     "sanitizer_findings": 0
   },
-  "original_framing_finding": "Heap-buffer-overflow reading the control field of an empty frame."
+  "original_framing_finding": "Heap-buffer-overflow reading the control field of an empty frame.",
+  "negotiation_fixture_checks": 5,
+  "negotiated_limit_transfer_cases": 4
 }

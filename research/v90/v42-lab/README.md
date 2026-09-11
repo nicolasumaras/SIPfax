@@ -48,3 +48,15 @@ An exact-allocation empty-frame fixture reproduces a heap-buffer-overflow in the
 Independent byte fixtures also expose a missing four-byte pointer advance after the XID HDLC-options field. The correction prevents the following parameter from overwriting the options. Exact 26-byte uncompressed and 44-byte compression-advertisement fixtures pass; the latter tests serialization only and does not enable compression in transfer tests or production. The dictionary-size field already advances correctly and requires no patch.
 
 The pre-framing baseline fails both the wire and malformed-input checks. Corrected framing checks pass normally and under ASan/UBSan, with the primary transfer matrix unchanged at 45/46. No LAPM code is deployed by this lab.
+
+## Asymmetric parameter negotiation
+
+Independent XID fixtures expose wrong direction mapping, replies advertising configuration rather than selected values, discarded negotiation at SABME establishment, and nonstandard handling of omitted fields. The temporary patch maps peer TX to local RX and vice versa, uses the standard 128-octet/15-frame defaults in the negotiation rule, serializes selected values in responses, and preserves negotiated parameters across link establishment. Explicit modem restart restores configured preferences. See V.42 9.2.3–9.2.4 and Table 11a note 2.
+
+The independent command fixture requests TX/RX sizes of 112/80 octets and windows of 9/4 against local preferences of 64/96 octets and 3/5 frames. It verifies the opposite-direction selected values, their exact reply bytes, persistence through SABME, restart and omitted-parameter defaults. The pre-negotiation baseline fails the direction, reply, persistence and omission checks.
+
+Four additional transfer cases use those different preferences on the two peers and verify all 65,536 bytes in each direction, drained acknowledgements and matching final limits. Clean, delayed/backpressured, corrupted and detection-disabled cases pass. The original 46-case matrix remains 45/46 within its deadline; the expanded primary transfer total is 49/50.
+
+These checks do not yet establish rejection of all invalid parameter values, response values outside the offered range, unsupported optional functions, safe configuration above allocated maxima, or full interoperability. Those remain integration gates.
+
+The expanded 50-case transfer matrix, negotiation assertions, framing checks and long diagnostic also ran under ASan/UBSan on CT105 with no findings in corrected variants. The known deadline failure remains unchanged.

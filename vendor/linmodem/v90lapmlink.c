@@ -59,6 +59,12 @@ static void selected_frame_status(void *opaque,const uint8_t *frame,int length,i
                        " addr=%02x control=%02x info0=%02x\n",
                 length,ok?"valid":"invalid",addr,control,info0);
     }
+    if(ok && !s->selected_xid_dumped && length>=3
+       && (frame[1]&0xec)==0xac && frame[2]==0x82){
+        fprintf(stderr,"[v42] first selected XID:");
+        for(int i=0;i<length;i++)fprintf(stderr," %02x",frame[i]);
+        fputc('\n',stderr);s->selected_xid_dumped=1;
+    }
 }
 
 static void odp(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count)
@@ -98,6 +104,7 @@ static void selected(void *opaque,unsigned candidate)
     v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
     hdlc_rx_restart(&s->selected_hdlc);
     s->selected_candidate=candidate;s->selection_count++;
+    s->selected_xid_dumped=0;
     fprintf(stderr,"[v42] selected LAPM candidate %u after %s\n",candidate,
             s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
 }

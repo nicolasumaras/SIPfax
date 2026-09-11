@@ -912,6 +912,7 @@ static int rx_unnumbered_cmd_frame(v42_state_t *ss, const uint8_t *frame, int le
         /* Exchange general ID info */
         receive_xid(ss, frame, len);
         transmit_xid(ss, s->rsp_addr);
+        fprintf(stderr,"[v42] queued LAPM XID response: addr=%02x\n",s->rsp_addr);
         break;
     case LAPM_U_TEST:
         /* TODO: */
@@ -1113,8 +1114,15 @@ SPAN_DECLARE(void) lapm_receive(void *user_data, const uint8_t *frame, int len, 
     if ((frame[1] & LAPM_FRAMETYPE_MASK) != LAPM_FRAMETYPE_U && len < 3)
         return;
     if ((frame[1] & LAPM_FRAMETYPE_MASK) == LAPM_FRAMETYPE_U
-        && (frame[1] & 0xEC) == LAPM_U_XID && !validated_xid(frame, len))
-        return;
+        && (frame[1] & 0xEC) == LAPM_U_XID)
+    {
+        int envelope_ok = validated_xid(frame, len);
+        fprintf(stderr,"[v42] LAPM parser XID: len=%d envelope=%s addr=%02x role=%s state=%d\n",
+                len,envelope_ok?"valid":"invalid",frame[0],
+                frame[0]==s->rsp_addr?"command":"response",s->state);
+        if (!envelope_ok)
+            return;
+    }
 
     switch ((frame[1] & LAPM_FRAMETYPE_MASK))
     {

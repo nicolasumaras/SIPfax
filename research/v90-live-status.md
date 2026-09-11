@@ -1742,3 +1742,14 @@ The integrated default and seeds 43127, 62091 and 98017 pass all 192 expected fr
 CT105 ASan/UBSan feedback history/reacquisition checks pass, including 28.8 half-symbol input. A cached PCMU benchmark recovered 192 frames across 529 blocks, with 547.155 ms total receiver time and a 12.966 ms peak for one 20 ms audio block. This is a workload measurement, not a hard real-time guarantee.
 
 Hardware qualification is outstanding. The deployed runtime remains `5151eb5`, upstream 26400 with automatic initial echo acquisition. No 28.8 hardware success is claimed.
+
+
+## First integrated 28.8 kbit/s hardware trial
+
+CI run 34552054644 passed both jobs for `dcb450f6243a529e64559b13c067f7285472d2e9`. The CT105 binary SHA-256 is `a885a92e8db167b78dad585ce8c6b67ee8c35bc1f229bec687f2a4c981bad761`.
+
+Hardware attempt `0f9584df-0054-405e-81b3-c6809fa22892` used verified native PID13375, configured upstream 28800 and automatic echo acquisition. It passed the internet probe and all 18 independently verified response hashes in 38.325 seconds, with zero Windows CRC, alignment, timeout, framing or overrun errors. The download took 7.501 seconds and median upstream check 1.3415 seconds. Native downstream CP was 49.333 kbit/s. Echo acquisition selected 1428 samples at sample 96480; initial B1 correlation was 0.9732. Final S/Sbar accompanied hangup, not a completed rate renegotiation.
+
+The capture contained 13533 packets with zero kernel drops or RTP sequence gaps. All 3355 downstream primary payloads matched exactly; all 3357 forwarded upstream payloads matched after eleven ATA startup packets. This verifies packet preservation, not analog playout continuity.
+
+The short call qualifies a sustained trial, not permanent deployment or general reliability. The wrapper restored the exact `5151eb5` binary and 26400/auto configuration. Service activity, notebook disconnection and cleared SIPFAXRED state were verified. All short-trial handles, including CI watch, fixture and capture, are terminal.

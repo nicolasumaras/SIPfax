@@ -48,11 +48,15 @@ static unsigned training_frames(const char *name,long minimum_ms)
 }
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 {
+    v90_phase4_init_rate(s,alaw,uinfo,v90_upstream_configured_rate());
+}
+void v90_phase4_init_rate(V90Phase4 *s,int alaw,int uinfo,unsigned rate)
+{
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
     /* 9.4.1.2/3: at least 2040 samples, MP begins within 2000ms.
        Round down to complete six-sample frames. */
     s->trn_frames=training_frames("SIPFAX_V90_INITIAL_TRN2D_MS",255);
-    v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init(&s->upstream);
+    v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init_rate(&s->upstream,rate);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
 }
 static void receive_cp(V90Phase4 *s)
@@ -107,7 +111,8 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
            Reset here so an early E cannot lose B1 at Ed completion. */
         void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
         void *opaque=s->upstream.opaque;
-        v90_upstream_init(&s->upstream);s->upstream.require_b1=1;
+        unsigned rate=s->upstream.rate;
+        v90_upstream_init_rate(&s->upstream,rate);s->upstream.require_b1=1;
         s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
         /* The matched training detector can report E after B1 has begun.
          * Replay bounded pre-decision audio to retain the complete B1 and

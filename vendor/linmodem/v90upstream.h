@@ -59,6 +59,9 @@ typedef struct V90Upstream {
     void *opaque;
     void (*receive_frame)(void *,const uint8_t *,unsigned);
 } V90Upstream;
+unsigned v90_upstream_configured_rate(void);
 void v90_upstream_init(V90Upstream *s);
+/* Explicit per-call rate; invalid values use the default 4800 profile. */
+void v90_upstream_init_rate(V90Upstream *s,unsigned rate);
 void v90_upstream_receive(V90Upstream *s,int16_t sample);
 #endif

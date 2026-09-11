@@ -37,15 +37,26 @@ void v90_info0d(unsigned char b[62], int alaw)
     field(b, 42, 16, crc_bits(b+12, 30));
     memset(b+58, 1, 4);
 }
-void v90_info1d(unsigned char b[109])
+static void info1d_rate(unsigned char b[109],unsigned rate)
 {
     static const unsigned char sync[8]={0,1,1,1,0,0,1,0};
     memset(b,0,109); memset(b,1,4); memcpy(b+4,sync,8);
-    /* Flat pre-emphasis, high carrier. Limit the initial trial to mandatory
-       3200 baud and 4800 bit/s upstream while implementing the receiver. */
-    b[61]=1; field(b,66,4,2);
+    /* Flat pre-emphasis and high carrier at the implemented 3200 symbols/s.
+       The projected maximum agrees with the selected per-call receiver. */
+    b[61]=1; field(b,66,4,rate/2400);
     field(b,79,10,512); /* frequency estimate unavailable, as specified */
     field(b,89,16,crc_bits(b+12,77)); memset(b+105,1,4);
+}
+void v90_info1d(unsigned char b[109])
+{
+    info1d_rate(b,v90_upstream_configured_rate());
+}
+static void select_upstream_rate(V90Startup *s)
+{
+    /* V.90 Table 9 note 1: rates above 12 require large-constellation support. */
+    unsigned limit=s->peer_large_constellations?31200:28800;
+    s->upstream_data_rate=s->upstream_max_rate<limit?s->upstream_max_rate:limit;
+    info1d_rate(s->info1d,s->upstream_data_rate);
 }
 void v90_startup_init(V90Startup *s, int alaw)
 {
@@ -57,7 +68,8 @@ void v90_startup_init(V90Startup *s, int alaw)
     s->tx_symbol = -1;
     s->tx_sign = 1;
     v90_info0d(s->info0d, alaw);
-    v90_info1d(s->info1d);
+    s->upstream_max_rate=v90_upstream_configured_rate();
+    select_upstream_rate(s);
     /* Parallel symbol phases avoid assuming RTP and INFO boundaries coincide. */
     for (int j = 0; j < 14; ++j) s->rx[j].clock = j * 570;
     fprintf(stderr, "[v90p2] transmitting INFO0d (%s), then Tone B\n",
@@ -89,6 +101,10 @@ static void receive(V90Startup *s, int16_t input)
             if (!s->info0_received && r->count >= 49 && valid_info0a(r->bits+21)) {
                 s->info0_received = 1;
                 s->info0_at = s->samples;
+                s->peer_large_constellations=r->bits[21+25];
+                select_upstream_rate(s);
+                fprintf(stderr,"[v90p2] peer large constellation=%u; upstream selected=%u bit/s\n",
+                        s->peer_large_constellations,s->upstream_data_rate);
                 fprintf(stderr, "[v90p2] CRC-valid INFO0a at %.3fs: ack=%d 3429=%d\n",
                         s->samples / 8000.0, r->bits[49], r->bits[35]);
             }
@@ -136,7 +152,10 @@ static long reversal_boundary(V90Startup *s)
 static void begin_retrain(V90Startup *s, const char *reason)
 {
     long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
+    unsigned selected=s->upstream_data_rate,maximum=s->upstream_max_rate,large=s->peer_large_constellations;
     v90_startup_init(s,law);
+    s->upstream_data_rate=selected;s->upstream_max_rate=maximum;s->peer_large_constellations=large;
+    info1d_rate(s->info1d,selected);
     s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
     s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
     fprintf(stderr,"[v90p2] %s retrain %u at %.6fs; silence70ms then Tone B\n",
@@ -352,7 +371,7 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                 if(stage!=s->training_tx.stage)
                     fprintf(stderr,"[v90p3] DIL stage %u at %.6fs (2=Phase4 pending)\n",s->training_tx.stage,s->samples/8000.0);
                 if(s->training_tx.stage==2) {
-                    v90_phase4_init(&s->phase4,s->alaw,s->uinfo);s->phase4_active=1;
+                    v90_phase4_init_rate(&s->phase4,s->alaw,s->uinfo,s->upstream_data_rate);s->phase4_active=1;
                 }
             }
         }

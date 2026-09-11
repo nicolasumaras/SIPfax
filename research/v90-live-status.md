@@ -1790,3 +1790,10 @@ The raw receive and transmit audio was retained privately. Offline causal echo r
 A protocol review found that INFO1d still hard-codes projected maximum rate 2 (4.8 kbit/s) for 3200 symbols/s, whereas MP now requests rate 13. This mismatch also existed on earlier working profiles, so it is not a proven explanation for this failure. INFO0d already advertises large-constellation support. The next investigation is to make per-call Phase2/MP/receiver rate selection consistent with the peer's capabilities, then retest rather than infer success from synthetic frames.
 
 The wrapper restored `dcb450f` at 28800/auto. Service activity, binary hash, persistent configuration, notebook idle and cleared SIPFAXRED state were verified. CI watch, runner, fixture, capture, retrieval, CT105 check and replay jobs are terminal. 31.2 kbit/s remains undeployed and unqualified on hardware.
+
+
+## Consistent per-call upstream rate selection
+
+INFO1d now projects the selected upstream rate instead of a hard-coded 4800 bit/s. The selection is captured per call and shared with Phase4 MP and receiver initialization. A CRC-valid INFO0a large-constellation capability permits 31.2 kbit/s; without that capability the configured maximum is capped at 28.8 kbit/s. E resets and retraining preserve the selected rate rather than rereading environment configuration.
+
+The new independent wire test covers every configured profile, corrupted capability frames, INFO1d and MP rate/capability/CRC agreement, explicit invalid rates, and selected-rate preservation through E and retrain even when the environment changes. The native suite and 31.2 seed-98017 waveform matrix pass. Replaying the failed call's raw INFO0a exchange confirms the notebook does advertise large-constellation support, so this change still selects 31.2 for it. This corrects a negotiation inconsistency; whether it resolves the hardware failure remains unproven until another call. The deployed runtime remains `dcb450f` at 28800/auto.

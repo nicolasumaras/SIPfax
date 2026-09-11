@@ -11,11 +11,19 @@
 #include "v90upstream.h"
 static void soft_pair(void *,unsigned,unsigned);
 static void qam_bits(void *,const uint8_t *);
+unsigned v90_upstream_configured_rate(void)
+{
+    const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
+    return rate && !strcmp(rate,"31200")?31200:rate && !strcmp(rate,"28800")?28800:rate && !strcmp(rate,"26400")?26400:rate && !strcmp(rate,"24000")?24000:rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
+}
 void v90_upstream_init(V90Upstream *s)
 {
+    v90_upstream_init_rate(s,v90_upstream_configured_rate());
+}
+void v90_upstream_init_rate(V90Upstream *s,unsigned rate)
+{
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
-    const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
-    s->rate=rate && !strcmp(rate,"31200")?31200:rate && !strcmp(rate,"28800")?28800:rate && !strcmp(rate,"26400")?26400:rate && !strcmp(rate,"24000")?24000:rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
+    s->rate=rate>=4800 && rate<=31200 && rate%2400==0?rate:4800;
     if(s->rate!=4800)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
         l->next_symbol=i;

@@ -25,4 +25,5 @@ typedef struct {
 } V90Phase4;
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo);
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input);
+void v90_phase4_init_rate(V90Phase4 *s,int alaw,int uinfo,unsigned rate);
 #endif

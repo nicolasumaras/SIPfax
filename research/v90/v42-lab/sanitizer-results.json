@@ -1,0 +1,16 @@
+{
+  "environment": "CT105 temporary standalone build; live modem not linked or changed",
+  "source_revision": "8f1e1646bdec99eac5fd2cd92c35563f736b9b89",
+  "flags": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+  "options": {
+    "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+    "UBSAN_OPTIONS": "halt_on_error=1"
+  },
+  "primary_cases": 46,
+  "passed": 45,
+  "delivery_deadline_failures": 1,
+  "sanitizer_findings": 0,
+  "original_detection_finding": "left shift of negative value -1",
+  "correction": "Keep only nine previous bits before shifting in the next bit; detector inspects ten bits.",
+  "scope": "Primary matrix only; 600-second diagnostic not included in this sanitizer run."
+}

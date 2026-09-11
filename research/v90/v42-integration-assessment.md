@@ -19,3 +19,10 @@ No V.42/LAPM implementation was enabled or deployed during this assessment. The 
 The pinned reference was built from the seven required C modules without installing a system dependency. A two-peer lab found an unsolicited-final-bit defect: the RR/RNR response helper sends F=1 even when P=0. This contradicts V.42 8.4.2 and stalls the clean unequal-rate case. Correcting the response to echo the incoming P bit fixes that regression.
 
 The corrected implementation passes 44/46 expanded cases covering exact bidirectional data, final acknowledgements, unequal clocks, propagation delay, backpressure, variable frame sizes and corrupted bits/bursts. Two fixed-frame cases with dense continuous periodic faults at long delay remain incomplete; both recover when the faults stop. See [the pinned lab, procedure and limitations](v42-lab/README.md). The runner returns failure for the incomplete corrected cases. None of this enables LAPM on the live service.
+
+
+## Timer and detection corrections
+
+A second defect keeps the idle timer active when sending I frames; V.42 8.4.1 requires the acknowledgement timer. A direct per-frame timer check reproduces the violation and verifies the correction. ASan/UBSan also found a negative signed shift in detection; bounding the register to its ten used bits fixes it.
+
+With all three corrections, 45/46 primary cases pass and all 46 run without sanitizer findings. The remaining fixed-size dense-error case exceeds 120 simulated seconds but completes with exact data and acknowledgements at 164.961250 seconds in a separately labelled continuous-fault diagnostic. The original deadline failure remains reported. A trial restriction on sending during timer recovery produced no change in these cases and was not retained. Malformed-frame handling, severe-outage behavior and native/hardware integration remain to be qualified; the live V.90 service is unchanged.

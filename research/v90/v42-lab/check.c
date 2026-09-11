@@ -12,11 +12,14 @@
 #include "spandsp/private/hdlc.h"
 #include "spandsp/private/v42.h"
 #define TOTAL 65536u
+#ifndef TEST_SECONDS
+#define TEST_SECONDS 120
+#endif
 #ifndef ERROR_STOP_SECONDS
 #define ERROR_STOP_SECONDS 120
 #endif
 struct peer {v42_state_t *v;unsigned side,sent,received,up,down,errors;};
-static unsigned sample, busy_violation;
+static unsigned sample, busy_violation, timer_violation;
 struct delayed {unsigned due;int bit;};
 static struct delayed queue[2][8192];static unsigned head[2],tail[2],max_queue[2];
 static uint8_t data(unsigned side,unsigned n){uint32_t x=n+0x9e3779b9u*(side+1);x^=x>>16;x*=0x85ebca6bu;x^=x>>13;return x;}
@@ -34,9 +37,9 @@ int main(int argc,char**argv){
  unsigned complete_sample=0;
  struct peer p[2]={{.side=0},{.side=1}};unsigned acc[2]={0},bits[2]={0},flips[2]={0},rates[2]={86400,asymmetric?148000:86400};
  for(unsigned i=0;i<2;i++){p[i].v=v42_init(NULL,i==0,detect,source,sink,p+i);if(!p[i].v)return 3;p[i].v->config.comp=0;p[i].v->tx_bit_rate=rates[i]/3;v42_set_status_callback(p[i].v,status,p+i);v42_restart(p[i].v);}
- for(sample=0;sample<8000*120;sample++){
+ for(sample=0;sample<8000*TEST_SECONDS;sample++){
   if(busy){if(sample==5*8000)v42_set_local_busy_status(p[0].v,true);if(sample==7*8000)v42_set_local_busy_status(p[0].v,false);if(sample==9*8000)v42_set_local_busy_status(p[1].v,true);if(sample==11*8000)v42_set_local_busy_status(p[1].v,false);}
-  for(unsigned i=0;i<2;i++){acc[i]+=rates[i];while(acc[i]>=24000){acc[i]-=24000;int bit=v42_tx_bit(p[i].v);bits[i]++;if(corrupt && sample>8000*3 && sample<8000*ERROR_STOP_SECONDS && bits[i]%(corrupt+i*997)==0){bit^=1;flips[i]++;}if(burst && sample>8000*3 && bits[i]%(50000+i*997)<burst){bit=1;flips[i]++;}
+  for(unsigned i=0;i<2;i++){acc[i]+=rates[i];while(acc[i]>=24000){acc[i]-=24000;unsigned before_vs=p[i].v->lapm.vs;int bit=v42_tx_bit(p[i].v);if(p[i].v->lapm.vs!=before_vs && (p[i].v->bit_timer<=0 || p[i].v->bit_timer>p[i].v->tx_bit_rate))timer_violation++;bits[i]++;if(corrupt && sample>8000*3 && sample<8000*ERROR_STOP_SECONDS && bits[i]%(corrupt+i*997)==0){bit^=1;flips[i]++;}if(burst && sample>8000*3 && bits[i]%(50000+i*997)<burst){bit=1;flips[i]++;}
    if(tail[i]-head[i]>=8192){fprintf(stderr,"Delay queue overflow\n");return 4;}queue[i][tail[i]%8192]=(struct delayed){sample+delay*8,bit};tail[i]++;if(tail[i]-head[i]>max_queue[i])max_queue[i]=tail[i]-head[i];}
    while(head[i]!=tail[i] && queue[i][head[i]%8192].due<=sample){v42_rx_bit(p[i^1].v,queue[i][head[i]%8192].bit);head[i]++;}}
 
@@ -46,7 +49,8 @@ int main(int argc,char**argv){
  for(unsigned i=0;i<2;i++)fprintf(stderr,"peer%u vs=%u va=%u vr=%u put=%d get=%d acked=%d busy=%d/%d timer=%d retry=%d ctrl=%d/%d\n",i,p[i].v->lapm.vs,p[i].v->lapm.va,p[i].v->lapm.vr,p[i].v->lapm.info_put,p[i].v->lapm.info_get,p[i].v->lapm.info_acked,p[i].v->lapm.local_busy,p[i].v->lapm.far_busy,p[i].v->bit_timer,p[i].v->lapm.retry_count,p[i].v->lapm.ctrl_put,p[i].v->lapm.ctrl_get);
  for(unsigned i=0;i<2;i++)fprintf(stderr,"peer%u cfg=%d hdlc len=%zu flags=%d report=%d pos=%zu\n",i,p[i].v->lapm.configuring,p[i].v->lapm.hdlc_tx.len,p[i].v->lapm.hdlc_tx.flag_octets,p[i].v->lapm.hdlc_tx.report_flag_underflow,p[i].v->lapm.hdlc_tx.pos);
  printf("{\"delay_ms\":%u,\"busy\":%u,\"burst\":%u,\"busy_delivery_violations\":%u,\"max_queue\":[%u,%u]}\n",delay,busy,burst,busy_violation,max_queue[0],max_queue[1]);
- unsigned ok=p[0].received==TOTAL&&p[1].received==TOTAL&&!busy_violation;
+ printf("{\"acknowledgement_timer_violations\":%u}\n",timer_violation);
+ unsigned ok=p[0].received==TOTAL&&p[1].received==TOTAL&&!busy_violation&&!timer_violation;
  for(unsigned i=0;i<2;i++)ok=ok && p[i].v->lapm.va==p[i].v->lapm.vs && p[i].up==1 && p[i].down==0 && p[i].errors==0 && !strcmp(lapm_status_to_str(p[i].v->lapm.state),"LAPM_DATA");
  for(unsigned i=0;i<2;i++)v42_free(p[i].v);
  return ok?0:1;

@@ -65,3 +65,16 @@ it reaches valid LCP in only three of the nine recordings. Some early candidates
 reset before PPP begins. Native LAPM therefore needs per-candidate HDLC evidence
 and buffered replay before committing to one ordered stream. The callback must
 not merge candidates.
+
+The pinned, corrected LGPL-2.1 V.42 subset is now vendored with its licence,
+upstream source hashes and reproducible generation command. The complete native
+modem links it, but no runtime path calls it yet.
+
+An initial passive selector maintains separate detection and CRC-16 HDLC state
+for all 40 receiver candidates. It accepts selection evidence only from a valid
+general-format V.42 XID after a complete ODP sequence and trailing mark gap. It
+buffers 8192 bits per detected candidate, replays the chosen stream in order,
+ignores a valid XID without ODP, rejects a bad FCS, isolates other candidates,
+reports invalidation, and fails closed on buffer overflow. A synthetic test
+exercises each condition under ASan/UBSan. Hardware has not sent an XID to this
+path yet, so selection is not an interoperability result.

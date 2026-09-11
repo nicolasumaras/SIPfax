@@ -17,6 +17,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--source', type=Path, required=True, help='Pristine pinned SpanDSP checkout/tarball root')
     ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--emit-source', type=Path,
+                    help='Write the fully corrected v42.c used by the lab')
     ap.add_argument('--sanitizers', action='store_true', help='Build with ASan/UBSan; requires installed runtimes')
     args = ap.parse_args()
     source = args.source.resolve() / 'src'
@@ -55,6 +57,8 @@ def main():
         patched = patched.replace(old, old+'\n    buf += 4;', 1)
     pre_negotiation = patched
     patched = patch_negotiation(patched)
+    if args.emit_source:
+        args.emit_source.write_text(patched)
     results = []
     with tempfile.TemporaryDirectory(prefix='sipfax-v42-lab-') as td:
         build = Path(td)

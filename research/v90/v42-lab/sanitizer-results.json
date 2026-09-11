@@ -12,7 +12,7 @@
   "sanitizer_findings": 0,
   "original_detection_finding": "left shift of negative value -1",
   "correction": "Keep only nine previous bits before shifting in the next bit; detector inspects ten bits.",
-  "scope": "50 primary corrected transfer cases, long-stress diagnostic, two wire fixtures, 14 invalid inputs and five negotiation assertions. The original dense-error primary deadline failure remains reported.",
+  "scope": "50 primary corrected transfer cases, long-stress diagnostic, two wire fixtures, 14 invalid inputs and five negotiation assertions. The original dense-error primary deadline failure remains reported. Four additional complete-interruption cases also pass under sanitizers.",
   "framing_checks": {
     "exact_wire_fixtures": 2,
     "invalid_frames_ignored_without_state_change": 14,
@@ -20,5 +20,7 @@
   },
   "original_framing_finding": "Heap-buffer-overflow reading the control field of an empty frame.",
   "negotiation_fixture_checks": 5,
-  "negotiated_limit_transfer_cases": 4
+  "negotiated_limit_transfer_cases": 4,
+  "outage_cases": 4,
+  "outage_passed": 4
 }

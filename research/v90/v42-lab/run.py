@@ -64,6 +64,8 @@ def main():
             ('pre-framing', pre_framing, []),
             ('pre-negotiation', pre_negotiation, []),
             ('corrected', patched, []),
+            ('outage-short', patched, ['-DOUTAGE_SECONDS=2']),
+            ('outage-long', patched, ['-DOUTAGE_SECONDS=30', '-DOUTAGE_DISCONNECT']),
             ('negotiated-limits', patched, ['-DNEGOTIATED_LIMITS']),
             ('variable', patched, ['-DVARIABLE_FRAMES']),
             ('recovery', patched, ['-DERROR_STOP_SECONDS=30']),
@@ -108,6 +110,8 @@ def main():
                 cases = [(0, 0, 1, 0, 0, 0), (0, 1, 1, 0, 0, 0)]
             elif variant == 'final-bit-only':
                 cases = [(11000, 1, 1, delay, 1, 0) for delay in (80, 120)]
+            elif variant in ('outage-short', 'outage-long'):
+                cases = [(0, 1, 1, delay, 0, 0) for delay in (0, 80)]
             elif variant == 'negotiated-limits':
                 cases = [(0, 1, 1, 0, 0, 0), (0, 1, 1, 80, 1, 0),
                          (50021, 1, 1, 40, 1, 0), (0, 1, 0, 40, 0, 0)]

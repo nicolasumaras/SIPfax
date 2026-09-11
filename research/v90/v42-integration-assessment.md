@@ -34,3 +34,14 @@ The lab now rejects incomplete frame headers and malformed XID group/TLV envelop
 ## Negotiated directions and lifetime
 
 Independent asymmetric fixtures now verify peer-TX/local-RX mapping, selected response values, standard defaults for missing parameters, persistence through SABME and restoration of preferences on modem restart. Four new complete data-transfer cases with unequal frame sizes and windows pass, expanding primary transfer coverage to 49/50 within the deadline. The original dense-error deadline failure remains visible. Invalid parameter values, out-of-range responses, optional-function handling and outage behavior still need qualification before native integration.
+
+## Native integration boundaries verified from current code
+
+- `v90upstream.c:bit` exposes descrambled upstream bits immediately before the UART parser. It is called for multiple timing/pair candidates. A LAPM receiver must retain a selected candidate and receive explicit discontinuities; merging callbacks from all candidates would corrupt HDLC ordering. Existing `receive_frame` deduplication works on complete PPP frames and cannot substitute for bitstream selection.
+- `v90.c:v90_serial_bit` consumes byte-valued DTE FIFO entries and adds 8N1 framing. A negotiated LAPM transmitter must replace this framing with HDLC bits. LAPM information callbacks carry DTE octets; their boundaries are unrelated to PPP packet boundaries.
+- `v90phase4.c:data_bit` emits B1, clamps DTE during retraining and can optionally emit a decline handshake. LAPM support must coordinate detection here and never run alongside decline mode. The V.42 timer must follow usable negotiated downstream bits/sample time deliberately across these pauses.
+- `v90upstream.c` resets candidate parser state on first mapping frames and erasures. `v90phase4.c` can reinitialize the complete upstream receiver during renegotiation. Protocol state and callback ownership must survive or explicitly reset at the correct layer.
+- `v90startup.c` currently uses valid initial LCP as evidence to suppress startup rate fallback. LAPM establishment needs an explicit corresponding state; fabricating `lcp_seen` would hide missing PPP startup.
+- Native receive FIFO backpressure must map to LAPM local-busy behavior without dropping acknowledged DTE octets. The existing complete-PPP-frame discard path is not adequate for reliable LAPM delivery.
+
+These are code-inspected integration requirements, not implemented hooks or hardware proof.

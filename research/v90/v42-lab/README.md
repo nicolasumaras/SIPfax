@@ -60,3 +60,11 @@ Four additional transfer cases use those different preferences on the two peers 
 These checks do not yet establish rejection of all invalid parameter values, response values outside the offered range, unsupported optional functions, safe configuration above allocated maxima, or full interoperability. Those remain integration gates.
 
 The expanded 50-case transfer matrix, negotiation assertions, framing checks and long diagnostic also ran under ASan/UBSan on CT105 with no findings in corrected variants. The known deadline failure remains unchanged.
+
+## Complete-interruption checks
+
+Four additional fault cases replace both transmitted bitstreams with constant marks starting at simulated second five, with either zero or 80 ms propagation delay. A two-second interruption recovers all 65,536 bytes in each direction and drains acknowledgements without reconnecting, finishing at 23.394375/38.202500 seconds. A thirty-second interruption generates exactly one disconnect per peer at approximately 18.98–19.06 seconds, leaves both peers idle, and delivers no payload after disconnect. The simulation continues to second 40, including five seconds after the channel returns. These tests model damaged digital bitstreams, not loss of modem carrier or process scheduling.
+
+No additional protocol correction was required for these four cases. The original dense-error deadline failure is still reported. Native carrier-loss, retraining, candidate selection and PPP teardown remain separate integration requirements.
+
+All four interruption checks also pass under ASan/UBSan with no findings.

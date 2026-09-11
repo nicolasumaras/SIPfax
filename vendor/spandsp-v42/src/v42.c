@@ -294,15 +294,27 @@ static int receive_xid(v42_state_t *ss, const uint8_t *frame, int len)
     len -= 3;
     while (len > 0)
     {
-        group_id = frame[0];
-        group_len = frame[1];
-        group_len = (group_len << 8) | frame[2];
-        frame += 3;
-        len -= (3 + group_len);
-        if (len < 0)
-            break;
+        group_id = *frame++;
+        len--;
+        /* V.42 7.6.2.5: the user-data subfield has no GL octets and
+           occupies the remainder of the XID information field. */
+        if (group_id == GI_USER_DATA)
+        {
+            group_len = len;
+        }
+        else
+        {
+            if (len < 2)
+                return -1;
+            group_len = ((uint16_t) frame[0] << 8) | frame[1];
+            frame += 2;
+            len -= 2;
+            if (group_len > len)
+                return -1;
+        }
         buf = frame;
         frame += group_len;
+        len -= group_len;
         switch (group_id)
         {
         case GI_PARAM_NEGOTIATION:
@@ -1071,15 +1083,24 @@ static int validated_xid(const uint8_t *frame, int len)
         return 0;
     while (position < (unsigned) len)
     {
-        if ((unsigned) len - position < 3)
-            return 0;
-        unsigned group = frame[position];
-        unsigned length = ((unsigned) frame[position + 1] << 8) | frame[position + 2];
-        position += 3;
+        unsigned group = frame[position++];
+        unsigned length;
+        if (group == GI_USER_DATA)
+        {
+            length = (unsigned) len - position;
+        }
+        else
+        {
+            if ((unsigned) len - position < 2)
+                return 0;
+            length = ((unsigned) frame[position] << 8) | frame[position + 1];
+            position += 2;
+        }
         if (length > (unsigned) len - position)
             return 0;
         unsigned end = position + length;
-        if (group == GI_PARAM_NEGOTIATION || group == GI_PRIVATE_NEGOTIATION)
+        if (group == GI_PARAM_NEGOTIATION || group == GI_PRIVATE_NEGOTIATION
+            || group == GI_USER_DATA)
         {
             while (position < end)
             {

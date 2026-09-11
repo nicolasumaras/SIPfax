@@ -5,6 +5,7 @@
 #include "v90lapmlink.h"
 
 #define TOTAL 16384u
+extern void lapm_receive(void *user_data,const uint8_t *frame,int len,int ok);
 struct endpoint {unsigned side,sent,received;};
 static unsigned test_sample,max_pending,saw_busy;
 static uint8_t datum(unsigned side,unsigned n)
@@ -53,9 +54,29 @@ static void verify_ten_adps(void)
     assert(bits==360 && answerer.neg.txadps==10);
     assert(!strcmp(lapm_status_to_str(answerer.lapm.state),"LAPM_IDLE"));
 }
+static void verify_v44_user_data_xid(void)
+{
+    static const uint8_t xid[]={
+        0x03,0xaf,0x82,0x80,0x00,0x13,0x03,0x03,0x8a,0x89,0x00,
+        0x05,0x02,0x04,0x00,0x06,0x02,0x04,0x00,0x07,0x01,0x0f,
+        0x08,0x01,0x0f,0xf0,0x00,0x0f,0x00,0x03,0x56,0x34,0x32,
+        0x01,0x01,0x03,0x02,0x02,0x08,0x00,0x03,0x01,0x20,0xff,
+        0x40,0x03,0x56,0x34,0x34,0x41,0x01,0x00,0x42,0x01,0x03,
+        0x43,0x02,0x08,0x00,0x44,0x02,0x08,0x00,0x45,0x01,0x8e,
+        0x46,0x01,0x8e,0x47,0x02,0x20,0x00,0x48,0x02,0x20,0x00};
+    struct endpoint unused={0};v42_state_t answerer;
+    assert(v42_init(&answerer,false,false,source,caller_sink,&unused));
+    assert(answerer.lapm.ctrl_put==0);
+    lapm_receive(&answerer,xid,sizeof(xid),1);
+    assert(answerer.lapm.ctrl_put==1);
+    assert(answerer.lapm.ctrl_buf[0].buf[0]==answerer.lapm.rsp_addr);
+    lapm_receive(&answerer,xid,sizeof(xid)-1,1);
+    assert(answerer.lapm.ctrl_put==1);
+}
 int main(void)
 {
     verify_ten_adps();
+    verify_v44_user_data_xid();
     struct endpoint answer={.side=0},caller_ep={.side=1};
     V90LapmLink link;v90_lapm_link_init(&link,49333,&answer,source,answer_sink);
     v42_state_t caller;assert(v42_init(&caller,true,true,source,caller_sink,&caller_ep));

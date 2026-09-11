@@ -6,15 +6,24 @@ static int validated_xid(const uint8_t *frame, int len)
         return 0;
     while (position < (unsigned) len)
     {
-        if ((unsigned) len - position < 3)
-            return 0;
-        unsigned group = frame[position];
-        unsigned length = ((unsigned) frame[position + 1] << 8) | frame[position + 2];
-        position += 3;
+        unsigned group = frame[position++];
+        unsigned length;
+        if (group == GI_USER_DATA)
+        {
+            length = (unsigned) len - position;
+        }
+        else
+        {
+            if ((unsigned) len - position < 2)
+                return 0;
+            length = ((unsigned) frame[position] << 8) | frame[position + 1];
+            position += 2;
+        }
         if (length > (unsigned) len - position)
             return 0;
         unsigned end = position + length;
-        if (group == GI_PARAM_NEGOTIATION || group == GI_PRIVATE_NEGOTIATION)
+        if (group == GI_PARAM_NEGOTIATION || group == GI_PRIVATE_NEGOTIATION
+            || group == GI_USER_DATA)
         {
             while (position < end)
             {

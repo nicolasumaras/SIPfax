@@ -37,4 +37,11 @@ int v90_equalizer_adapt(V90Equalizer *s,double target_re,double target_im,double
  * Feed both samples through symbol(), consuming only symbol-time outputs.
  * Those outputs start at symbol zero after seven symbols of lookahead. */
 int v90_equalizer_train_half(V90Equalizer *,const double *,const double *,const double *,const double *);
+/* Explicit B1 length: symbols must be 120 (3000 baud) or 128 (3200 baud).
+ * stride=1 requires 7/15 taps; stride=2 requires 29 taps and midpoint/symbol
+ * ordering. Observations contain symbols*stride values, targets symbols.
+ * The 80-symbol fit and held-out validation preserve the legacy 128 behavior.
+ * Unsupported lengths/modes reject before reading arrays; state is unchanged. */
+int v90_equalizer_train_symbols(V90Equalizer *,const double *,const double *,
+    const double *,const double *,unsigned symbols,unsigned stride);
 #endif

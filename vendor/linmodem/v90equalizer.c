@@ -17,20 +17,20 @@ static int bounded(double x)
 {
     return isfinite(x) && fabs(x)<1e6;
 }
-static int train(V90Equalizer *s,const double *re,const double *im,
-                       const double *tr,const double *ti,unsigned stride)
+int v90_equalizer_train_symbols(V90Equalizer *s,const double *re,const double *im,
+                       const double *tr,const double *ti,unsigned symbols,unsigned stride)
 {
-    if(!s||!re||!im||!tr||!ti)return 0;
+    if(!s||!re||!im||!tr||!ti || (symbols!=120 && symbols!=128) || (stride!=1 && stride!=2))return 0;
     unsigned taps=s->taps;
     if((stride==1 && taps!=V90_EQ_TAPS && taps!=V90_EQ_LONG_TAPS) ||
        (stride==2 && taps!=V90_EQ_HALF_TAPS))return 0;
     unsigned center=(taps-1)/2,delay=center/stride;
     double complex x[256],y[128],a[V90_EQ_MAX_TAPS][V90_EQ_MAX_TAPS+1]={{0}};
-    for(unsigned n=0;n<128*stride;++n) {
+    for(unsigned n=0;n<symbols*stride;++n) {
         if(!bounded(re[n])||!bounded(im[n]))return 0;
         x[n]=re[n]+I*im[n];
     }
-    for(unsigned n=0;n<128;++n) {
+    for(unsigned n=0;n<symbols;++n) {
         if(!bounded(tr[n])||!bounded(ti[n]))return 0;
         y[n]=tr[n]+I*ti[n];
     }
@@ -61,7 +61,7 @@ static int train(V90Equalizer *s,const double *re,const double *im,
     }
     double norm=0,before=0,after=0;
     for(unsigned j=0;j<taps;++j)norm+=creal(a[j][taps]*conj(a[j][taps]));
-    for(unsigned n=delay+80;n<128-delay;++n) {
+    for(unsigned n=delay+80;n<symbols-delay;++n) {
         double complex z=0;
         for(unsigned j=0;j<taps;++j)z+=a[j][taps]*x[stride*n+stride-1+j-center];
         double complex e=z-y[n],b=x[stride*n+stride-1]-y[n];
@@ -75,12 +75,12 @@ static int train(V90Equalizer *s,const double *re,const double *im,
 int v90_equalizer_train(V90Equalizer *s,const double *re,const double *im,
                         const double *tr,const double *ti)
 {
-    return train(s,re,im,tr,ti,1);
+    return v90_equalizer_train_symbols(s,re,im,tr,ti,128,1);
 }
 int v90_equalizer_train_half(V90Equalizer *s,const double *re,const double *im,
                              const double *tr,const double *ti)
 {
-    return train(s,re,im,tr,ti,2);
+    return v90_equalizer_train_symbols(s,re,im,tr,ti,128,2);
 }
 int v90_equalizer_symbol(V90Equalizer *s,double re,double im,double *orr,double *oi)
 {

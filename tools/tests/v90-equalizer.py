@@ -7,6 +7,7 @@ import tempfile
 import sys
 import numpy as np
 taps=15 if "--long" in sys.argv else 7
+symbols=120 if "--120" in sys.argv else 128
 delay=(taps-1)//2
 root=Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory() as td:
@@ -24,6 +25,7 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90equalizer.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p;lib.destroy.argtypes=[C.c_void_p]
     array=np.ctypeslib.ndpointer(dtype=np.float64,flags='C_CONTIGUOUS')
+    lib.v90_equalizer_train_symbols.argtypes=[C.c_void_p,array,array,array,array,C.c_uint,C.c_uint]
     lib.v90_equalizer_train.argtypes=[C.c_void_p,array,array,array,array]
     lib.v90_equalizer_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double,C.POINTER(C.c_double),C.POINTER(C.c_double)]
     lib.v90_equalizer_adapt.argtypes=[C.c_void_p,C.c_double,C.c_double,C.c_double]
@@ -32,7 +34,12 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     lib.same.argtypes=[C.c_void_p,C.c_void_p]
     lib.count.argtypes=[C.c_void_p];lib.count.restype=C.c_ulonglong
     def train(s,x,y):
-        return lib.v90_equalizer_train(s,*[np.ascontiguousarray(z) for z in [x.real,x.imag,y.real,y.imag]])
+        arrays=[np.ascontiguousarray(z) for z in [x.real,x.imag,y.real,y.imag]]
+        if symbols==120:return lib.v90_equalizer_train_symbols(s,*arrays,symbols,1)
+        clone=lib.clone(s);old=lib.v90_equalizer_train(s,*arrays)
+        new=lib.v90_equalizer_train_symbols(clone,*arrays,128,1)
+        assert old==new and lib.same(s,clone)
+        lib.destroy(clone);return old
     def run(s,x):
         values=[]
         for v in x:
@@ -59,17 +66,17 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     lib.destroy(s)
     for channel in [np.array([.13-.08j,1,-.12-.04j]),np.array([.06+.07j,-.13j,1,.1-.05j,-.04j])]:
         noisy=np.convolve(desired,channel,'same')+rng.normal(0,.015,len(desired))+1j*rng.normal(0,.015,len(desired))
-        s=lib.create();assert train(s,noisy[:128],desired[:128])
+        s=lib.create();assert train(s,noisy[:symbols],desired[:symbols])
         corrected=run(s,noisy)
-        before=np.mean(abs(noisy[128:-delay]-desired[128:-delay])**2)
-        after=np.mean(abs(corrected[128:]-desired[128:-delay])**2)
+        before=np.mean(abs(noisy[symbols:-delay]-desired[symbols:-delay])**2)
+        after=np.mean(abs(corrected[symbols:]-desired[symbols:-delay])**2)
         assert after<.05*before,(before,after)
-        nearest=np.argmin(abs(corrected[128:,None]-points[None,:]),axis=1)
-        assert np.array_equal(points[nearest],desired[128:-delay])
+        nearest=np.argmin(abs(corrected[symbols:,None]-points[None,:]),axis=1)
+        assert np.array_equal(points[nearest],desired[symbols:-delay])
         # Reject a fit that sees correct training but contradictory held-out data.
         # The rejection must preserve coefficients AND streaming history.
-        count=lib.count(s);bad=desired[:128].copy();bad[80+delay:]*=-1
-        assert not train(s,noisy[:128],bad) and lib.count(s)==count
+        count=lib.count(s);bad=desired[:symbols].copy();bad[80+delay:]*=-1
+        assert not train(s,noisy[:symbols],bad) and lib.count(s)==count
         lib.destroy(s)
     # A changing complex channel: train once, then adapt only confident
     # nearest-point decisions. Unseen late symbols must improve over fixed FIR.
@@ -77,7 +84,7 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     varying=desired+(.13-.08j+.12*variation)*np.roll(desired,1)+(-.12-.04j-.08*variation)*np.roll(desired,-1)
     results=[]
     for adaptive in [False,True]:
-        s=lib.create();assert train(s,varying[:128],desired[:128]);output=[]
+        s=lib.create();assert train(s,varying[:symbols],desired[:symbols]);output=[]
         for z in varying:
             r=C.c_double();i=C.c_double()
             if lib.v90_equalizer_symbol(s,z.real,z.imag,C.byref(r),C.byref(i)):
@@ -95,10 +102,10 @@ unsigned long long count(V90Equalizer*s){return s->samples;}
     assert results[1]<.1*results[0],results
     print('PASS: guarded normalized LMS tracks a changing channel; invalid updates preserve state')
     s=lib.create();zeros=np.zeros(128,dtype=complex)
-    assert not train(s,zeros,desired[:128])
-    assert not train(s,desired[:128],desired[:128])
+    assert not train(s,zeros,desired[:symbols])
+    assert not train(s,desired[:symbols],desired[:symbols])
     for bad in [float('nan'),float('inf'),1e100]:
-        broken=desired[:128].copy();broken[40]=bad
-        assert not train(s,broken,desired[:128])
+        broken=desired[:symbols].copy();broken[40]=bad
+        assert not train(s,broken,desired[:symbols])
     assert np.array_equal(run(s,desired),desired[:-delay]);lib.destroy(s)
 print('PASS: held-out complex FIR training, unseen distorted symbol recovery, delay, identity and rejection state preservation')

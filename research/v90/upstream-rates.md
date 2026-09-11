@@ -29,7 +29,9 @@ The new module is linked into the native build but is not yet connected to the s
 
 The profile-based B1 generator now emits 120 labels at 3000 symbols/s and 128 at 3200. It maintains GPA scrambling across low/high frames, omits inserted bits from the scrambler input count, resets differential and 16-state trellis encoders, and applies inversion as the last J=7 data frame. A profile-based inversion helper covers subsequent data and counter wraparound. Independent tests compare every B1 label against a separate GPA recurrence, legacy shell mapper and geometric subset-conversion table for all 23 profiles. Bounds/rejection checks pass with ASan/UBSan on CT105; the native build passes. Streaming acquisition still uses the original 128-symbol path.
 
-Next: parameterize streaming B1 acquisition/equalizer training and symbol/carrier timing, then connect the new mapping module and per-call symbol-rate selection. This module alone is not 3000-symbol/s reception or hardware qualification.
+Equalizer training now accepts explicit 120/128-symbol B1 lengths for all three supported filter sizes (7/15 baud-spaced taps and 29 half-symbol taps). It still fits 80 interior symbols and validates the remaining interior observations. The existing entry points delegate to length 128 without changing their algorithm. Unsupported lengths/strides reject before input-array access. Tests verify independent distorted-channel recovery at both lengths, wrapper equivalence at 128, held-out rejection, and exact-length input allocations under CT105 ASan/UBSan. The 28.8 kbit/s seed-98017 PCMU/ISI/clock/timing matrix passes in direct and delayed-E modes. No runtime deployment followed this change.
+
+Next: parameterize streaming B1 acquisition and symbol/carrier timing, then connect the new mapping module and per-call symbol-rate selection. This module alone is not 3000-symbol/s reception or hardware qualification.
 
 ## Historical development record
 

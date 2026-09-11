@@ -39,6 +39,21 @@ jobs:
           for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-rate-selection v90-reneg-training v90-shell v90-mapping v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
+      - name: Test 3000-symbol PCM profiles
+        run: |
+          set -e
+          for rate in 4800 7200 9600 12000 14400 16800 19200 21600 24000 26400 28800; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --low-carrier
+          done
+          for rate in 26400 28800; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --long-clock --isi --random-payloads --timing-sweep --seed 98017
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --long-clock --isi --random-payloads --timing-sweep --seed 98017 --low-carrier
+          done
+      - name: Sanitize PCM profile initialization
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-upstream-profile-sanitize.c vendor/linmodem/v90upstream.c vendor/linmodem/v90qam8.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c -lm -o /tmp/v90-upstream-profile-sanitize
+          /tmp/v90-upstream-profile-sanitize
       - name: Test upstream clock recovery
         run: |
           /usr/bin/python3 tools/tests/v90_shell_reference.py

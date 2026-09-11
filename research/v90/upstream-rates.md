@@ -37,7 +37,13 @@ The symbol-stream receiver now accepts explicit 3000/3200 profiles. B1 replay, c
 
 Independent symbol-stream tests cover all 23 profiles through B1/data transitions and data-frame switching, with ideal/impaired carrier and baud/half-symbol inputs. They compare exact bits, frame lengths and source-symbol positions. The complete 29-test native suite and 28.8 seed-98017 PCM/timing matrix pass. The carrier-fit fixture was updated to initialize the new length field and now checks both lengths. CT105 ASan/UBSan covers all 3000 profiles with history wrap, reacquisition, both sampling modes and generic-trellis size rejection. The native build passes. No production deployment or 3000 hardware qualification follows these symbol-level results.
 
-Next: parameterize PCM symbol/carrier timing and frame delivery, then carry per-call symbol-rate selection through negotiation. Live 3000-symbol/s PCM reception remains disabled. This module alone is not 3000-symbol/s reception or hardware qualification.
+The explicit PCM initializer now accepts the profile's symbol rate and high/low carrier. The matched filter uses its symbol spacing, acquisition lanes span that spacing, Gardner updates use fractional quarter-sample intervals, and half-symbol observations use the selected midpoint distance. Frame delivery consumes the current low/high-frame bit count. Invalid explicit profiles leave the receiver unchanged; legacy initialization still selects 3200/high carrier.
+
+All 22 basic 3000-symbol/s PCM profiles (4800–28800, both 1800/2000 Hz carriers) pass four timing offsets with independent G.711 mu-law quantization and exact PPP frame comparison. A long 26400/2000 Hz seed-98017 case initially lost frame 41. Reducing initial timing phase gain from 0.1 to 0.05 only for 26400/3000 closes it; default and seeds 43127, 62091 and 98017 now pass all eight phase/±100 ppm cases on both carriers with ISI, mu-law and 192 expected frames. The 28800/3000 seed-98017 matrices pass on both carriers. These are direct PCM tests; the delayed-E/Phase4 path still selects 3200 and is explicitly outside their scope.
+
+All 29 native tests, the legacy 28800/3200 seed-98017 direct/delayed-E matrix, native build and CT105 profile-initialization/PCM ASan/UBSan checks pass. CI adds the basic profiles, targeted stress regressions and memory checks. Production is unchanged.
+
+Next: propagate symbol rate/carrier through Phase 3 training, Phase 4 and E resets, then INFO1a/INFO1d negotiation. The training receiver still assumes 3200/1920 and startup accepts only INFO1a upstream code 4. No live 3000-symbol/s capability is advertised yet. This module alone is not 3000-symbol/s reception or hardware qualification.
 
 ## Historical development record
 

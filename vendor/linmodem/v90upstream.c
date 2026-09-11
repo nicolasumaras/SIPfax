@@ -1,4 +1,4 @@
-/* Experimental V.34 upstream receiver for V.90: 4800..31200 bit/s at 3200 symbols/s.
+/* Experimental V.34 upstream receiver for V.90: 4800..31200 bit/s at 3200, 4800..28800 at 3000 symbols/s.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
@@ -22,12 +22,19 @@ void v90_upstream_init(V90Upstream *s)
 }
 void v90_upstream_init_rate(V90Upstream *s,unsigned rate)
 {
+    v90_upstream_init_profile(s,rate>=4800 && rate<=31200 && rate%2400==0?rate:4800,3200,1);
+}
+int v90_upstream_init_profile(V90Upstream *s,unsigned rate,unsigned symbol_rate,unsigned high_carrier)
+{
+    V90Mapping mapping;
+    if(!s || high_carrier>1 || !v90_mapping_init(&mapping,rate,symbol_rate))return 0;
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
-    s->rate=rate>=4800 && rate<=31200 && rate%2400==0?rate:4800;
-    if(s->rate!=4800)for(unsigned i=0;i<V90_UP_PHASES;++i) {
+    s->rate=rate;s->symbol_rate=symbol_rate;s->symbol_period=32000.0/symbol_rate;
+    s->carrier=high_carrier?mapping.high_carrier:mapping.low_carrier;
+    if(s->rate!=4800 || s->symbol_rate==3000)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
-        l->next_symbol=i;
-        v90_qam_stream_init_rate(&l->stream,s->rate);
+        l->next_symbol=i*s->symbol_period/V90_UP_PHASES;
+        v90_qam_stream_init_profile(&l->stream,s->rate,s->symbol_rate);
         l->stream.opaque=l;l->stream.receive_bits=qam_bits;
     }
     /* V.34 10.1.3.1: one frame of scrambled ones, zero encoder state,
@@ -49,7 +56,7 @@ void v90_upstream_init_rate(V90Upstream *s,unsigned rate)
         v90_trellis_stream_init(&l->stream);
         l->stream.opaque=l;l->stream.receive_pair=soft_pair;
     }
-    double beta=.1,sps=2.5;
+    double beta=.1,sps=8000.0/s->symbol_rate;
     for(int fraction=0;fraction<4;++fraction)for(int k=0;k<V90_UP_TAPS;++k) {
         double *taps=s->taps[fraction];
         double t=(k-(V90_UP_TAPS-1)/2-fraction*.25)/sps;
@@ -59,6 +66,7 @@ void v90_upstream_init_rate(V90Upstream *s,unsigned rate)
         else taps[k]=(sin(M_PI*t*(1-beta))+4*beta*t*cos(M_PI*t*(1+beta)))/(M_PI*t*(1-16*beta*beta*t*t));
     }
     for(int i=0;i<V90_UP_PHASES;++i)for(int j=0;j<2;++j)s->lanes[i][j].crc=0xffff;
+    return 1;
 }
 static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 {
@@ -115,7 +123,7 @@ static void qam_bits(void *opaque,const uint8_t *bits)
     }
     if(!bits)return;
     l->lane.source_sample=(long)(l->symbol_time[l->stream.output_symbol%256]/4);
-    for(unsigned i=0;i<l->stream.b1.k+12+8*l->stream.b1.q;++i)bit(l->up,&l->lane,bits[i]);
+    for(unsigned i=0;i<l->stream.frame_bits;++i)bit(l->up,&l->lane,bits[i]);
 }
 static unsigned delta(double ar,double ai,double br,double bi)
 {
@@ -158,7 +166,7 @@ static void filtered_at(V90Upstream *s,double time,double *re,double *im)
 }
 static void symbol(V90Upstream *s,long time,double re,double im)
 {
-    if(s->rate!=4800) {
+    if(s->rate!=4800 || s->symbol_rate==3000) {
         s->filtered_re[time%32]=re;s->filtered_im[time%32]=im;
         for(unsigned phase=0;phase<V90_UP_PHASES;++phase) {
             V90UpQamLane *l=&s->qam[phase];V90Qam8Stream *q=&l->stream;
@@ -167,12 +175,12 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             l->symbol_time[q->symbols%256]=l->next_symbol;
             /* Half-symbol FIR input: the earlier midpoint is available in
              * the same quarter-sample matched-filter history as this symbol. */
-            if(s->rate>=26400 && l->next_symbol>=5) {
-                filtered_at(s,l->next_symbol-5,&q->mid_re,&q->mid_im);q->have_mid=1;
+            if(s->rate>=26400 && l->next_symbol>=s->symbol_period/2) {
+                filtered_at(s,l->next_symbol-s->symbol_period/2,&q->mid_re,&q->mid_im);q->have_mid=1;
             }
             int locked=v90_qam8_stream_symbol(q,ar,ai);
             double error=0;
-            if(locked==1 && l->have_timing_previous && l->next_symbol>=5) {
+            if(locked==1 && l->have_timing_previous && l->next_symbol>=s->symbol_period/2) {
                 double mr,mi;filtered_at(s,(l->next_symbol+l->previous_time)/2,&mr,&mi);
                 double energy=ar*ar+ai*ai+l->previous_re*l->previous_re+
                     l->previous_im*l->previous_im+2*(mr*mr+mi*mi);
@@ -192,10 +200,10 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             l->previous_time=l->next_symbol;
             /* Narrow the phase correction with the tracking integrator so
              * steady-state timing noise does not dominate the denser QAM. */
-            /* Dense 28.8/31.2 kbit/s startup needs less Gardner phase jitter;
+            /* Dense 28.8/31.2 kbit/s and 26.4/3000 startup need less Gardner phase jitter;
              * retain the existing frequency integrator and steady-state gain. */
-            double phase_gain=s->rate>=19200 && q->symbols-q->origin>=9600?.02:s->rate==31200?.02:s->rate==28800?.05:.1;
-            l->next_symbol+=10+l->timing_frequency+phase_gain*error;
+            double phase_gain=s->rate>=19200 && q->symbols-q->origin>=9600?.02:s->rate==31200?.02:(s->rate==28800 || (s->symbol_rate==3000 && s->rate==26400))?.05:.1;
+            l->next_symbol+=s->symbol_period+l->timing_frequency+phase_gain*error;
             l->previous_re=ar;l->previous_im=ai;l->have_timing_previous=locked>=0;
             if(locked==1 && !s->b1_seen) {
                 s->b1_seen=1;s->b1_sample=s->samples;s->b1_score=q->score;
@@ -224,7 +232,7 @@ static void symbol(V90Upstream *s,long time,double re,double im)
 }
 void v90_upstream_receive(V90Upstream *s,int16_t input)
 {
-    double phase=2*M_PI*1920*s->samples/8000.0;
+    double phase=2*M_PI*s->carrier*s->samples/8000.0;
     s->re[s->position]=input*cos(phase);s->im[s->position]=-input*sin(phase);
     /* Evaluate the matched filter at quarter-sample instants. Averaging
        adjacent outputs attenuates/distorts the wideband baseband signal. */

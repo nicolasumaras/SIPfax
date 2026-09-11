@@ -12,9 +12,13 @@ import tempfile
 import numpy as np
 root=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser(add_help=False)
+parser.add_argument('--symbol-rate',type=int,choices=[3000,3200],default=3200)
+parser.add_argument('--low-carrier',action='store_true')
 parser.add_argument('--seed',type=int,default=None)
 parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
+baud=options.symbol_rate
+if options.low_carrier and baud!=3000:parser.error("low-carrier test currently requires --symbol-rate 3000")
 failures=[]
 def verify_frames(received, fraction, ppm, mode):
     if received==expected:return
@@ -28,12 +32,20 @@ converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
  [13,13,12,12,5,5,4,4],[14,15,15,14,6,7,7,6]]
-rate=31200 if "--31200" in sys.argv else 28800 if "--28800" in sys.argv else 26400 if "--26400" in sys.argv else 24000 if '--24000' in sys.argv else 21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
-k,m={7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10),24000:(24,8),26400:(30,14),28800:(28,12),31200:(26,10)}[rate]
+rate=4800 if "--4800" in sys.argv else 31200 if "--31200" in sys.argv else 28800 if "--28800" in sys.argv else 26400 if "--26400" in sys.argv else 24000 if '--24000' in sys.argv else 21600 if '--21600' in sys.argv else 19200 if '--19200' in sys.argv else 16800 if '--16800' in sys.argv else 14400 if '--14400' in sys.argv else 12000 if '--12000' in sys.argv else 9600 if '--9600' in sys.argv else 7200
+k,m={4800:(0,1),7200:(6,2),9600:(12,3),12000:(18,5),14400:(24,8),16800:(30,14),19200:(28,12),21600:(26,10),24000:(24,8),26400:(30,14),28800:(28,12),31200:(26,10)}[rate]
 q_bits=5 if rate==31200 else 4 if rate==28800 else 3 if rate>=24000 else 2 if rate==21600 else 1 if rate==19200 else 0
+if baud==3000:
+    if rate>28800:parser.error('3000 symbols/s supports at most 28800 bit/s')
+    k,m,q_bits={4800:(1,2,0),7200:(8,2,0),9600:(14,4,0),12000:(20,6,0),14400:(27,11,0),16800:(25,9,1),19200:(24,8,2),21600:(30,14,2),24000:(28,12,3),26400:(27,11,4),28800:(25,9,5)}[rate]
+mapping_period=15 if baud==3000 else 16
+carrier_hz=(1800 if options.low_carrier else 2000) if baud==3000 else 1920
+sps=8000/baud
 frame_bits=k+12+8*q_bits
+high_count=rate//25-(frame_bits-1)*mapping_period
+schedule=[frame_bits-1+int((i+1)*high_count//mapping_period!=i*high_count//mapping_period) for i in range(mapping_period)]
 from v90_shell_reference import ShellReference
-if rate>=14400:rings=ShellReference(m)
+if m>=5:rings=ShellReference(m)
 else:
     rings=sorted(itertools.product(range(m),repeat=8),key=lambda r:
      (sum(r),sum(r[:4]),sum(r[4:6]),r[6],r[4],sum(r[:2]),r[2],r[0]))[:1<<k]
@@ -54,11 +66,14 @@ clock_drift='--clock-drift' in sys.argv or '--long-clock' in sys.argv
 if clock_drift:
     repetitions=64 if '--long-clock' in sys.argv else 8
     wire*=repetitions;expected*=repetitions
-plain=[1]*(16*frame_bits)+[1]*180
+plain=[1]*(rate//25)+[1]*180
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 # Flush the rate-dependent trellis lookahead with real idle symbols.
 plain.extend([1]*(20*frame_bits))
-plain.extend([1]*((-len(plain))%frame_bits))
+frame_sizes=[];total=0
+while total<len(plain):
+    size=schedule[len(frame_sizes)%mapping_period];frame_sizes.append(size);total+=size
+plain.extend([1]*(total-len(plain)))
 # GPA encoder, continuous from reset B1 into data.
 register=0;bits=[]
 for b in plain:
@@ -70,12 +85,15 @@ state=previous=0;symbols=[];pattern=[int(x) for x in '01110111111110']
 def subset(z):
     x=((int(z.real)+3)//2)&3;y=((int(z.imag)+3)//2)&3
     return ((x^y)&1)|((x&1)<<1)|((((x>>1)^(y>>1)^x^y)&1)<<2)
-for f in range(len(bits)//frame_bits):
-    v=bits[frame_bits*f:frame_bits*f+frame_bits];shell=rings[sum(v[i]<<i for i in range(k))]
+cursor=0
+for f,size in enumerate(frame_sizes):
+    v=bits[cursor:cursor+size];cursor+=size;frame_k=k-int(size<frame_bits)
+    shell=rings[sum(v[i]<<i for i in range(frame_k))]
     for p in range(4):
-        pair=4*f+p+384
-        inv=pattern[(pair//32)%14] if pair%32==0 else 0
-        g=k+(3+2*q_bits)*p
+        pair=4*f+p+24*mapping_period
+        half=2*mapping_period
+        inv=pattern[(pair//half)%14] if pair%half==0 else 0
+        g=frame_k+(3+2*q_bits)*p
         a=(previous+v[g+1]+2*v[g+2])%4
         b=(a+2*v[g]+((state&1)^inv))%4;previous=a
         qa=sum(v[g+3+j]<<j for j in range(q_bits));qb=sum(v[g+3+q_bits+j]<<j for j in range(q_bits))
@@ -131,6 +149,8 @@ void phase4_run(V90Phase4*s,const int16_t*x,unsigned n) {
 unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
 
 ''')
+    if baud==3000:
+        w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,3000,%d))abort();'%(rate,not options.low_carrier)))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
         *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)
@@ -143,11 +163,11 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
     rng=np.random.default_rng(9072 if options.seed is None else options.seed)
     cases=[(f,p) for f in [0,.25,.5,.75] for p in [-100,100]] if "--timing-sweep" in sys.argv else [( .25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]
     for fraction,ppm in cases:
-        base=np.zeros(int(len(symbols)*2.5)+250,dtype=complex)
+        base=np.zeros(int(len(symbols)*sps)+250,dtype=complex)
         for i,z in enumerate(symbols):
-            center=100+fraction+2.5*i*(1+ppm/1e6)
-            for n in range(math.ceil(center-40),math.floor(center+40)+1):base[n]+=z*pulse((n-center)/2.5)
-        samples=np.arange(len(base));carrier=np.exp(1j*(.61+2*np.pi*1920.3*samples/8000))
+            center=100+fraction+sps*i*(1+ppm/1e6)
+            for n in range(math.ceil(center-40),math.floor(center+40)+1):base[n]+=z*pulse((n-center)/sps)
+        samples=np.arange(len(base));carrier=np.exp(1j*(.61+2*np.pi*(carrier_hz+.3)*samples/8000))
         wave=np.rint((400 if rate==31200 else 500 if rate==28800 else 650 if rate==26400 else 900 if rate>=16800 else 1800)*(base*carrier).real+rng.normal(0,1,len(base)))
         assert np.max(abs(wave))<32768,'synthetic PCM clipping'
         pcm=wave.astype(np.int16)
@@ -164,6 +184,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             assert lib.acquired(s)
             verify_frames(received,fraction,ppm,'direct')
         finally:lib.destroy(s)
+        if baud==3000:continue # Phase4 still selects 3200; direct PCM qualification only.
         received.clear();s=lib.phase4_create(cb)
         try:
             lib.phase4_run(s,pcm,len(pcm))
@@ -174,4 +195,4 @@ if failures:
     import json
     print('FAIL: '+json.dumps(failures),file=sys.stderr)
     sys.exit(1)
-print('PASS: PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+print('PASS: PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' bit/s at '+str(baud)+' symbols/s PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

@@ -47,7 +47,8 @@ typedef struct V90Upstream {
     V90UpLane lanes[V90_UP_PHASES][2];
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];
-    unsigned rate;
+    unsigned rate,symbol_rate;
+    double carrier,symbol_period;
     V90UpQamLane qam[V90_UP_PHASES];
     double filtered_re[32],filtered_im[32];
     /* Known 4800/3200 B1, observed independently of data acquisition. */
@@ -63,5 +64,8 @@ unsigned v90_upstream_configured_rate(void);
 void v90_upstream_init(V90Upstream *s);
 /* Explicit per-call rate; invalid values use the default 4800 profile. */
 void v90_upstream_init_rate(V90Upstream *s,unsigned rate);
+/* Explicit PCM profile; high_carrier is 0 or 1. Invalid profiles return 0
+ * without changing state. No environment/negotiation selection is implied. */
+int v90_upstream_init_profile(V90Upstream *,unsigned rate,unsigned symbol_rate,unsigned high_carrier);
 void v90_upstream_receive(V90Upstream *s,int16_t sample);
 #endif

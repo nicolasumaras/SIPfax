@@ -545,3 +545,8 @@ The capture had 137535 packets, zero kernel drops and no RTP sequence gaps. All 
 After the reversible trial restored `117ae76`, `5151eb5` was deployed with upstream 26400 and automatic echo acquisition. Service activity, binary hash, configuration and FreePBX availability were verified. Rollback retains `117ae76` as `lm.pre-auto-5151eb5` and its fixed-mode configuration in `/tmp/v90-upstream-before-auto-5151eb5.conf`.
 
 Remaining work includes higher upstream rates and symbol-rate coverage, error-rate reduction and broader reliability tests, ongoing echo-delay tracking, V.34 fallback and future concurrent calls. Additional synthetic-seed losses remain unresolved. The V.90 goal is still active and PR29 remains draft.
+
+
+### Expanded seeded regression matrix
+
+[Receiver regression investigation](receiver-regressions.md) records the full timing matrices: seed 43127 loses a frame at two phases; seed 62091 loses frames in all eight tested phase/clock combinations, identically for direct reception and delayed-E replay. The waveform test now supports `--keep-going` to report every mismatch while returning failure. Simple timing/carrier/equalizer gain experiments were rejected or remain insufficient; no receiver change was deployed.

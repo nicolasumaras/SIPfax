@@ -13,7 +13,17 @@ import numpy as np
 root=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser(add_help=False)
 parser.add_argument('--seed',type=int,default=None)
+parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
+failures=[]
+def verify_frames(received, fraction, ppm, mode):
+    if received==expected:return
+    result={'phase':fraction,'ppm':ppm,'mode':mode,'frames':len(received),
+            'expected':len(expected),'first_mismatch':next((i for i,(a,b) in
+            enumerate(zip(received,expected)) if a!=b),None)}
+    if not options.keep_going:raise AssertionError(result)
+    failures.append(result)
+
 converter=[[0,0,1,1,8,8,9,9],[3,2,2,3,11,10,10,11],
  [5,5,4,4,13,13,12,12],[6,7,7,6,14,15,15,14],
  [8,8,9,9,0,0,1,1],[11,10,10,11,3,2,2,3],
@@ -151,12 +161,16 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             for start in range(0,len(pcm),137):
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
             assert lib.acquired(s)
-            assert received==expected,(fraction,ppm,len(received),len(expected),next((i for i,(a,b) in enumerate(zip(received,expected)) if a!=b),None))
+            verify_frames(received,fraction,ppm,'direct')
         finally:lib.destroy(s)
         received.clear();s=lib.phase4_create(cb)
         try:
             lib.phase4_run(s,pcm,len(pcm))
             assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
-            assert received==expected, 'Pre-E replay changed PPP data'
+            verify_frames(received,fraction,ppm,'delayed-E')
         finally:lib.destroy(s)
+if failures:
+    import json
+    print('FAIL: '+json.dumps(failures),file=sys.stderr)
+    sys.exit(1)
 print('PASS: PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

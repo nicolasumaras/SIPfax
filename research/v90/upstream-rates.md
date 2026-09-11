@@ -749,3 +749,15 @@ Native `9be7827` attempt `78e72b18-d771-4bec-b901-2b8d6df7fe39` selected 3200/hi
 After the reversible trial restored `efc00dc`, the tested `9be7827` binary was installed permanently. Its hash, active service, normal symbol negotiation and 28800/49334 ceilings were verified, and its source archive/build manifest were retained with matching hashes on CT105. Rollback files are `/opt/sipfax/vendor/linmodem/lm.pre-9be7827` and `/tmp/v90-upstream-before-9be7827.conf`. All capture/fixture processes are terminal.
 
 The B1 audit now separately reports `initial_lcp_seen`, avoiding confusion between raw FCS coincidences and recognizable startup traffic. Recorded control and failure checks returned 20/true and 0/false respectively. This change hardens recovery; it does not resolve 3000/28800 decoding. The adaptation lead remains incomplete, and the low-carrier trial did not solve it.
+
+### Replay-origin and echo checks (2026-09-11)
+
+The deployed `9be7827` service and installed binary hash were reverified before these offline tests. No server configuration or decoder change was made.
+
+Repeating the 15–32-second replay with start offsets 0–7 samples shows that the step-0.02 adaptation lead is not robust. The original failed 3000 recording yields two structurally consistent LCP Configure-Requests at offsets 0, 2, 3, 4, 6 and 7, but none at offsets 1 and 5. The newer failed recording yields none at any offset. Both passing controls preserve their 17/20 frame counts and four initial LCP packets at every offset for baseline and step-0.02. This sensitivity is further reason not to deploy the adaptation change.
+
+Replacing only the trellis input pairs during known B1 with their exact reference points leaves all six baseline counts unchanged (20, 0, 17, 0, 0, 17). Combining it with step-0.02 still recovers only the two requests in the older failure. This experiment does not support training-state corruption as a sufficient explanation.
+
+Causal echo replay at NLMS steps 0, 0.0005, 0.001, 0.002 and 0.005 never recovers initial LCP in either failed recording. Disabling adaptation also loses both passing controls; the deployed 0.0005 and 0.001 recover 17/20 frames; 0.002 yields 15/0 and 0.005 yields 0/0. Using a transmit reference quantized through the same PCMU encode/decode mapping preserves the 17/20 control counts at 0.0005 and 0.001 but still recovers neither failure. Faster echo convergence or this reference substitution alone therefore has no demonstrated repair benefit. Aggregate results are retained in `receiver-experiments-2026-09-11.json`; private audio and decoded payloads are excluded.
+
+Next hardware experiment: the existing INFO1d implementation always requests flat transmit pre-emphasis. V.90 section 6.4 and Table 9 provide for analogue transmit pre-emphasis selected by the digital modem; V.34 section 5.4 Tables 3/4 define indices 0–10. Unlike receiver-only gain changes, this changes the caller's transmitted spectrum. A bounded, reversible 3000-symbol/s test with a supported nonzero index can establish whether transmit spectral shaping helps this path. No such setting has yet been applied or qualified.

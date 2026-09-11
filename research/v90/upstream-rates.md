@@ -87,6 +87,15 @@ After the wrapper restored the prior baseline, `aa1ac2f` was permanently install
 
 The live service and installed hash were rechecked after the clean disconnect. All fixture/capture processes are terminal. Rollback files: `/opt/sipfax/vendor/linmodem/lm.pre-28800-aa1ac2f` and `/tmp/v90-upstream-before-28800-aa1ac2f.conf`. Higher-rate receiver diagnosis, wider interoperability, downstream maximum-rate qualification, fallback and future concurrency remain unfinished.
 
+
+### Downstream ceiling trials on deployed aa1ac2f (2026-09-11)
+
+A reversible `SIPFAX_V90_MAX_BPS=56000` trial, attempt `be9d1376-8bda-41fe-90a1-ba32d123805a`, negotiated CP 54.667 kbit/s initially and 56 kbit/s after the upstream startup downshift from 28800 to 26400 at 3200 symbols/s. PPP and the internet probe succeeded. The first 32 KiB download then timed out at 29996 ms with 21601 body bytes and nine reported CRC errors. Native logs show downstream rate renegotiation to 53.333 kbit/s during the stall. This failed the short transfer gate; it is not a qualified 56 kbit/s connection. The 16150-packet capture had zero capture drops/gaps, 4009 matching downstream primary payloads and 4011 matching upstream payloads. No TCP capture was taken for this short trial, so a specific TCP-loss mechanism is not established.
+
+A second trial capped at `53334`, attempt `f49bf5ae-3c09-44ab-ab01-1b1b96ff6469`, selected CP 53.333 kbit/s both before and after one upstream downshift to 26400 at 3200 symbols/s. Internet access and all 18 transfer hashes passed over 36.112 seconds with zero modem errors. The download took 6962 ms; median upload time was 1381 ms. The 16302-packet capture had zero drops/gaps, 4045 matching downstream payloads and 4058-to-4047 matching upstream payloads after the eleven-packet startup suffix.
+
+Both calls disconnected cleanly; their temporary override was removed and the active service returned to the qualified 49334 ceiling. Raw RX/TX and RTP captures are retained privately; all trial/fixture/capture processes are terminal. Next is sustained qualification at 53.333 kbit/s. The 56 kbit/s stall remains recorded as a failure.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

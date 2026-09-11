@@ -1412,11 +1412,11 @@ static int v42_support_negotiation_tx_bit(v42_state_t *s)
     }
     else
     {
-        if (s->neg.odp_seen  &&  s->neg.txadps < 10)
+        if (s->neg.odp_seen  &&  s->neg.txadps <= 10)
         {
             if (s->neg.txbits <= 0)
             {
-                if (++s->neg.txadps >= 10)
+                if (s->neg.txadps >= 10)
                 {
                     t400_stop(s);
                     s->lapm.state = LAPM_IDLE;
@@ -1426,6 +1426,7 @@ static int v42_support_negotiation_tx_bit(v42_state_t *s)
                 }
                 else
                 {
+                    s->neg.txadps++;
                     s->neg.txstream = 0x3FE8A;
                     s->neg.txbits = 36;
                 }

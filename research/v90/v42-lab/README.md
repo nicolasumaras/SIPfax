@@ -18,6 +18,13 @@ The sender also checks whether *any* timer is running before starting T401. An a
 
 ASan/UBSan exposed a signed left shift of the detection register while it held -1. Only the ten-bit received character is inspected, so the correction masks to nine previous bits before shifting in the new bit. This preserves the used detector history without undefined signed arithmetic.
 
+The answerer increments its ADP counter before testing for completion, so it
+enters LAPM after transmitting nine 36-bit patterns even though the counter
+reads ten. The correction starts each pattern before incrementing and exits
+only after all ten patterns, for 360 transmitted detection bits. A direct
+wire-count assertion covers this boundary. The full corrected transfer matrix
+retains the results below.
+
 Primary references: [pinned response helper](https://github.com/freeswitch/spandsp/blob/8f1e1646bdec99eac5fd2cd92c35563f736b9b89/src/v42.c#L653), [ITU-T V.42 (03/2002)](https://www.itu.int/rec/T-REC-V.42).
 
 ## Coverage and actual outcome

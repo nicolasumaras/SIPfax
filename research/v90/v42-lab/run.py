@@ -57,6 +57,20 @@ def main():
         patched = patched.replace(old, old+'\n    buf += 4;', 1)
     pre_negotiation = patched
     patched = patch_negotiation(patched)
+    adp_count = 'if (++s->neg.txadps >= 10)'
+    if patched.count(adp_count) != 1:
+        ap.error('Expected answerer ADP counter was not found')
+    patched = patched.replace(adp_count, 'if (s->neg.txadps >= 10)', 1)
+    adp_start = '                else\n                {\n                    s->neg.txstream = 0x3FE8A;'
+    if patched.count(adp_start) != 1:
+        ap.error('Expected answerer ADP start was not found')
+    patched = patched.replace(adp_start,
+        '                else\n                {\n                    s->neg.txadps++;\n                    s->neg.txstream = 0x3FE8A;', 1)
+    adp_loop = 'if (s->neg.odp_seen  &&  s->neg.txadps < 10)'
+    if patched.count(adp_loop) != 1:
+        ap.error('Expected answerer ADP loop guard was not found')
+    patched = patched.replace(adp_loop,
+                              'if (s->neg.odp_seen  &&  s->neg.txadps <= 10)', 1)
     if args.emit_source:
         args.emit_source.write_text(patched)
     results = []
@@ -139,7 +153,7 @@ def main():
                 results.append(row)
                 print(variant, case, 'PASS' if run.returncode == 0 else 'INCOMPLETE', flush=True)
     report = {'source_revision': manifest['revision'],
-              'patch': 'Echo P in response F (8.4.2); replace T403 with T401 when sending an I frame (8.4.1); bound the detection shift register to ten bits; validate complete XID envelopes before dispatch; advance past serialized HDLC options.',
+              'patch': 'Echo P in response F (8.4.2); replace T403 with T401 when sending an I frame (8.4.1); bound the detection shift register to ten bits; validate complete XID envelopes before dispatch; advance past serialized HDLC options; transmit all ten answerer detection patterns before entering LAPM.',
               'scope': 'Two reference peers, 65536 exact bytes each direction; primary deadline 120 simulated seconds; long-stress diagnostic retains continuous errors up to 600 seconds; no hardware or full conformance claim.',
               'negotiation_patch': 'Map peer TX to local RX; negotiate relative to standard defaults; reply with selected values; preserve parameters through link establishment; restore preferences on modem restart.',
               'sanitizers': args.sanitizers,

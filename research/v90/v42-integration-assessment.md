@@ -96,3 +96,10 @@ bytes each way after ODP, CRC-valid XID candidate selection, and LAPM link
 establishment. The complete bridge test passes ASan/UBSan on CT105 and the full
 native modem links successfully. Hardware interoperability is still required
 before retaining this option in the service configuration.
+
+The first hardware trial detected a complete ODP on candidate 8 but received no
+XID before repeated retraining. Inspection found that the pinned answerer
+entered LAPM before emitting its tenth advertised detection pattern. The
+generator now emits all ten patterns, and a direct wire-count assertion covers
+the 360 detection bits. The corrected two-peer transfer matrix retains its
+49/50 primary deadline result; hardware retry remains required.

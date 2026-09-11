@@ -35,8 +35,27 @@ static int answer_sink(void *opaque,const uint8_t *data,int length)
     return (int)accept;
 }
 static void caller_status(void *opaque,int code){(void)opaque;(void)code;}
+static void verify_ten_adps(void)
+{
+    struct endpoint unused={0};v42_state_t caller,answerer;
+    assert(v42_init(&caller,true,true,source,caller_sink,&unused));
+    assert(v42_init(&answerer,false,true,source,caller_sink,&unused));
+    v42_set_status_callback(&caller,caller_status,&unused);
+    v42_set_status_callback(&answerer,caller_status,&unused);
+    for(unsigned i=0;i<1000 && !answerer.neg.odp_seen;i++)
+        v42_rx_bit(&answerer,v42_tx_bit(&caller));
+    assert(answerer.neg.odp_seen);
+    int detect_state=answerer.lapm.state;unsigned bits=0;
+    while(answerer.lapm.state==detect_state && bits<500){
+        v42_tx_bit(&answerer);
+        if(answerer.lapm.state==detect_state)bits++;
+    }
+    assert(bits==360 && answerer.neg.txadps==10);
+    assert(!strcmp(lapm_status_to_str(answerer.lapm.state),"LAPM_IDLE"));
+}
 int main(void)
 {
+    verify_ten_adps();
     struct endpoint answer={.side=0},caller_ep={.side=1};
     V90LapmLink link;v90_lapm_link_init(&link,49333,&answer,source,answer_sink);
     v42_state_t caller;assert(v42_init(&caller,true,true,source,caller_sink,&caller_ep));

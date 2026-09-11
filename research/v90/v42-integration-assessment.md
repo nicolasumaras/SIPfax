@@ -106,4 +106,13 @@ the 360 detection bits. The corrected two-peer transfer matrix retains its
 The runtime therefore follows the robustness guidance in V.42 Appendix III.1:
 after ODP it repeats supported ADPs until the selector observes the
 originator's CRC-valid XID, then changes the reference protocol state before
-replaying the buffered frame. Hardware retry remains required.
+replaying the buffered frame. A third hardware call transmitted the repeated
+ADP but still selected no XID before the notebook requested rate
+renegotiation. An independent inverse of the negotiated 49.333 kbit/s PCM
+mapping recovered all 1776 B1d mark bits followed by 387 consecutive,
+bit-exact E/C ADPs from the captured server audio. This rules out the logical
+ADP generator, downstream scrambler and PCM mapper for that interval. The next
+hardware build records bounded candidate metadata (transitions, flags and
+HDLC frame validity) to determine whether the notebook recognized ADP and the
+upstream receiver lost the subsequent XID. It passed the two-peer bridge under
+ASan/UBSan; the notebook was offline when that diagnostic call was attempted.

@@ -21,6 +21,14 @@ The next implementation gate is a parameterized 3000-symbol/s receiver, independ
 
 Broader reliability, fallback, echo tracking and future concurrent calls remain separate unfinished work. The successful single-call deployment does not prove full V.90 conformance.
 
+### 3000-symbol/s mapping foundation
+
+`v90mapping.c/h` now provides validated minimum-shaping profiles for all 4800–28800 bit/s rates at 3000 symbols/s, alongside the existing 4800–31200 profiles at 3200. Profiles carry carrier frequencies (including the exact fractional 3200 low carrier), P/J, b, K/M/q and high-frame count. Stateless frame indexing implements the standard switching schedule without accumulating drift. Inverse mapping removes the inserted highest shell bit on low frames, rejects a nonzero inserted bit, and leaves output buffers unchanged on invalid input. Callers must advance their frame index after erasures.
+
+The new module is linked into the native build but is not yet connected to the streaming receiver or advertised during negotiation. Independent tests use published Tables 8/10 and the legacy shell encoder to verify 7497 mapping frames across 23 profiles, including all 15/16-frame schedules, superframe transitions, large frame indices, exact bit counts, low-frame insertion and buffer/label rejection. CT105 ASan/UBSan checks pass; the clean native build passes with the CI compiler flags. The local sanitizer runtime libraries were missing, so sanitizer validation was performed in CT105's isolated temporary directory. Production was not changed.
+
+Next: parameterize B1 length, trellis/inversion framing and symbol/carrier timing, then connect the new mapping module and per-call symbol-rate selection. This module alone is not 3000-symbol/s reception or hardware qualification.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-rate-selection v90-reneg-training v90-shell v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
+          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-rate-selection v90-reneg-training v90-shell v90-mapping v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
       - name: Test upstream clock recovery
@@ -106,6 +106,8 @@ jobs:
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize
           /tmp/v90-shell-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-mapping-sanitize.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c -o /tmp/v90-mapping-sanitize
+          /tmp/v90-mapping-sanitize
       - name: Sanitize provisional feedback history
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-feedback-sanitize.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c -lm -o /tmp/v90-feedback-sanitize

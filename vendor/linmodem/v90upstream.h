@@ -38,6 +38,9 @@ typedef struct {
 typedef struct V90Upstream {
     double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];
     unsigned position,frames;
+    /* A well-formed, uncompressed LCP Configure packet proves PPP startup.
+     * An arbitrary FCS match must not disable initial recovery. */
+    unsigned lcp_seen;
     long samples,last_frame_sample;
     unsigned last_length;
     uint8_t last_frame[V90_UP_FRAME];

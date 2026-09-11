@@ -68,6 +68,21 @@ int v90_upstream_init_profile(V90Upstream *s,unsigned rate,unsigned symbol_rate,
     for(int i=0;i<V90_UP_PHASES;++i)for(int j=0;j<2;++j)s->lanes[i][j].crc=0xffff;
     return 1;
 }
+/* RFC 1661 sections 5 and 6.6: initial Configure packets have an
+ * uncompressed ff03/c021 header. Length excludes FCS and permits padding.
+ * Keep forwarding other FCS-valid frames to pppd for protocol handling. */
+static int startup_lcp(const uint8_t *p,unsigned n)
+{
+    if(n<10 || p[0]!=0xff || p[1]!=3 || p[2]!=0xc0 || p[3]!=0x21 || p[4]<1 || p[4]>4)return 0;
+    unsigned length=((unsigned)p[6]<<8)|p[7];
+    if(length<4 || length>n-6)return 0;
+    unsigned end=4+length;
+    for(unsigned at=8;at<end;){
+        if(end-at<2 || p[at+1]<2 || p[at+1]>end-at)return 0;
+        at+=p[at+1];
+    }
+    return 1;
+}
 static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 {
     if(value==0x7e) {
@@ -82,6 +97,7 @@ static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
                 memcpy(s->recent[i].frame,l->frame,l->length);
                 s->recent_next=(i+1)%V90_UP_RECENT;
                 if(s->recent_count<V90_UP_RECENT)++s->recent_count;
+                if(startup_lcp(l->frame,l->length))s->lcp_seen=1;
                 ++s->frames;s->last_frame_sample=s->samples;s->last_length=l->length;
                 memcpy(s->last_frame,l->frame,l->length);
                 fprintf(stderr,"[v90data] CRC-valid PPP frame %u bytes at %.6fs\n",l->length,s->samples/8000.0);

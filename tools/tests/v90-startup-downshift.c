@@ -47,7 +47,7 @@ int main(void)
         case 4:s->phase4.rx_e_logged=0;break;
         case 5:s->phase4.cp.silence=1;break;
         case 6:s->phase4.upstream.b1_seen=0;break;
-        case 7:s->phase4.upstream.frames=1;break;
+        case 7:s->phase4.upstream.lcp_seen=1;break;
         case 8:s->phase4.upstream.samples=s->phase4.upstream.b1_sample-1;break;
         }
         int16_t in=0,out=0;v90_startup_process(s,&out,&in,1);assert(!s->retrains);
@@ -61,9 +61,15 @@ int main(void)
     s->phase4.upstream.samples=48000;
     int16_t in=0,out=0;v90_startup_process(s,&out,&in,1);
     assert(!s->retrains && s->upstream_rate_limit==28800);
-    s->phase4.upstream.frames=1;v90_startup_process(s,&out,&in,1);
+    s->phase4.upstream.lcp_seen=1;v90_startup_process(s,&out,&in,1);
     assert(s->have_upstream_data);
     s->phase4.upstream.samples=160000;v90_startup_process(s,&out,&in,1);
     assert(!s->retrains && s->upstream_rate_limit==28800);++cases;
+    /* Random FCS matches and non-LCP traffic do not prove link startup. */
+    prepare(s,28800,3000,160,1);s->phase4.upstream.frames=1;
+    v90_startup_process(s,&out,&in,1);
+    assert(s->retrains==1 && !s->have_upstream_data && s->upstream_rate_limit==26400);++cases;
+    prepare(s,28800,3000,160,1);s->phase4.upstream.frames=1;
+    begin_retrain(s,"FCS-only preservation");assert(!s->have_upstream_data);++cases;
     free(s);printf("PASS: %u startup downshift deadline/profile/floor/guard cases\n",cases);return 0;
 }

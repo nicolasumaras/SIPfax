@@ -182,7 +182,7 @@ static void begin_retrain(V90Startup *s, const char *reason)
     long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
     unsigned maximum=s->upstream_max_rate,large=s->peer_large_constellations;
     unsigned carriers=s->peer_carriers,forced=s->forced_symbol_rate;
-    unsigned limit=s->upstream_rate_limit,data=s->have_upstream_data || (s->phase4_active && s->phase4.upstream.frames);
+    unsigned limit=s->upstream_rate_limit,data=s->have_upstream_data || (s->phase4_active && s->phase4.upstream.lcp_seen);
     v90_startup_init(s,law);
     s->upstream_max_rate=maximum;s->peer_large_constellations=large;
     s->peer_carriers=carriers;s->forced_symbol_rate=forced;s->upstream_rate_limit=limit;s->have_upstream_data=data;select_upstream_rate(s);
@@ -275,12 +275,12 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
         receive_tone(s, in[i]);
         /* Local startup recovery: a plausible B1 alone does not establish
            a usable data channel. Give the caller 10s + 2 RTDs to send its
-           first CRC-valid PPP frame, then retry one rate step lower.
+           first well-formed LCP Configure packet, then retry one rate step lower.
            Successful XP calls deliver their first frame about 5.9s after E;
            a five-second guard would interrupt those normal starts. The
-           ceiling survives retrains; no downshift below 4800 or after data
-           has ever arrived on this call. This is not a V.90 timing rule. */
-        if(s->phase4_active && s->phase4.upstream.frames)s->have_upstream_data=1;
+           ceiling survives retrains; no downshift below 4800 or after LCP
+           startup has been recognized on this call. This is not a V.90 timing rule. */
+        if(s->phase4_active && s->phase4.upstream.lcp_seen)s->have_upstream_data=1;
         if(s->phase4_active && s->phase4.stage==4 && !s->have_upstream_data &&
            !s->phase4.renegotiations && s->phase4.rx_e_logged &&
            !s->phase4.cp.silence && s->phase4.upstream.b1_seen && s->upstream_data_rate>4800) {

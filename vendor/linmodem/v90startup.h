@@ -23,6 +23,7 @@ typedef struct {
     long probe_start, info1_start, probe_reply, round_trip, info1_received_at;
     unsigned char info1d[109];
     unsigned upstream_max_rate,upstream_data_rate,peer_large_constellations;
+    unsigned peer_carriers,forced_symbol_rate,upstream_symbol_rate,upstream_high_carrier;
     V90Training training;
     int training_active,training_tx_active;
     V90TrainTx training_tx;

@@ -18,7 +18,6 @@ parser.add_argument('--seed',type=int,default=None)
 parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
 baud=options.symbol_rate
-if options.low_carrier and baud!=3000:parser.error("low-carrier test currently requires --symbol-rate 3000")
 failures=[]
 def verify_frames(received, fraction, ppm, mode):
     if received==expected:return
@@ -39,7 +38,7 @@ if baud==3000:
     if rate>28800:parser.error('3000 symbols/s supports at most 28800 bit/s')
     k,m,q_bits={4800:(1,2,0),7200:(8,2,0),9600:(14,4,0),12000:(20,6,0),14400:(27,11,0),16800:(25,9,1),19200:(24,8,2),21600:(30,14,2),24000:(28,12,3),26400:(27,11,4),28800:(25,9,5)}[rate]
 mapping_period=15 if baud==3000 else 16
-carrier_hz=(1800 if options.low_carrier else 2000) if baud==3000 else 1920
+carrier_hz=(1800 if options.low_carrier else 2000) if baud==3000 else (12800/7 if options.low_carrier else 1920)
 sps=8000/baud
 frame_bits=k+12+8*q_bits
 high_count=rate//25-(frame_bits-1)*mapping_period
@@ -149,8 +148,8 @@ void phase4_run(V90Phase4*s,const int16_t*x,unsigned n) {
 unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
 
 ''')
-    if baud==3000:
-        w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,3000,%d))abort();'%(rate,not options.low_carrier)).replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,%d,3000,%d))abort();'%(rate,not options.low_carrier)))
+    if baud==3000 or options.low_carrier:
+        w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,%d,%d))abort();'%(rate,baud,not options.low_carrier)).replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,%d,%d,%d))abort();'%(rate,baud,not options.low_carrier)))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
         *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)

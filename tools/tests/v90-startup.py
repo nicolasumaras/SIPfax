@@ -124,6 +124,7 @@ void destroy(void *s) { free(s); }
     for law in [0,1]:
         b=(C.c_ubyte*62)();lib.v90_info0d(b,law);b=list(b)
         assert b[:12]==[1]*4+[0,1,1,1,0,0,1,0]
+        assert b[40]==0
         assert b[39]==law and b[42:58]==crc(b[12:42]) and b[58:]==[1]*4
         s=lib.create(law); out=np.zeros(1600,dtype=np.int16);sil=out.copy()
         lib.v90_startup_process(s,out,sil,len(out));lib.destroy(s)

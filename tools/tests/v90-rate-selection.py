@@ -66,7 +66,8 @@ unsigned explicit_rate(unsigned rate){V90Upstream*s=malloc(sizeof(*s));v90_upstr
                         bits=(C.c_ubyte*109)();lib.info(s,bits);bits=list(bits)
                         assert bits[89:105]==crc(bits[12:89])
                         assert bits[61]==1 and sum(bits[66+k]<<k for k in range(4))==expected//2400
-                        assert not any(bits[25:61]) and not any(bits[70:79])
+                        assert not any(bits[25:52]) and not any(bits[70:79])
+                        assert sum(bits[57+k]<<k for k in range(4))==(min(expected,28800)//2400 if not damaged else 0)
                         lib.phase4(s);assert lib.receiver(s)==expected
                         mp=(C.c_ubyte*102)();lib.mp(s,mp);mp=list(mp)
                         assert sum(mp[24+k]<<k for k in range(4))==expected//2400

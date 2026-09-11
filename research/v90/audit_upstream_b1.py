@@ -43,6 +43,7 @@ void run(V90Upstream*s,const short*x,unsigned n){for(unsigned i=0;i<n;++i)v90_up
 unsigned reference(V90Upstream*s,uint16_t*v){return v90_mapping_b1(&s->qam[0].stream.mapping,v,128);}
 unsigned get(unsigned lane,uint16_t*v,double*r,double*i){memcpy(v,labels[lane],sizeof(labels[lane]));memcpy(r,re[lane],sizeof(re[lane]));memcpy(i,im[lane],sizeof(im[lane]));return nc[lane];}
 unsigned frame_count(void){return frames;}
+unsigned lcp_seen(void){return live->lcp_seen;}
 long first_frame_sample(void){return first_frame;}
 long b1_sample(void){return live->b1_sample;}
 void destroy(void*s){free(s);}
@@ -70,5 +71,5 @@ void destroy(void*s){free(s);}
    residual=abs(X@coef-target)**2
    models[name]={'fit_mse':float(np.mean(residual[fit])),'heldout_mse':float(np.mean(residual[test]))}
   rows.append({'bit_error_counts':[int(np.count_nonzero(((np.asarray(lab)[:n]^np.asarray(ref)[:n])>>bit)&1)) for bit in range(11)],'models':models,'lane':lane,'wrong_b1_labels':wrong,'wrong_interior':sum(7<=p<n-7 for p in wrong),'mse_fit':float(np.mean(error[7:87])),'mse_heldout':float(np.mean(error[87:n-7]))})
- result={'rate':rate,'baud':baud,'replayed_seconds':[args.start,args.end],'crc_frames':lib.frame_count(),'b1_symbols':n,'first_frame_sample':lib.first_frame_sample(),'b1_sample':lib.b1_sample(),'lanes':rows}
+ result={'rate':rate,'baud':baud,'replayed_seconds':[args.start,args.end],'crc_frames':lib.frame_count(),'initial_lcp_seen':bool(lib.lcp_seen()),'b1_symbols':n,'first_frame_sample':lib.first_frame_sample(),'b1_sample':lib.b1_sample(),'lanes':rows}
  args.output.write_text(json.dumps(result,indent=2));print(json.dumps(result));lib.destroy(s)

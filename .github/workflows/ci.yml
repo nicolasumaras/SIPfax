@@ -92,7 +92,7 @@ jobs:
           /tmp/v90-upstream-profile-sanitize
       - name: Sanitize LAPM candidate selection
         run: |
-          echo '9ce7722543d8dd3b5d792a93b8f8e777333426965e5e352fbb67aaa4317f4df9  vendor/spandsp-v42/src/v42.c' | sha256sum -c -
+          echo '0439610baf6b2f0e3aa0539d489bad2f92414c1887cc00915a6057f495cc5526  vendor/spandsp-v42/src/v42.c' | sha256sum -c -
           gcc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-maybe-uninitialized -fsanitize=address,undefined -fno-omit-frame-pointer -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v90-lapm-select.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/v42.c vendor/spandsp-v42/src/hdlc.c vendor/spandsp-v42/src/crc.c vendor/spandsp-v42/src/bit_operations.c vendor/spandsp-v42/src/logging.c vendor/spandsp-v42/src/alloc.c vendor/spandsp-v42/src/async.c -o /tmp/v90-lapm-select-sanitize
           /tmp/v90-lapm-select-sanitize
       - name: Sanitize LAPM runtime bridge

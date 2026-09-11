@@ -834,6 +834,12 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
         }
     } else {
         if(s->lapm_requested && s->lapm.initialized)v90_lapm_link_drain(&s->lapm);
+        /* LAPM carries PPP as framed DTE octets, so the raw asynchronous PPP
+           decoder is intentionally disconnected. A live LAPM link is the
+           equivalent startup evidence for suppressing the initial-data
+           recovery timer. */
+        if(s->lapm_requested && s->lapm.initialized && s->lapm.connected)
+            s->startup.have_upstream_data=1;
         if(!s->startup.phase4_active || s->startup.phase4.stage!=4 || !s->startup.phase4.rx_e_logged)
             v90_echo_pause(&s->echo);
         else if(v90_echo_due(&s->echo,s->startup.samples))

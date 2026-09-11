@@ -16,13 +16,27 @@ The first supported baseline follows the LKMA-168 decision:
 
 ## Experimental V.90 backend
 
-The native C backend in `vendor/linmodem` has established V.90 calls with
-48 kbit/s downstream, 4.8 kbit/s upstream and authenticated PPP internet access
-using a Windows XP hardware modem through a Cisco ATA187 and FreePBX.
-Rate renegotiation and full retraining have restored traffic within an existing
-PPP session. Longer-term reliability remains under development: earlier soak
-tests encountered a one-way failure. See the [live development record](research/v90-live-status.md)
-for evidence and remaining work; these results do not imply full V.90 conformance.
+The native C backend in `vendor/linmodem` answers Windows XP hardware modems
+through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
+The retained CT105 baseline has passed a sustained call at 49.333 kbit/s downstream
+and 28.8 kbit/s upstream, with 129 verified transfer hashes without request retries.
+Residual modem errors occurred; this is qualification on one tested path.
+
+The development receiver implements 3000-symbol/s upstream profiles from 4.8 to
+28.8 kbit/s and 3200-symbol/s profiles through 31.2 kbit/s. Startup follows the
+caller’s carrier capabilities and preserves the selected profile through training,
+E replay and rate renegotiation. Live 3000-symbol/s calls at 7.2 and 26.4 kbit/s
+passed short transfer tests. The 3000/28.8 and 3200/31.2 profiles have failed live
+PPP startup despite passing synthetic tests; maximum rates are not guaranteed.
+
+Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no valid
+PPP frame arrives within five seconds plus two round-trip delays. It preserves the
+reduced ceiling through retraining, stops at 4.8 kbit/s, and does not apply after
+valid data has arrived on the call. One hardware call successfully recovered from
+3000/28.8 to 3000/26.4 on the same call. Sustained recovery qualification is pending.
+See [receiver qualification](research/v90/upstream-rates.md) and the
+[live development record](research/v90-live-status.md) for evidence and remaining
+work. These results do not imply full V.90 conformance or concurrent-call support.
 
 The native backend passively monitors PPP echo traffic. After a matching reply
 has demonstrated peer support, repeated unanswered requests can trigger one
@@ -47,26 +61,36 @@ The launcher uses the built `vendor/linmodem/lm` alongside the repository;
 it does not enable private audio capture. The normal SIPfax PPP configuration,
 G.711 codec negotiation and per-call backend lifecycle still apply.
 
-Current hardware experiments use these service environment settings:
+Hardware qualification uses these service environment settings:
 
 | Variable | Default | Current test setting |
 | --- | --- | --- |
-| `SIPFAX_V90_MAX_BPS` | `56000` | `48000` downstream ceiling |
+| `SIPFAX_V90_MAX_BPS` | `56000` | `49334` downstream ceiling |
 | `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
-| `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `255` rate-renegotiation training interval |
+| `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |
+| `SIPFAX_V90_UPSTREAM_RATE` | `4800` | `28800` initial upstream ceiling |
+| `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | `3000` for the current recovery trial; `3200` can also restrict offers |
+| `SIPFAX_V90_LINE_ECHO` | off | `auto` initial echo-delay acquisition |
+| `SIPFAX_V90_SOFT_RX` | `0` | `1` soft-decision 4.8 kbit/s path |
+| `SIPFAX_RTP_PLAYOUT_MS` | `0` | `60` |
+| `SIPFAX_PPP_UPSTREAM_TCP_MSS` | disabled | `536` |
 
 The initial training setting accepts 255–2000 ms, rounded down to a complete
 six-sample frame; invalid values use the default. The independent renegotiation
 setting accepts 0–2000 ms with the same rounding; it defaults to 255 ms.
-Longer renegotiation training is an unverified interoperability experiment. Service environment changes require a restart
+The symbol-rate restriction accepts `3000` or `3200`; other values allow both
+implemented rates. Offers still respect the caller’s carrier capabilities. Automatic
+echo mode acquires an initial delay; continuous delay tracking remains unfinished.
+Service environment changes require a restart
 when no call is active. A stored `modem.command` takes precedence over its
 environment seed. The native code retains its GPL-2.0 licensing.
 
-`SIPFAX_V90_SOFT_RX=1` opts into the experimental streaming soft-decision
-upstream decoder. The default remains hard decoding. Both paths reset at the
-existing rate-renegotiation boundaries. Recorded replay matches the default
-receiver, but live reliability and natural-error correction gains are unverified;
-adaptive symbol timing is still unfinished.
+`SIPFAX_V90_SOFT_RX=1` selects soft decisions for the legacy 4.8 kbit/s,
+3200-symbol/s path. The other implemented profiles use the streaming trellis/shell
+receiver, with B1 acquisition, carrier/equalizer fitting and adaptive symbol timing.
+Profile and waveform regressions include fractional timing, clock drift, mu-law,
+interference and delayed-E replay. Hardware qualification remains narrower than
+synthetic profile coverage.
 
 For the experimental 4.8 kbit/s upstream, `SIPFAX_PPP_UPSTREAM_TCP_MSS=536`
 optionally limits TCP segment-size advertisements sent to IPv4 PPP clients.

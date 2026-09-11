@@ -4,9 +4,9 @@ Goal: actual V.90 answering service and PPP internet, initially one notebook, fu
 
 ## Current deployment
 
-CT105's retained baseline is native `9be7827`, with a 28.8 kbit/s upstream ceiling, both supported symbol rates and automatic initial echo-delay acquisition. Authenticated PPP internet and bidirectional hash-verified transfers work on the XP notebook / ATA187 path. See [current receiver qualification](v90/upstream-rates.md) for source/binary provenance and current test outcomes.
+CT105 now runs native `8aa8c5e`, with causal ODP training, index-2 pre-emphasis for 3000 symbols/s, a 28.8 kbit/s upstream ceiling, both symbol rates and automatic initial echo acquisition. Authenticated PPP internet and bidirectional hash-verified transfers work on the XP notebook / ATA187 path. See [current receiver qualification](v90/upstream-rates.md) for provenance and current outcomes.
 
-The opt-in ODP receiver with configurable index-2 pre-emphasis is under qualification. The 48-frame prediction candidate (`8aa8c5e`) passed two consecutive short 3000/28800 calls at 49.333 kbit/s downstream with no startup fallback, 18 hashes per call and zero reported modem errors. The candidate also passed 129 sustained hashes over 629.806 seconds, with eight CRC errors, no alignment errors and 35 downstream TCP retransmitted segments. Earlier sustained testing on the shorter predictor had 19 CRC/two alignment errors and 66 retransmitted segments. These results do not establish sustained reliability or full conformance.
+The retained build passed three consecutive 3000/28800 startups and sustained 129-check calls at both 3000/28800 and 3200/28800, at 49.333 kbit/s downstream. The sustained calls had eight and thirteen CRC errors respectively, no alignment errors and no application retries. CI passed; `9be7827` remains available for rollback. Residual downstream errors, broader interoperability and full conformance remain unqualified.
 
 The remainder is chronological history. Statements such as “not implemented”, “internet unproven”, and older deployment identifiers describe the dated stage in which they were recorded, not current capability.
 

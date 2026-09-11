@@ -18,20 +18,17 @@ The first supported baseline follows the LKMA-168 decision:
 
 The native C backend in `vendor/linmodem` answers Windows XP hardware modems
 through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
-CT105 retains the verified `9be7827` baseline while later receiver changes are
-qualified. This hardware path has passed sustained PPP transfers at 49.333 kbit/s
-downstream and 26.4/28.8 kbit/s upstream on earlier profiles.
+CT105 runs verified native `8aa8c5e`, with causal ODP training, index-2
+pre-emphasis for 3000 symbols/s and normal symbol-rate negotiation. The previous
+`9be7827` binary/configuration is retained for rollback.
 
-The development receiver implements 3000-symbol/s upstream profiles from 4.8 to
-28.8 kbit/s and 3200-symbol/s profiles through 31.2 kbit/s. Startup follows the
-caller's carrier capabilities and preserves the selected profile through training,
-E replay and rate renegotiation. Causal ODP-assisted training with index-2
-pre-emphasis started 3000/28.8 without fallback in two trials, but a later repeat
-needed recovery to 26.4. The sustained hardware trial
-passed all 129 transfer checks on one connection, but recorded 19 CRC/two alignment
-errors and 66 retransmitted TCP segments over 672.717 seconds. The initial short
-trial was error-free; sustained quality still needs improvement. The optional
-3200/31.2 profile remains unqualified. Maximum rates are not guaranteed.
+The receiver implements 3000-symbol/s upstream profiles from 4.8 to 28.8 kbit/s
+and 3200-symbol/s profiles through 31.2 kbit/s. Three consecutive 3000/28.8 calls
+started without fallback. Sustained calls at both 3000/28.8 and 3200/28.8 passed
+all 129 transfer checks at 49.333 kbit/s downstream, without application retries.
+They recorded eight and thirteen CRC errors respectively, with no alignment
+errors. Sustained quality remains under development; the optional 31.2 kbit/s
+profile and maximum downstream rates remain unqualified.
 
 Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no valid
 LCP Configure packet arrives within ten seconds plus two round-trip delays. It preserves the
@@ -75,8 +72,8 @@ Hardware qualification uses these service environment settings:
 | `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |
 | `SIPFAX_V90_UPSTREAM_RATE` | `4800` | `28800` initial upstream ceiling |
 | `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | unset in deployment; `3000` or `3200` restricts qualification offers |
-| `SIPFAX_V90_PREEMPHASIS_3000` | `0` (flat) | `2` in the successful 3000/28800 trial |
-| `SIPFAX_V90_ODP_TRAINING` | off | `1` enables experimental detection-pattern equalizer training |
+| `SIPFAX_V90_PREEMPHASIS_3000` | `0` (flat) | `2` in deployment |
+| `SIPFAX_V90_ODP_TRAINING` | off | `1` in deployment; enables detection-pattern equalizer training |
 | `SIPFAX_V90_LINE_ECHO` | off | `auto` initial echo-delay acquisition |
 | `SIPFAX_V90_SOFT_RX` | `0` | `1` soft-decision 4.8 kbit/s path |
 | `SIPFAX_RTP_PLAYOUT_MS` | `0` | `60` |

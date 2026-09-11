@@ -65,7 +65,7 @@ int run(int law,unsigned offset,unsigned sr,unsigned ld){
 }
 ''')
     so=Path(tmp)/'test.so'
-    sources=['v90training.c','v90pcm.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c']
+    sources=['v90training.c','v90pcm.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c']
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(wrapper),*[str(root/'vendor/linmodem'/s) for s in sources],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.run.argtypes=[C.c_int,C.c_uint,C.c_uint,C.c_uint]
     for law in [0,1]:

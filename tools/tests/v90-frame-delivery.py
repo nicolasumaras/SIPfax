@@ -24,7 +24,7 @@ void gate(V90Upstream*s,int seen){s->require_b1=1;s->b1_seen=seen;}
 unsigned count(V90Upstream*s){return s->frames;}
 void destroy(void*s){free(s);}
 ''')
-    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90equalizer.c'),str(root/'vendor/linmodem/v90shell.c'),'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90equalizer.c'),str(root/'vendor/linmodem/v90shell.c'),str(root/'vendor/linmodem/v90mapping.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     lib.feed.argtypes=[C.c_void_p,C.c_long,C.c_long,C.c_char_p,C.c_uint];lib.count.argtypes=[C.c_void_p];lib.destroy.argtypes=[C.c_void_p]
     s=lib.create()

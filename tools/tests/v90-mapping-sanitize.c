@@ -1,8 +1,10 @@
 /* Bounds and transactional rejection for initialized mapping profiles. */
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 #include "v90mapping.h"
+#include "v90qam8.h"
 int main(void)
 {
     V90Mapping s,before;
@@ -34,6 +36,17 @@ int main(void)
             assert(v90_mapping_inversion(&s,0)==1);
             assert(v90_mapping_inversion(&s,2*s.p)==0);
             assert(v90_mapping_inversion(&s,UINT64_MAX)<=1);
+            V90Qam8B1 detector;assert(v90_qam_b1_init_profile(&detector,rate,baud));
+            assert(detector.length==8*s.p);
+            double gain=-1,phase=-1,score=-1;
+            for(unsigned j=0;j<1000;++j)
+                assert(!v90_qam8_b1_symbol(&detector,0,0,&gain,&phase,&score));
+            assert(gain==-1 && phase==-1 && score==-1);
+            assert(!v90_qam8_b1_symbol(&detector,NAN,0,&gain,&phase,&score));
+            assert(detector.count==0 && detector.position==0);
+            assert(!v90_qam_b1_init_profile(&detector,rate,2999));
+            assert(detector.length==0 && detector.m==0);
+            assert(!v90_qam8_b1_symbol(&detector,1,1,&gain,&phase,&score));
             assert(v90_mapping_frame_bits(&s,UINT64_MAX)>0);
         }
     assert(!v90_mapping_init(NULL,4800,3000));

@@ -66,7 +66,7 @@ int run(const int16_t *pcm,unsigned n,const uint8_t *bits,unsigned nb,int valid)
  return seen==3 && silent>=800 && rt==408 && s.stage==4?0:5;
 }
 ''')
-    sources=['v90training.c','v90pcm.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c']
+    sources=['v90training.c','v90pcm.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c']
     subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/s) for s in sources],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.run.argtypes=[np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint,C.c_char_p,C.c_uint,C.c_int]
     fixture=(root/'test/fixtures/v90-cpt-6417.bits').read_bytes()

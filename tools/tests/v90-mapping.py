@@ -23,16 +23,24 @@ with tempfile.TemporaryDirectory() as td:
  d=Path(td);w=d/'w.c';so=d/'mapping.so'
  w.write_text('''#include <stdlib.h>
 #include "v90mapping.h"
+#include "v90qam8.h"
 void *create(unsigned rate,unsigned baud){V90Mapping*s=malloc(sizeof(*s));if(!s)return NULL;if(!v90_mapping_init(s,rate,baud)){free(s);return NULL;}return s;}
 void destroy(void*s){free(s);}
+void *detector(unsigned rate,unsigned baud){V90Qam8B1*s=malloc(sizeof(*s));if(!s)return NULL;if(!v90_qam_b1_init_profile(s,rate,baud)){free(s);return NULL;}return s;}
+unsigned detector_length(V90Qam8B1*s){return s->length;}
+unsigned detector_count(V90Qam8B1*s){return s->count;}
+
 void params(V90Mapping*s,unsigned*out){out[0]=s->b;out[1]=s->k;out[2]=s->m;out[3]=s->q;out[4]=s->p;out[5]=s->j;}
 double carrier(V90Mapping*s,unsigned high){return high?s->high_carrier:s->low_carrier;}
 typedef struct {int M,g2_tab[137],g4_tab[137],z8_tab[138];} V34DSPState;
 '''+legacy+'''
 void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2])rings,index);}
 ''')
- subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(native),str(w),str(native/'v90mapping.c'),str(native/'v90shell.c'),'-o',str(so)],check=True)
+ subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(native),str(w),str(native/'v90mapping.c'),str(native/'v90shell.c'),str(native/'v90qam8.c'),str(native/'v90trellis.c'),str(native/'v90equalizer.c'),'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_uint,C.c_uint];lib.create.restype=C.c_void_p
+ lib.detector.argtypes=[C.c_uint,C.c_uint];lib.detector.restype=C.c_void_p
+ lib.detector_length.argtypes=[C.c_void_p];lib.detector_count.argtypes=[C.c_void_p]
+ lib.v90_qam8_b1_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double,C.POINTER(C.c_double),C.POINTER(C.c_double),C.POINTER(C.c_double)]
  lib.destroy.argtypes=[C.c_void_p];lib.params.argtypes=[C.c_void_p,C.POINTER(C.c_uint)]
  lib.carrier.argtypes=[C.c_void_p,C.c_uint];lib.carrier.restype=C.c_double
  lib.v90_mapping_frame_bits.argtypes=[C.c_void_p,C.c_ulonglong]
@@ -96,6 +104,29 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
     generated=(C.c_uint16*130)(*([65535]*130))
     assert lib.v90_mapping_b1(s,generated,8*p)==8*p
     assert list(generated)[:8*p]==reference and list(generated)[8*p:]==[65535]*(130-8*p)
+    detector=lib.detector(rate,baud);assert detector and lib.detector_length(detector)==8*p
+    try:
+     gain=C.c_double(-99);phase=C.c_double(-99);score=C.c_double(-99)
+     def feed(z):return lib.v90_qam8_b1_symbol(detector,z.real,z.imag,C.byref(gain),C.byref(phase),C.byref(score))
+     for _ in range(17):assert not feed(0j)
+     import cmath
+     rotation=1.7*cmath.exp(.31j)
+     for index,label in enumerate(reference):
+      z=quarter[label>>2]*(-1j)**(label&3)*rotation
+      match=feed(z)
+      assert bool(match)==(index==len(reference)-1),(baud,rate,index,match)
+     assert abs(gain.value-1.7)<1e-10 and abs(phase.value-.31)<1e-10 and abs(score.value-1)<1e-10
+     assert not feed(complex(float('nan'),0)) and lib.detector_count(detector)==0
+     assert not feed(complex(1e101,0)) and lib.detector_count(detector)==0
+     # Reset forces acquisition to wait for a complete fresh B1.
+     for index,label in enumerate(reference):
+      assert bool(feed(quarter[label>>2]*(-1j)**(label&3)))==(index==len(reference)-1)
+     assert not feed(complex(float('nan'),0))
+     for index,label in enumerate(reference):
+      z=quarter[label>>2]*(-1j)**(label&3)*rotation+complex(rng.gauss(0,.01),rng.gauss(0,.01))
+      assert bool(feed(z))==(index==len(reference)-1)
+     assert abs(gain.value-1.7)<.02 and abs(phase.value-.31)<.01 and score.value>.99
+    finally:lib.destroy(detector)
     generated[:]=[65535]*130
     assert not lib.v90_mapping_b1(s,generated,8*p-1) and list(generated)==[65535]*130
     previous=0

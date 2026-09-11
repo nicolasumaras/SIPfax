@@ -61,11 +61,15 @@ typedef struct {
     uint16_t labels[V90_QAM8_B1_SYMBOLS];
     double re[V90_QAM8_B1_SYMBOLS],im[V90_QAM8_B1_SYMBOLS];
     double reference_energy;
-    unsigned position,count,m,k,q;
+    unsigned position,count,m,k,q,length;
 } V90Qam8B1;
 void v90_qam8_b1_init(V90Qam8B1 *s);
 /* 7200/9600/12000/14400/16800/19200/21600/24000/26400/28800/31200 at 3200 symbols/s; invalid rate clears state and returns 0. */
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate);
+/* Explicit 3000/3200 profile, including 4800 bit/s. Initializes acquisition
+ * only; does not enable that profile in the streaming PCM/data receiver.
+ * Invalid profiles clear state. Observation buffers remain bounded at 128. */
+int v90_qam_b1_init_profile(V90Qam8B1 *s,unsigned rate,unsigned symbol_rate);
 /* Feed symbol-spaced matched-filter output. On a match, gain/phase describe
  * received = gain * exp(j*phase) * reference; score is normalized correlation.
  * This establishes the B1 end at this symbol, without tracking later data.

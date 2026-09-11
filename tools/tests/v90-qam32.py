@@ -51,7 +51,7 @@ unsigned long long count(V90Trellis*s){return s->pairs;}
     elif q_bits==2:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam160Frames').replace('v90_qam32_frames_init','v90_qam160_frames_init').replace('s,14400','s,21600'))
     elif q_bits:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam96Frames').replace('v90_qam32_frames_init','v90_qam96_frames_init').replace('s,14400','s,19200'))
     elif m==14:w.write_text(w.read_text().replace('V90Qam32Frames','V90Qam56Frames').replace('v90_qam32_frames_init','v90_qam56_frames_init').replace('s,14400','s,16800'))
-    subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/n) for n in ['v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.trellis.restype=lib.frames.restype=C.c_void_p;lib.frames.argtypes=[C.c_uint];lib.destroy.argtypes=[C.c_void_p]
     lib.count.argtypes=[C.c_void_p];lib.count.restype=C.c_ulonglong
     frame_fn=getattr(lib,'v90_qam%d_frame'%point_count)

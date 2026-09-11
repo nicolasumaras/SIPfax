@@ -23,7 +23,7 @@ void fit(const unsigned char *labels,const double *re,const double *im,
  b1_carrier(&s,&result[0],&result[1],&result[2]);
 }
 ''')
-    subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/f) for f in ['v90trellis.c','v90shell.c','v90equalizer.c']],'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),*[str(root/'vendor/linmodem'/f) for f in ['v90trellis.c','v90shell.c','v90mapping.c','v90equalizer.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.fit.argtypes=[C.POINTER(C.c_uint8),C.POINTER(C.c_double),C.POINTER(C.c_double),C.c_uint,C.POINTER(C.c_double)]
     def fit(labels,samples,position):
         out=(C.c_double*3)();lib.fit((C.c_uint8*128)(*labels),(C.c_double*128)(*[z.real for z in samples]),(C.c_double*128)(*[z.imag for z in samples]),position,out);return list(out)

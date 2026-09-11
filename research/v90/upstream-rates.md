@@ -711,3 +711,21 @@ Normal-negotiation attempt `f321fd02-757d-4266-99f4-bbcf99bdbd1f` selected 3200/
 Forced-3000 attempt `3daba540-1037-41a8-9c69-71abb79f728a` selected 28800 and triggered one initial PPP timeout at startup time 26.527500 seconds, reducing the ceiling to 26400. The same call established PPP and passed internet access plus all 18 hashes over 56.100 seconds. Windows counted one alignment error, zero CRC errors and zero other errors. Capture: 17148 packets, zero kernel drops or RTP sequence gaps. All 4251 forwarded downstream payloads match; the final server packet at epoch 1789104823.561761 followed the ATA BYE at 1789104823.556899 and the server-leg BYE at 1789104823.559675. Upstream 4264-to-4253 payloads match after eleven startup packets. The strict equal-length audit initially rejected the hangup tail; the SIP timing accounts for it explicitly.
 
 After both reversible trials restored the preceding binary, `efc00dc` was deployed with normal symbol negotiation and the existing 49334 downstream ceiling. This corrects premature 3200 startup recovery; it does not resolve the original 3000/28800 receiver failure or qualify full V.90 conformance. Higher rates, broader interoperability, fallback and concurrency remain unfinished.
+
+### Recorded 3000/28800 receiver diagnosis (2026-09-11)
+
+Full CI run 34565749878 passed for deployed native `efc00dc`. The active binary, normal symbol negotiation, 28800 upstream ceiling and 49334 downstream ceiling were reverified. No experimental decoder variant below was deployed.
+
+The current successful 3200 recording and failed initial 3000 training were retained privately from native processes 17962 and 18219. Causal echo cancellation acquired the same 1428-sample delay at sample 96640 for both. Replaying seconds 15–32 recovers 20 CRC-valid frames from the successful call and zero from the initial failed 3000 phase; this window excludes the later successful 26400 retrain.
+
+`audit_upstream_b1.py` now provides a reproducible diagnostic for known training labels, per-bit error counts, fit/held-out residuals and simple distortion models. It compiles a temporary instrumented receiver and reports aggregates without decoded payloads. Example with a private echo-corrected signed 16-bit little-endian 8 kHz recording:
+
+```sh
+python3 research/v90/audit_upstream_b1.py 28800 3000 corrected.s16 audit.json --start 15 --end 32
+```
+
+The old failed 3000 recording has held-out B1 MSE 0.734–0.844 across locked lanes; the latest failed recording's lane 5 has MSE 0.762 and seven wrong interior training labels. Errors include the two low label bits protected by the trellis, so a purely uncoded shell-bit explanation is insufficient. These residuals are in normalized constellation units, not an end-to-end line SNR measurement. Complex linear, conjugate-linear and radial-cubic corrections fitted on symbols 7–86 do not consistently improve the held-out symbols 87 through length-minus-eight. They do not identify a static nonlinearity repair.
+
+Private recorded experiments also tested four-point causal cubic interpolation in place of linear quarter-sample interpolation, matched-filter rolloff values 0.05/0.1/0.15/0.2/0.3/0.5, and carrier-frequency scoring with the actual 29-tap half-symbol equalizer rather than the existing 15-tap symbol equalizer. The two earlier passing controls retained 17 CRC-valid frames each in the replay window; the original failed 3000 and prematurely interrupted 3200 records remained at zero. The carrier-fit comparison additionally retained 20 frames in the new passing control and zero in the new failed initial 3000 phase. None supplies evidence for deploying a receiver change. Rejection of these specific candidates does not rule out all timing, filtering, nonlinear or carrier problems.
+
+The portable audit was rerun against the latest failed recording and reproduced the private diagnostic JSON exactly. Next receiver work should measure decision/equalizer divergence through the transition from known B1 to data, using both failed recordings and the passing controls, rather than treating CRC-only parameter sweeps as a sufficient diagnosis.

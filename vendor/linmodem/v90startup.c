@@ -63,6 +63,7 @@ static void select_upstream_rate(V90Startup *s)
     /* V.90 Table 9 note 1: rates above 12 require large-constellation support. */
     unsigned limit=s->peer_large_constellations?31200:28800;
     s->upstream_data_rate=s->upstream_max_rate<limit?s->upstream_max_rate:limit;
+    if(s->upstream_rate_limit && s->upstream_data_rate>s->upstream_rate_limit)s->upstream_data_rate=s->upstream_rate_limit;
     info1d_profiles(s->info1d,s->upstream_data_rate,s->peer_carriers,s->forced_symbol_rate);
 }
 static int select_upstream_profile(V90Startup *s)
@@ -89,6 +90,7 @@ void v90_startup_init(V90Startup *s, int alaw)
     s->tx_sign = 1;
     v90_info0d(s->info0d, alaw);
     s->upstream_max_rate=v90_upstream_configured_rate();
+    s->upstream_rate_limit=s->upstream_max_rate;
     const char *baud=getenv("SIPFAX_V90_UPSTREAM_SYMBOL_RATE");
     if(baud && (!strcmp(baud,"3000") || !strcmp(baud,"3200")))s->forced_symbol_rate=(unsigned)atoi(baud);
     s->peer_carriers=8; /* Provisional legacy offer until CRC-valid INFO0a. */
@@ -180,9 +182,10 @@ static void begin_retrain(V90Startup *s, const char *reason)
     long now=s->samples;unsigned retrains=s->retrains+1;int law=s->alaw;
     unsigned maximum=s->upstream_max_rate,large=s->peer_large_constellations;
     unsigned carriers=s->peer_carriers,forced=s->forced_symbol_rate;
+    unsigned limit=s->upstream_rate_limit,data=s->have_upstream_data || (s->phase4_active && s->phase4.upstream.frames);
     v90_startup_init(s,law);
     s->upstream_max_rate=maximum;s->peer_large_constellations=large;
-    s->peer_carriers=carriers;s->forced_symbol_rate=forced;select_upstream_rate(s);
+    s->peer_carriers=carriers;s->forced_symbol_rate=forced;s->upstream_rate_limit=limit;s->have_upstream_data=data;select_upstream_rate(s);
     s->samples=now;s->retrains=retrains;s->retrain_mute_until=now+560;
     s->info0_received=1;s->info0_at=now-1000;s->tx_symbol=63;
     fprintf(stderr,"[v90p2] %s retrain %u at %.6fs; silence70ms then Tone B\n",
@@ -270,6 +273,22 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
     for (int i = 0; i < n; ++i, ++s->samples) {
         receive(s, in[i]);
         receive_tone(s, in[i]);
+        /* Local startup recovery: a plausible B1 alone does not establish
+           a usable data channel. Give the caller 5s + 2 RTDs to send its
+           first CRC-valid PPP frame, then retry one rate step lower. The
+           ceiling survives retrains; no downshift below 4800 or after data
+           has ever arrived on this call. This is not a V.90 timing rule. */
+        if(s->phase4_active && s->phase4.upstream.frames)s->have_upstream_data=1;
+        if(s->phase4_active && s->phase4.stage==4 && !s->have_upstream_data &&
+           !s->phase4.renegotiations && s->phase4.rx_e_logged &&
+           !s->phase4.cp.silence && s->phase4.upstream.b1_seen && s->upstream_data_rate>4800) {
+            long rtd=s->round_trip>0?s->round_trip:0;
+            if(s->phase4.upstream.samples-s->phase4.upstream.b1_sample>=40000+2*rtd) {
+                s->upstream_rate_limit=s->upstream_data_rate-2400;
+                fprintf(stderr,"[v90p2] B1 without PPP; reducing upstream ceiling to %u bit/s\n",s->upstream_rate_limit);
+                begin_retrain(s,"initiate after initial PPP decode timeout;");
+            }
+        }
         /* 9.6.1: E must arrive within 5s + 2 RTDs of the Rd/Rd-bar
            transition (384 samples after Rd starts, not the end of Rd-bar).
            Test before generating the next sample so the first timeout

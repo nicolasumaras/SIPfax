@@ -52,6 +52,10 @@ jobs:
         run: |
           gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c -lm -o /tmp/v90-startup-profile-sanitize
           /tmp/v90-startup-profile-sanitize
+      - name: Sanitize startup PPP downshift
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-downshift.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c -lm -o /tmp/v90-startup-downshift
+          /tmp/v90-startup-downshift
       - name: Test 3000-symbol rate renegotiation
         run: |
           python3 tools/tests/v90-reneg-training.py --3000

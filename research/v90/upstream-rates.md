@@ -69,6 +69,13 @@ Both calls ended with a clean disconnect and restored the verified `dcb450f` pro
 
 The highest failing profiles at 3000/28800 and 3200/31200 both use q=5; this is a diagnostic lead, not proof of an encoder/decoder defect. The current startup deadline guards missing B1 only, so a detected B1 followed by zero valid PPP frames waits for the caller timeout. A bounded recovery/downshift policy and continued high-rate receiver diagnosis are next. Short-call success does not qualify sustained 3000 operation or all mandatory rates.
 
+
+### Startup recovery after B1 without PPP
+
+Startup now watches for the first CRC-valid upstream PPP frame after B1. If none arrives within five seconds plus two round-trip delays, it reduces the current upstream rate ceiling by 2400 bit/s and initiates a retrain. This is a local recovery policy, not a V.90 protocol deadline. The original configured maximum remains available for diagnostics; the lower ceiling survives later retrains and limits both symbol-rate offers. The policy never downshifts below 4800 and is disabled after valid upstream data has ever arrived on the call, during rate renegotiation, before E, or during CPs silence.
+
+This change addresses the observed high-rate calls that trained but waited until Windows error 721 without delivering data. It does not fix the high-rate decoder or prove that the notebook will complete a retrain before its PPP timeout. All 32 native tests and the build pass. CT105 ASan/UBSan passes 285 deadline/rate/floor/guard cases and the startup profile matrix. Hardware recovery qualification is pending.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

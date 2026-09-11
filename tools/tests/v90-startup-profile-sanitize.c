@@ -8,7 +8,7 @@ int main(void)
     for(unsigned mask=0;mask<16;++mask)
     for(unsigned force=0;force<3;++force)
     for(unsigned code=0;code<8;++code) {
-        v90_startup_init(s,0);s->upstream_max_rate=rate;s->peer_large_constellations=1;
+        v90_startup_init(s,0);s->upstream_max_rate=rate;s->upstream_rate_limit=rate;s->peer_large_constellations=1;
         s->peer_carriers=mask;s->forced_symbol_rate=force?2800+200*force:0;
         select_upstream_rate(s);s->upstream_rate=code;s->downstream_rate=6;
         unsigned baud=code==3?3000:3200,carriers=(mask>>(code==3?0:2))&3;

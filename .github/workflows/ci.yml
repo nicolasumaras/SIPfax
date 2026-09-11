@@ -73,6 +73,9 @@ jobs:
       - name: Test 3000-symbol PCM profiles
         run: |
           set -e
+          for baud in 3000 3200; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads
+          done
           for rate in 4800 7200 9600 12000 14400 16800 19200 21600 24000 26400 28800; do
             python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu
             python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --low-carrier

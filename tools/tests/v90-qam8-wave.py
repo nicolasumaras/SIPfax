@@ -15,6 +15,7 @@ parser=argparse.ArgumentParser(add_help=False)
 parser.add_argument('--symbol-rate',type=int,choices=[3000,3200],default=3200)
 parser.add_argument('--low-carrier',action='store_true')
 parser.add_argument('--seed',type=int,default=None)
+parser.add_argument('--odp-prefix',action='store_true',help='Precede PPP with 1.2 s of V.42 detection and 4.5 s idle')
 parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
 baud=options.symbol_rate
@@ -66,6 +67,13 @@ if clock_drift:
     repetitions=64 if '--long-clock' in sys.argv else 8
     wire*=repetitions;expected*=repetitions
 plain=[1]*(rate//25)+[1]*180
+if options.odp_prefix:
+    # Hardware controls send alternating DC1 parity with fourteen extra marks.
+    # Keep the independent mapper and scrambler continuous through both transitions.
+    for n in range(round(rate*1.2/24)):
+        value=0x11 if n%2==0 else 0x91
+        plain.extend([0]+[(value>>i)&1 for i in range(8)]+[1]*15)
+    plain.extend([1]*round(rate*4.5))
 for b in wire:plain.extend([0]+[(b>>i)&1 for i in range(8)]+[1])
 # Flush the rate-dependent trellis lookahead with real idle symbols.
 plain.extend([1]*(20*frame_bits))
@@ -135,6 +143,7 @@ void run(V90Upstream*s,const int16_t*x,unsigned n){for(unsigned i=0;i<n;++i)v90_
 void destroy(void*s){free(s);}
 unsigned rate(V90Upstream*s){return s->rate;}
 unsigned acquired(V90Upstream*s){return s->b1_seen;}
+unsigned odp(V90Upstream*s){return s->odp_seen;}
 void *phase4_create(void (*cb)(void*,const uint8_t*,unsigned)) {
  V90Phase4*s=malloc(sizeof(*s));v90_phase4_init(s,0,78);
  s->cpt.drn=9;s->cpt.sr=1;s->cpt.lookahead=1;s->cpt.count=1;s->cpt.filter[0]=63;
@@ -146,6 +155,7 @@ void phase4_run(V90Phase4*s,const int16_t*x,unsigned n) {
  for(unsigned i=0;i<n;++i){if(s->samples==140)s->rx.e_seen=1;v90_phase4_next(s,x[i]);}
 }
 unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
+unsigned phase4_odp(V90Phase4*s){return s->upstream.odp_seen;}
 
 ''')
     if baud==3000 or options.low_carrier:
@@ -157,7 +167,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
     lib.run.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint]
     lib.phase4_create.argtypes=[cbtype];lib.phase4_create.restype=C.c_void_p
     lib.phase4_run.argtypes=lib.run.argtypes
-    for name in ['rate','acquired','destroy','phase4_acquired']:getattr(lib,name).argtypes=[C.c_void_p]
+    for name in ['rate','acquired','destroy','phase4_acquired','odp','phase4_odp']:getattr(lib,name).argtypes=[C.c_void_p]
     os.environ['SIPFAX_V90_UPSTREAM_RATE']=str(rate)
     rng=np.random.default_rng(9072 if options.seed is None else options.seed)
     cases=[(f,p) for f in [0,.25,.5,.75] for p in [-100,100]] if "--timing-sweep" in sys.argv else [( .25,-100),(.25,100)] if clock_drift else [(x,0) for x in [0,.25,.5,.75]]
@@ -181,16 +191,18 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             for start in range(0,len(pcm),137):
                 chunk=pcm[start:start+137];lib.run(s,chunk,len(chunk))
             assert lib.acquired(s)
+            if options.odp_prefix:assert lib.odp(s), "ODP prefix was not recognized"
             verify_frames(received,fraction,ppm,'direct')
         finally:lib.destroy(s)
         received.clear();s=lib.phase4_create(cb)
         try:
             lib.phase4_run(s,pcm,len(pcm))
             assert lib.phase4_acquired(s), 'Delayed E reset discarded B1'
+            if options.odp_prefix:assert lib.phase4_odp(s), 'Delayed E lost ODP detection'
             verify_frames(received,fraction,ppm,'delayed-E')
         finally:lib.destroy(s)
 if failures:
     import json
     print('FAIL: '+json.dumps(failures),file=sys.stderr)
     sys.exit(1)
-print('PASS: PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' bit/s at '+str(baud)+' symbols/s PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+print('PASS: ODP prefix '+str(options.odp_prefix)+'; PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' bit/s at '+str(baud)+' symbols/s PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

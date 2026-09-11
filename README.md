@@ -18,17 +18,20 @@ The first supported baseline follows the LKMA-168 decision:
 
 The native C backend in `vendor/linmodem` answers Windows XP hardware modems
 through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
-The deployed CT105 build has passed a sustained call at 49.333 kbit/s downstream
-and 26.4 kbit/s upstream after automatic startup recovery, with 129 verified
-transfer hashes, no retries and zero reported modem errors. This is qualification
-on one tested path. The prior build also passed a sustained 28.8 kbit/s upstream call.
+CT105 retains the verified `9be7827` baseline while later receiver changes are
+qualified. This hardware path has passed sustained PPP transfers at 49.333 kbit/s
+downstream and 26.4/28.8 kbit/s upstream on earlier profiles.
 
 The development receiver implements 3000-symbol/s upstream profiles from 4.8 to
 28.8 kbit/s and 3200-symbol/s profiles through 31.2 kbit/s. Startup follows the
-caller’s carrier capabilities and preserves the selected profile through training,
-E replay and rate renegotiation. Live 3000-symbol/s calls at 7.2 and 26.4 kbit/s
-passed short transfer tests. The 3000/28.8 and 3200/31.2 profiles have failed live
-PPP startup despite passing synthetic tests; maximum rates are not guaranteed.
+caller's carrier capabilities and preserves the selected profile through training,
+E replay and rate renegotiation. Causal ODP-assisted training with index-2
+pre-emphasis started 3000/28.8 without fallback in two trials, but a later repeat
+needed recovery to 26.4. The sustained hardware trial
+passed all 129 transfer checks on one connection, but recorded 19 CRC/two alignment
+errors and 66 retransmitted TCP segments over 672.717 seconds. The initial short
+trial was error-free; sustained quality still needs improvement. The optional
+3200/31.2 profile remains unqualified. Maximum rates are not guaranteed.
 
 Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no valid
 LCP Configure packet arrives within ten seconds plus two round-trip delays. It preserves the

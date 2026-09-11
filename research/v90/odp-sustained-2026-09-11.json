@@ -1,0 +1,41 @@
+{
+  "attempt": "ae5c1f4b-f1b3-4e1b-b837-984f33f5b987",
+  "native_base": "8a4b760",
+  "private_change": "INFO1d pre-emphasis index 2 for 3000 baud",
+  "binary_sha256": "a8ee8c47bb9115a8fe7fc0fec496407d932a56f3d40343bc237dd256a3f55475",
+  "checks": 129,
+  "application_failures": 0,
+  "same_connection": true,
+  "final_status": "Disconnected",
+  "statistics": {
+    "nativeError": 0,
+    "bytesSent": 204022,
+    "bytesReceived": 2282428,
+    "framesSent": 2341,
+    "framesReceived": 2274,
+    "crcErrors": 19,
+    "timeoutErrors": 0,
+    "alignmentErrors": 2,
+    "hardwareOverruns": 0,
+    "framingErrors": 0,
+    "bufferOverruns": 0,
+    "linkBitsPerSecond": 49296,
+    "durationMilliseconds": 672717
+  },
+  "rtp_packets": 140897,
+  "tcp_packets": 4510,
+  "capture_drops": 0,
+  "sequence_gaps": 0,
+  "downstream_exact_payloads": 35077,
+  "upstream_input_payloads": 35090,
+  "upstream_forwarded_exact_suffix": 35079,
+  "tcp_flows": 129,
+  "downstream_retransmitted_segments": 66,
+  "completed_rate_renegotiations": 2,
+  "caller_requested_full_retrains": 1,
+  "retained_upstream": 28800,
+  "retained_downstream": [
+    148000,
+    3
+  ]
+}

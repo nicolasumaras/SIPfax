@@ -1,0 +1,33 @@
+{
+  "attempt": "974a5779-dc0a-4409-a2f5-72e3d96ddc7d",
+  "source": "2c19af6",
+  "preemphasis": 2,
+  "training": true,
+  "initial_upstream": 28800,
+  "recovered_upstream": 26400,
+  "checks": 18,
+  "final_status": "Disconnected",
+  "statistics": {
+    "nativeError": 0,
+    "bytesSent": 31701,
+    "bytesReceived": 43235,
+    "framesSent": 183,
+    "framesReceived": 165,
+    "crcErrors": 1,
+    "timeoutErrors": 0,
+    "alignmentErrors": 1,
+    "hardwareOverruns": 0,
+    "framingErrors": 0,
+    "bufferOverruns": 0,
+    "linkBitsPerSecond": 49296,
+    "durationMilliseconds": 55389
+  },
+  "info1d_verified": true,
+  "rtp_packets": 16980,
+  "capture_drops": 0,
+  "sequence_gaps": 0,
+  "downstream_exact": 4211,
+  "downstream_hangup_tail": 1,
+  "upstream_received": 4224,
+  "upstream_forwarded": 4213
+}

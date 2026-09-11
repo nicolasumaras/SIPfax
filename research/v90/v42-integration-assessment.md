@@ -45,3 +45,23 @@ Independent asymmetric fixtures now verify peer-TX/local-RX mapping, selected re
 - Native receive FIFO backpressure must map to LAPM local-busy behavior without dropping acknowledged DTE octets. The existing complete-PPP-frame discard path is not adequate for reliable LAPM delivery.
 
 These are code-inspected integration requirements, not implemented hooks or hardware proof.
+
+## Native synchronous-bit boundary
+
+The upstream receiver now has an optional callback for descrambled synchronous
+bits. It identifies each QAM, soft, or hard timing candidate separately and
+reports QAM erasures as candidate invalidations. Profile initialization clears
+the callback so a call owner cannot accidentally retain stale callback state.
+
+A replay fixture independently reconstructs the existing asynchronous PPP
+frames from this callback. Across nine captured startup recordings it observes
+102 native CRC-valid frames and matches all 102 exactly; eight recordings
+contain frames. Two representative recordings, including one with repeated
+candidate resets, also pass ASan/UBSan in a temporary CT105 build. Production is
+unchanged.
+
+Selecting the first candidate that recognizes the V.42 ODP sequence is rejected:
+it reaches valid LCP in only three of the nine recordings. Some early candidates
+reset before PPP begins. Native LAPM therefore needs per-candidate HDLC evidence
+and buffered replay before committing to one ordered stream. The callback must
+not merge candidates.

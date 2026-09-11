@@ -112,7 +112,7 @@ static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
     l->frame[l->length++]=value;l->crc^=value;
     for(int k=0;k<8;++k)l->crc=(l->crc>>1)^((l->crc&1)?0x8408:0);
 }
-static void bit(V90Upstream *s,V90UpLane *l,unsigned b)
+static void bit(V90Upstream *s,V90UpLane *l,unsigned candidate,unsigned b)
 {
     unsigned plain=((l->scrambler>>22)^b)&1;
     if(s->b1_seen && !s->lcp_seen && v42_detect_bit(&l->v42,plain) && !s->odp_seen){
@@ -121,6 +121,7 @@ static void bit(V90Upstream *s,V90UpLane *l,unsigned b)
     }
     l->scrambler=(l->scrambler<<1)&0x7fffff;
     if(b)l->scrambler^=1|(1<<18);
+    if(s->receive_bit)s->receive_bit(s->bit_opaque,candidate,(int)plain,l->source_sample);
     if(!l->uart_count) {if(!plain){l->uart_count=1;l->uart_value=0;}return;}
     if(l->uart_count<=8) {l->uart_value|=plain<<(l->uart_count-1);++l->uart_count;return;}
     l->uart_count=0;if(plain)byte(s,l,l->uart_value);
@@ -131,7 +132,7 @@ static void soft_pair(void *opaque,unsigned a,unsigned b)
     l->lane.source_sample=(long)((10*l->stream.output_symbol+l->phase)/4);
     if(l->have_previous) {
         unsigned d=(b-a)&3,q=(a-l->previous)&3;
-        bit(l->up,&l->lane,d>>1);bit(l->up,&l->lane,q&1);bit(l->up,&l->lane,q>>1);
+        bit(l->up,&l->lane,V90_UP_PHASES+l->phase,d>>1);bit(l->up,&l->lane,V90_UP_PHASES+l->phase,q&1);bit(l->up,&l->lane,V90_UP_PHASES+l->phase,q>>1);
     }
     l->previous=a;l->have_previous=1;
 }
@@ -139,11 +140,12 @@ static void qam_bits(void *opaque,const uint8_t *bits)
 {
     V90UpQamLane *l=opaque;
     if(l->stream.output_frames==1 || !bits) {
+        if(l->up->receive_bit)l->up->receive_bit(l->up->bit_opaque,l->phase,-1,l->lane.source_sample);
         memset(&l->lane,0,sizeof(l->lane));l->lane.crc=0xffff;
     }
     if(!bits)return;
     l->lane.source_sample=(long)(l->symbol_time[l->stream.output_symbol%256]/4);
-    for(unsigned i=0;i<l->stream.frame_bits;++i)bit(l->up,&l->lane,bits[i]);
+    for(unsigned i=0;i<l->stream.frame_bits;++i)bit(l->up,&l->lane,l->phase,bits[i]);
 }
 static unsigned delta(double ar,double ai,double br,double bi)
 {
@@ -244,7 +246,8 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             if(l->have_previous) {
                 unsigned d=delta(re,im,l->a_re,l->a_im);
                 unsigned q=delta(l->a_re,l->a_im,l->previous_re,l->previous_im);
-                bit(s,l,d>>1);bit(s,l,q&1);bit(s,l,q>>1);
+                unsigned candidate=2*V90_UP_PHASES+2*(time%V90_UP_PHASES)+pair;
+                bit(s,l,candidate,d>>1);bit(s,l,candidate,q&1);bit(s,l,candidate,q>>1);
             }
             l->previous_re=l->a_re;l->previous_im=l->a_im;l->have_previous=1;l->have_a=0;
         }

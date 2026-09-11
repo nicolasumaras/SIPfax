@@ -1,0 +1,136 @@
+{
+  "scope": "Nine captured startup PCM replays with opt-in ODP48; synchronous bit-boundary verification, not LAPM hardware interoperability.",
+  "native_frames": 102,
+  "exact_observer_matches": 102,
+  "recordings_with_frames": 8,
+  "first_detection_selection_passes": 3,
+  "selection_result": "First V.42 detection is insufficient; retain as a rejected diagnostic rule.",
+  "recordings": [
+    {
+      "case": "v90-preemph-config",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 2,
+      "exact_observer_matches": 2,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 45,
+      "selected_resets": 6
+    },
+    {
+      "case": "v90-preemph2-first",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 2,
+      "exact_observer_matches": 2,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 26,
+      "selected_resets": 5
+    },
+    {
+      "case": "v90-3000-7ba92b5-first",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 2,
+      "exact_observer_matches": 2,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 28,
+      "selected_resets": 6
+    },
+    {
+      "case": "v90-efc00dc-3000",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 0,
+      "exact_observer_matches": 0,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 12,
+      "selected_resets": 0
+    },
+    {
+      "case": "v90-odp-pre2",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 19,
+      "exact_observer_matches": 19,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 62,
+      "selected_resets": 4
+    },
+    {
+      "case": "v90-odp-soak",
+      "rate": 28800,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 20,
+      "exact_observer_matches": 20,
+      "selected_candidate": -1,
+      "selected_frames": 0,
+      "selected_lcp": 0,
+      "reset_events": 39,
+      "selected_resets": 4
+    },
+    {
+      "case": "v90-odp-auto",
+      "rate": 28800,
+      "baud": 3200,
+      "exit_code": 0,
+      "native_frames": 20,
+      "exact_observer_matches": 20,
+      "selected_candidate": 0,
+      "selected_frames": 20,
+      "selected_lcp": 4,
+      "reset_events": 11,
+      "selected_resets": 0
+    },
+    {
+      "case": "v90-3000-26400-7ba92b5",
+      "rate": 26400,
+      "baud": 3000,
+      "exit_code": 0,
+      "native_frames": 17,
+      "exact_observer_matches": 17,
+      "selected_candidate": 9,
+      "selected_frames": 17,
+      "selected_lcp": 4,
+      "reset_events": 4,
+      "selected_resets": 0
+    },
+    {
+      "case": "v90-efc00dc-auto",
+      "rate": 28800,
+      "baud": 3200,
+      "exit_code": 0,
+      "native_frames": 20,
+      "exact_observer_matches": 20,
+      "selected_candidate": 9,
+      "selected_frames": 20,
+      "selected_lcp": 4,
+      "reset_events": 8,
+      "selected_resets": 0
+    }
+  ],
+  "sanitizers": {
+    "environment": "CT105 temporary build; production unchanged",
+    "cases": [
+      "v90-odp-auto",
+      "v90-preemph-config"
+    ],
+    "findings": 0,
+    "includes_repeated_candidate_resets": true
+  }
+}

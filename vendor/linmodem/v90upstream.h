@@ -6,6 +6,7 @@
 #include "v90qam8.h"
 #define V90_UP_TAPS 81
 #define V90_UP_PHASES 10
+#define V90_UP_CANDIDATES (4*V90_UP_PHASES)
 #define V90_UP_FRAME 4096
 #define V90_UP_RECENT 128
 #define V90_UP_B1_SYMBOLS 128
@@ -62,6 +63,14 @@ typedef struct V90Upstream {
     double b1_score;
     uint8_t b1_labels[V90_UP_B1_SYMBOLS];
     V90UpB1Lane b1[V90_UP_PHASES];
+    /* Optional synchronous bit observer before UART decoding. Candidate IDs:
+     * QAM 0..9, soft 4800 10..19, hard 4800 phase/pair 20..39.
+     * bit=-1 invalidates that candidate at an acquisition reset/erasure.
+     * Candidates must never be interleaved into one protocol receiver.
+     * Profile initialization clears callbacks; owners must reinstall them.
+     * source_sample is capture position, not a per-bit clock or unique index. */
+    void *bit_opaque;
+    void (*receive_bit)(void *,unsigned candidate,int bit,long source_sample);
     void *opaque;
     void (*receive_frame)(void *,const uint8_t *,unsigned);
 } V90Upstream;

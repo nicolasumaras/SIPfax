@@ -49,9 +49,11 @@ static void status(void *opaque,int code)
 static void odp(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count)
 {
     V90LapmLink *s=opaque;
-    if(!s->detected)
+    if(!s->detected){
         fprintf(stderr,"[v42] candidate %u completed ODP detection\n",candidate);
-    s->detected=1;s->adp_bits=0;
+        s->adp_bits=0;
+    }
+    s->detected=1;
     for(unsigned i=0;i<count;i++)v42_rx_bit(&s->protocol,bits[i]);
 }
 

@@ -105,6 +105,15 @@ The 163191-packet RTP capture had zero capture drops/gaps. All 40633 downstream 
 
 For the same transfer workload, the recent 49.333-ceiling recovery run completed in 581.627 seconds with zero modem errors and no downstream TCP retransmissions. The higher-ceiling run was about 32% longer. This is a comparison of two observed calls, not a general causal benchmark. Keep the deployment ceiling at 49334. The temporary override was removed, the active service verified, and all trial/capture/fixture processes are terminal. Raw audio, RTP and TCP evidence are retained privately.
 
+
+### Correction: normal PPP startup delay versus decode timeout
+
+A recorded-data comparison found a defect in the five-second startup downshift policy added in `aa1ac2f`. The successful 3200/28800 control recording delivers its first CRC-valid PPP frame 5.819125 seconds after B1 detection. Its measured RTD is 178.625 ms, so a five-second-plus-two-RTD guard expires at 5.357250 seconds, before that legitimate first frame. `[v90p4]` E/B1 timestamps and `[v90data]` PPP timestamps use different sample origins; subtracting those log values directly is invalid.
+
+The guard now permits ten seconds plus two RTDs after B1. A regression explicitly preserves a six-second quiet startup, then verifies that arriving data disables later downshift. All 286 guard/deadline/profile cases pass under CT105 ASan/UBSan; startup, negotiation and rate-selection suites and the native build pass. Hardware validation of the corrected grace period is next.
+
+This supersedes the interpretation that the `aa1ac2f` 3200/28800 downshifts prove a receiver failure: the watchdog can itself interrupt normal startup. The earlier 3000/28800 and 3200/31200 calls failed before this watchdog existed and remain unresolved. In a 15–32-second recorded replay, the successful 3200/28800 and 3000/26400 controls each recover 17 CRC-valid frames; the interrupted 3200/28800 and original failed 3000/28800 recordings recover none. A successful and an interrupted 3200/28800 lane both decode all interior B1 labels correctly. Substituting known B1 labels during provisional equalizer feedback leaves all four recordings' recovered frame hashes unchanged, so that experiment is not adopted.
+
 ## Historical development record
 
 The code default remains 4,800 bit/s at 3,200 symbols/s. The experimental

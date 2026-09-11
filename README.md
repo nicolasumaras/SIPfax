@@ -31,7 +31,7 @@ passed short transfer tests. The 3000/28.8 and 3200/31.2 profiles have failed li
 PPP startup despite passing synthetic tests; maximum rates are not guaranteed.
 
 Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no valid
-PPP frame arrives within five seconds plus two round-trip delays. It preserves the
+PPP frame arrives within ten seconds plus two round-trip delays. It preserves the
 reduced ceiling through retraining, stops at 4.8 kbit/s, and does not apply after
 valid data has arrived on the call. One hardware call successfully recovered from
 3000/28.8 to 3000/26.4 on the same call. A sustained recovery call also passed 129 transfer checks; a post-deployment call

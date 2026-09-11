@@ -274,8 +274,10 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
         receive(s, in[i]);
         receive_tone(s, in[i]);
         /* Local startup recovery: a plausible B1 alone does not establish
-           a usable data channel. Give the caller 5s + 2 RTDs to send its
-           first CRC-valid PPP frame, then retry one rate step lower. The
+           a usable data channel. Give the caller 10s + 2 RTDs to send its
+           first CRC-valid PPP frame, then retry one rate step lower.
+           Successful XP calls deliver their first frame about 5.9s after E;
+           a five-second guard would interrupt those normal starts. The
            ceiling survives retrains; no downshift below 4800 or after data
            has ever arrived on this call. This is not a V.90 timing rule. */
         if(s->phase4_active && s->phase4.upstream.frames)s->have_upstream_data=1;
@@ -283,7 +285,7 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
            !s->phase4.renegotiations && s->phase4.rx_e_logged &&
            !s->phase4.cp.silence && s->phase4.upstream.b1_seen && s->upstream_data_rate>4800) {
             long rtd=s->round_trip>0?s->round_trip:0;
-            if(s->phase4.upstream.samples-s->phase4.upstream.b1_sample>=40000+2*rtd) {
+            if(s->phase4.upstream.samples-s->phase4.upstream.b1_sample>=80000+2*rtd) {
                 s->upstream_rate_limit=s->upstream_data_rate-2400;
                 fprintf(stderr,"[v90p2] B1 without PPP; reducing upstream ceiling to %u bit/s\n",s->upstream_rate_limit);
                 begin_retrain(s,"initiate after initial PPP decode timeout;");

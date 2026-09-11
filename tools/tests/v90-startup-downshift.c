@@ -16,7 +16,7 @@ static void prepare(V90Startup *s,unsigned rate,unsigned baud,long rtd,long offs
     unsigned u[4]={53,78,88,96};for(unsigned i=0;i<4;++i)cp.mask[0][0][u[i]]=1;
     assert(!v90_pcm_init(&s->phase4.encoder,&cp,bit,0));consumed=0;
     s->phase4.upstream.b1_seen=1;s->phase4.upstream.b1_sample=320;
-    s->phase4.upstream.samples=320+40000+2*(rtd>0?rtd:0)+offset;
+    s->phase4.upstream.samples=320+80000+2*(rtd>0?rtd:0)+offset;
 }
 int main(void)
 {
@@ -54,5 +54,16 @@ int main(void)
         if(guard==7){assert(s->have_upstream_data);begin_retrain(s,"data preservation");assert(s->have_upstream_data);}
         ++cases;
     }
+    /* Hardware controls first deliver PPP at about 5.88s after E.
+       A six-second quiet interval must survive, then valid data permanently
+       disarms startup downshift even beyond the later deadline. */
+    prepare(s,28800,3200,160,0);
+    s->phase4.upstream.samples=48000;
+    int16_t in=0,out=0;v90_startup_process(s,&out,&in,1);
+    assert(!s->retrains && s->upstream_rate_limit==28800);
+    s->phase4.upstream.frames=1;v90_startup_process(s,&out,&in,1);
+    assert(s->have_upstream_data);
+    s->phase4.upstream.samples=160000;v90_startup_process(s,&out,&in,1);
+    assert(!s->retrains && s->upstream_rate_limit==28800);++cases;
     free(s);printf("PASS: %u startup downshift deadline/profile/floor/guard cases\n",cases);return 0;
 }

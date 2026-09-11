@@ -71,5 +71,7 @@ int main(void)
     assert(s->retrains==1 && !s->have_upstream_data && s->upstream_rate_limit==26400);++cases;
     prepare(s,28800,3000,160,1);s->phase4.upstream.frames=1;
     begin_retrain(s,"FCS-only preservation");assert(!s->have_upstream_data);++cases;
+    prepare(s,28800,3000,160,1);s->phase4.upstream.odp_seen=1;
+    v90_startup_process(s,&out,&in,1);assert(s->retrains==1 && !s->have_upstream_data);++cases;
     free(s);printf("PASS: %u startup downshift deadline/profile/floor/guard cases\n",cases);return 0;
 }

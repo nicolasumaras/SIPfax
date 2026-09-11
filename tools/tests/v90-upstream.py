@@ -24,7 +24,7 @@ void run(V90Upstream *s,const int16_t *x,unsigned n){for(unsigned i=0;i<n;++i)v9
 unsigned frames(V90Upstream *s){return s->frames;}
 unsigned lcp(V90Upstream *s){return s->last_length>=6 && s->last_frame[0]==255 && s->last_frame[1]==3 && s->last_frame[2]==0xc0 && s->last_frame[3]==0x21;}
 ''')
-    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90upstream.c'),str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90equalizer.c'),str(root/'vendor/linmodem/v90shell.c'),str(root/'vendor/linmodem/v90mapping.c'),'-lm','-o',str(so)],check=True)
+    subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Werror','-I'+str(root/'vendor/linmodem'),str(w),str(root/'vendor/linmodem/v90upstream.c'),str(root/'vendor/linmodem/v90trellis.c'),str(root/'vendor/linmodem/v90qam8.c'),str(root/'vendor/linmodem/v90equalizer.c'),str(root/'vendor/linmodem/v90shell.c'),str(root/'vendor/linmodem/v90mapping.c'),str(root/'vendor/linmodem/v42detect.c'),'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     for name in ['frames','lcp']:getattr(lib,name).argtypes=[C.c_void_p]
     lib.run.argtypes=[C.c_void_p,np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS'),C.c_uint]

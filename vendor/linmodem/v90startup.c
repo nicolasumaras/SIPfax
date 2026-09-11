@@ -420,6 +420,7 @@ void v90_startup_process(V90Startup *s, int16_t *out, const int16_t *in, int n)
                     fprintf(stderr,"[v90p3] DIL stage %u at %.6fs (2=Phase4 pending)\n",s->training_tx.stage,s->samples/8000.0);
                 if(s->training_tx.stage==2) {
                     s->phase4_active=v90_phase4_init_profile(&s->phase4,s->alaw,s->uinfo,s->upstream_data_rate,s->upstream_symbol_rate,s->upstream_high_carrier);
+                    if(s->phase4_active && s->have_upstream_data)s->phase4.v42_complete=1;
                 }
             }
         }

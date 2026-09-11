@@ -12,6 +12,8 @@ typedef struct {
     V90Pcm encoder;
     V90Upstream upstream;
     unsigned data_bits;
+    /* Opt-in initial V.42 detection decline. Never evidence of PPP startup. */
+    unsigned v42_decline_enabled,v42_complete,v42_reply_started,v42_reply_bits;
     void *data_opaque;
     int (*get_data_bit)(void *);
     uint8_t mp[132];

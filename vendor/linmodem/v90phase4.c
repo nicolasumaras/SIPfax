@@ -35,6 +35,21 @@ static int data_bit(void *opaque)
     V90Phase4 *s=opaque;
     if(s->data_bits++<48*(s->encoder.k+s->encoder.s))return 1;
     if(s->stage!=4)return 1; /* DTE clamped as soon as S is recognized. */
+    if(s->v42_decline_enabled && !s->v42_complete){
+        if(s->renegotiations)s->v42_complete=1;
+        else if(s->v42_reply_started){
+            int bit=v42_decline_bit(s->v42_reply_bits++);
+            if(s->v42_reply_bits==360)s->v42_complete=1;
+            return bit;
+        }else if(s->upstream.lcp_seen)s->v42_complete=1;
+        else if(s->upstream.odp_seen){
+            s->v42_reply_started=1;s->v42_reply_bits=1;
+            fprintf(stderr,"[v42] transmit E/NUL decline ADP\n");
+            return v42_decline_bit(0);
+        }else if(s->rx_e_logged && s->upstream.b1_seen &&
+                 s->upstream.samples-s->upstream.b1_sample>=6000)s->v42_complete=1;
+        else return 1; /* T400: mark without consuming queued DTE bits. */
+    }
     return s->get_data_bit?s->get_data_bit(s->data_opaque):1;
 }
 static unsigned training_frames(const char *name,long minimum_ms)
@@ -59,6 +74,8 @@ int v90_phase4_init_profile(V90Phase4 *s,int alaw,int uinfo,unsigned rate,unsign
     V90Mapping mapping;
     if(!s || high_carrier>1 || !v90_mapping_init(&mapping,rate,symbol_rate))return 0;
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
+    const char *decline=getenv("SIPFAX_V90_V42_DECLINE");
+    s->v42_decline_enabled=decline && !strcmp(decline,"1");
     /* 9.4.1.2/3: at least 2040 samples, MP begins within 2000ms.
        Round down to complete six-sample frames. */
     s->trn_frames=training_frames("SIPFAX_V90_INITIAL_TRN2D_MS",255);

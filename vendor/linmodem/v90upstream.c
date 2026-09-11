@@ -115,6 +115,10 @@ static void byte(V90Upstream *s,V90UpLane *l,unsigned value)
 static void bit(V90Upstream *s,V90UpLane *l,unsigned b)
 {
     unsigned plain=((l->scrambler>>22)^b)&1;
+    if(s->b1_seen && !s->lcp_seen && v42_detect_bit(&l->v42,plain) && !s->odp_seen){
+        s->odp_seen=1;
+        fprintf(stderr,"[v42] ODP detected at upstream sample %ld\n",s->samples);
+    }
     l->scrambler=(l->scrambler<<1)&0x7fffff;
     if(b)l->scrambler^=1|(1<<18);
     if(!l->uart_count) {if(!plain){l->uart_count=1;l->uart_value=0;}return;}

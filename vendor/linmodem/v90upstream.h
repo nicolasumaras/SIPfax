@@ -1,5 +1,6 @@
 #ifndef V90UPSTREAM_H
 #define V90UPSTREAM_H
+#include "v42detect.h"
 #include <stdint.h>
 #include "v90trellis.h"
 #include "v90qam8.h"
@@ -16,6 +17,7 @@ typedef struct {
     double a_re,a_im,previous_re,previous_im;
     unsigned have_a,have_previous,scrambler,uart_count,uart_value;
     unsigned length,escape,overflow,crc;
+    V42Detect v42;
     long source_sample;
     uint8_t frame[V90_UP_FRAME];
 } V90UpLane;
@@ -40,7 +42,7 @@ typedef struct V90Upstream {
     unsigned position,frames;
     /* A well-formed, uncompressed LCP Configure packet proves PPP startup.
      * An arbitrary FCS match must not disable initial recovery. */
-    unsigned lcp_seen;
+    unsigned lcp_seen,odp_seen;
     long samples,last_frame_sample;
     unsigned last_length;
     uint8_t last_frame[V90_UP_FRAME];

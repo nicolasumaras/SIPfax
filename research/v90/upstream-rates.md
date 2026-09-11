@@ -550,3 +550,16 @@ Remaining work includes higher upstream rates and symbol-rate coverage, error-ra
 ### Expanded seeded regression matrix
 
 [Receiver regression investigation](receiver-regressions.md) records the full timing matrices: seed 43127 loses a frame at two phases; seed 62091 loses frames in all eight tested phase/clock combinations, identically for direct reception and delayed-E replay. The waveform test now supports `--keep-going` to report every mismatch while returning failure. Simple timing/carrier/equalizer gain experiments were rejected or remain insufficient; no receiver change was deployed.
+
+
+## Half-symbol equalizer implementation
+
+The 26.4 kbit/s PCM receiver now supplies a midpoint and a symbol-time sample to a 29-tap complex FIR. Both come from the existing quarter-sample matched-filter history. Midpoints are carrier-normalized at half a symbol before the current phase. The receiver keeps symbol-time outputs with seven symbols of lookahead, matching the prior 15-tap path's output alignment. Provisional trellis feedback remains four pairs; final decisions retain 63-pair lookahead.
+
+B1 fitting uses 256 half-symbol observations and 128 known targets. It retains the 80-symbol fit and held-out validation, but increases the identity-directed ridge from 1e-6 to 1e-3 times trace/taps for the correlated half-symbol inputs. This corrected the prototype's frequent rejection of excessive coefficient norms; the norm-squared bound remains four. Bounded NLMS permits step 0.2 only for the 29-tap state. Seven/fifteen-tap paths keep their original 0.1 maximum, training API, and operation. Symbol-only 26.4 tests retain the 15-tap path unless midpoint input is supplied.
+
+The final integrated receiver passes all 192 exact expected frames in each of eight phase/clock cases, for both direct reception and delayed-E replay, under the default payload and seeds 43127, 62091 and 98017. This closes the documented two-seed synthetic losses; it does not prove all channels or rates. The independent 24 kbit/s long-clock/ISI/PCMU/random-payload matrix also passes.
+
+Dedicated half-symbol tests verify startup/output alignment, independently distorted held-out channel recovery, incompatible training modes, invalid input and step rejection with unchanged state. The full native suite, existing seven/fifteen-tap equalizer tests and clean native build pass. CT105 ASan/UBSan checks pass for half-symbol history wrapping, reacquisition and invalid midpoints. A CT105 normal-build replay recovered 192 frames across 567 blocks; total processing time was 439.195 ms and the largest 20 ms block took 12.868 ms. This is one timing observation, not a hard deadline guarantee.
+
+No hardware deployment has yet been made for this change. CT105 continues to run `5151eb5` with automatic echo-delay acquisition. The next gate is CI followed by a reversible short hardware call, then sustained transfers if the short call qualifies. Full V.90 conformance, higher upstream rates/symbol rates, broader reliability, ongoing echo-delay tracking, fallback and future concurrent calls remain unfinished.

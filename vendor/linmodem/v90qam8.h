@@ -72,6 +72,10 @@ int v90_qam8_b1_symbol(V90Qam8B1 *s,double re,double im,
 #endif
 typedef struct {
     V90Qam8B1 b1;
+    /* Optional half-symbol input, supplied before each symbol by the PCM
+     * frontend. B1 history is aligned with b1.position. */
+    double mid_re,mid_im,mid_b1_re[128],mid_b1_im[128];
+    unsigned have_mid;
     V90Trellis trellis;
     V90Qam8Frames frames;
     V90Carrier carrier;

@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-shell v90-carrier-fit v90-equalizer v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
+          for test in v8-cj v8-role-menu v90-cp v90-dil v90-s-detect v90-startup v90-reneg-training v90-shell v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
             /usr/bin/python3 "tools/tests/$test.py"
           done
       - name: Test upstream clock recovery
@@ -73,7 +73,11 @@ jobs:
           python3 tools/tests/v90-qam8-wave.py --24000 --long-clock --isi --pcmu
           python3 tools/tests/v90-qam8-wave.py --24000 --long-clock --isi --pcmu --random-payloads --timing-sweep
       - name: Test experimental 26400 upstream waveform
-        run: python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep
+        run: |
+          python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep
+          for seed in 43127 62091 98017; do
+            python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
+          done
       - name: Test automatic echo bridge framing
         run: SIPFAX_V90_LINE_ECHO=auto python3 tools/tests/linmodem-framing.py
       - name: Sanitize echo delay acquisition

@@ -194,6 +194,13 @@ static int normalized(V90Qam8Stream *s,double re,double im,double *ar,double *ai
     V90Carrier *c=&s->carrier;
     double cs=cos(c->phase),sn=sin(c->phase);
     *ar=(re*cs+im*sn)/c->gain;*ai=(im*cs-re*sn)/c->gain;
+    /* Normalize the earlier midpoint with its own carrier phase. Keep only
+     * symbol-time FIR outputs, preserving the seven-symbol output delay. */
+    if(s->equalizer.taps==V90_EQ_HALF_TAPS) {
+        double mcs=cos(c->phase-.5*c->frequency),msn=sin(c->phase-.5*c->frequency),ignored_re,ignored_im;
+        v90_equalizer_symbol(&s->equalizer,(s->mid_re*mcs+s->mid_im*msn)/c->gain,
+            (s->mid_im*mcs-s->mid_re*msn)/c->gain,&ignored_re,&ignored_im);
+    }
     if(s->b1.m>=5 && v90_equalizer_symbol(&s->equalizer,*ar,*ai,ar,ai)!=1) {
         c->phase=remainder(c->phase+c->frequency,2*acos(-1.0));return 0;
     }
@@ -263,7 +270,7 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
             memcpy(training.re,s->history_re[h],sizeof(training.re));
             memcpy(training.im,s->history_im[h],sizeof(training.im));
             double r,i;point(j?early_b:early_a,&r,&i);
-            if(v90_equalizer_adapt(&training,r,i,.1)) {
+            if(v90_equalizer_adapt(&training,r,i,s->equalizer.taps==V90_EQ_HALF_TAPS?.2:.1)) {
                 memcpy(s->equalizer.cr,training.cr,sizeof(training.cr));
                 memcpy(s->equalizer.ci,training.ci,sizeof(training.ci));
             }
@@ -309,7 +316,7 @@ static double b1_equalized_error(V90Qam8Stream *s,double frequency)
         xi[n]=(s->b1.im[j]*cs-s->b1.re[j]*sn)/gain;
         point(s->b1.labels[n],&tr[n],&ti[n]);
     }
-    V90Equalizer eq;v90_equalizer_init_taps(&eq,15);
+    V90Equalizer eq;v90_equalizer_init_taps(&eq,V90_EQ_LONG_TAPS);
     v90_equalizer_train(&eq,xr,xi,tr,ti);
     double error=0;
     for(unsigned n=87;n<121;++n) {
@@ -360,15 +367,18 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
     uint64_t index=s->symbols++;
     double input_limit=s->b1.m>=5?1e6:1e100;
     if(!isfinite(re)||!isfinite(im)||fabs(re)>1e100||fabs(im)>1e100 ||
-       (s->locked && (fabs(re/s->carrier.gain)>=input_limit || fabs(im/s->carrier.gain)>=input_limit))) {
+       (s->have_mid && (!isfinite(s->mid_re)||!isfinite(s->mid_im)||fabs(s->mid_re)>1e100||fabs(s->mid_im)>1e100)) ||
+       (s->locked && (fabs(re/s->carrier.gain)>=input_limit || fabs(im/s->carrier.gain)>=input_limit ||
+        (s->have_mid && (fabs(s->mid_re/s->carrier.gain)>=input_limit || fabs(s->mid_im/s->carrier.gain)>=input_limit))))) {
         s->locked=s->have_a=s->count=0;s->b1.position=s->b1.count=0;return -1;
     }
     if(s->locked){qam8_locked(s,re,im);return 1;}
     double gain,phase,score;
+    if(s->have_mid){s->mid_b1_re[s->b1.position]=s->mid_re;s->mid_b1_im[s->b1.position]=s->mid_im;}
     if(!v90_qam8_b1_symbol(&s->b1,re,im,&gain,&phase,&score))return 0;
     double frequency; b1_carrier(s,&gain,&phase,&frequency);
     v90_carrier_init(&s->carrier,phase,gain);s->carrier.frequency=frequency;
-    v90_equalizer_init_taps(&s->equalizer,s->b1.q==3?V90_EQ_MAX_TAPS:V90_EQ_TAPS);
+    v90_equalizer_init_taps(&s->equalizer,s->b1.q==3 && s->b1.m==14 && s->have_mid?V90_EQ_HALF_TAPS:s->b1.q==3?V90_EQ_LONG_TAPS:V90_EQ_TAPS);
     if(s->b1.m>=5) {
         double xr[128],xi[128],tr[128],ti[128];
         for(unsigned n=0;n<128;++n) {
@@ -378,7 +388,17 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
             xi[n]=(s->b1.im[j]*cs-s->b1.re[j]*sn)/gain;
             point(s->b1.labels[n],&tr[n],&ti[n]);
         }
-        v90_equalizer_train(&s->equalizer,xr,xi,tr,ti);
+        if(s->equalizer.taps==V90_EQ_HALF_TAPS) {
+            double hr[256],hi[256];
+            for(unsigned n=0;n<128;++n) {
+                unsigned j=(s->b1.position+n)%128;
+                double cs=cos(phase+frequency*(n-.5)),sn=sin(phase+frequency*(n-.5));
+                hr[2*n]=(s->mid_b1_re[j]*cs+s->mid_b1_im[j]*sn)/gain;
+                hi[2*n]=(s->mid_b1_im[j]*cs-s->mid_b1_re[j]*sn)/gain;
+                hr[2*n+1]=xr[n];hi[2*n+1]=xi[n];
+            }
+            v90_equalizer_train_half(&s->equalizer,hr,hi,tr,ti);
+        } else v90_equalizer_train(&s->equalizer,xr,xi,tr,ti);
     }
     v90_trellis_init(&s->trellis);
     if(s->b1.q==3 && s->b1.m==14)v90_qam448_frames_init(&s->frames,0);
@@ -394,6 +414,7 @@ int v90_qam8_stream_symbol(V90Qam8Stream *s,double re,double im)
     s->output_frames=s->rejected_frames=0;s->score=score;s->locked=1;
     for(unsigned i=0;i<V90_QAM8_B1_SYMBOLS;++i) {
         unsigned j=(s->b1.position+i)%V90_QAM8_B1_SYMBOLS;
+        s->mid_re=s->mid_b1_re[j];s->mid_im=s->mid_b1_im[j];
         qam8_locked(s,s->b1.re[j],s->b1.im[j]);
     }
     return 1;

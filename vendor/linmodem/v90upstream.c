@@ -157,6 +157,11 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             if(time<l->next_symbol)continue;
             double ar,ai;filtered_at(s,l->next_symbol,&ar,&ai);
             l->symbol_time[q->symbols%256]=l->next_symbol;
+            /* Half-symbol FIR input: the earlier midpoint is available in
+             * the same quarter-sample matched-filter history as this symbol. */
+            if(s->rate==26400 && l->next_symbol>=5) {
+                filtered_at(s,l->next_symbol-5,&q->mid_re,&q->mid_im);q->have_mid=1;
+            }
             int locked=v90_qam8_stream_symbol(q,ar,ai);
             double error=0;
             if(locked==1 && l->have_timing_previous && l->next_symbol>=5) {

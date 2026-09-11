@@ -26,4 +26,6 @@ typedef struct {
 void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo);
 int16_t v90_phase4_next(V90Phase4 *s,int16_t input);
 void v90_phase4_init_rate(V90Phase4 *s,int alaw,int uinfo,unsigned rate);
+/* Explicit negotiated profile. Invalid profiles leave state unchanged. */
+int v90_phase4_init_profile(V90Phase4 *,int alaw,int uinfo,unsigned rate,unsigned symbol_rate,unsigned high_carrier);
 #endif

@@ -47,7 +47,7 @@ typedef struct V90Upstream {
     V90UpLane lanes[V90_UP_PHASES][2];
     unsigned soft_enabled;
     V90UpSoftLane soft[V90_UP_PHASES];
-    unsigned rate,symbol_rate;
+    unsigned rate,symbol_rate,high_carrier;
     double carrier,symbol_period;
     V90UpQamLane qam[V90_UP_PHASES];
     double filtered_re[32],filtered_im[32];

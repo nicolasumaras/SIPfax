@@ -107,10 +107,28 @@ int v90_training_receive(V90Training *s,const int16_t *pcm,int count)
     return s->found;
 }
 
+int v90_s_detect_init_profile(V90SDetect *s,unsigned symbol_rate,unsigned high_carrier)
+{
+    if(!s || (symbol_rate!=3000 && symbol_rate!=3200) || high_carrier>1)return 0;
+    memset(s,0,sizeof(*s));s->symbol_rate=symbol_rate;
+    s->carrier=symbol_rate==3000?(high_carrier?2000:1800):(high_carrier?1920:12800.0/7);
+    /* Whole carrier/sideband cycles: 10 ms at 3000, 8.75 ms at 3200/low,
+     * and the legacy 12.5 ms at 3200/high. Five normalization blocks. */
+    s->window=symbol_rate==3000?80:high_carrier?100:70;s->block=s->window/5;
+    return 1;
+}
+void v90_s_detect_reset(V90SDetect *s)
+{
+    if(!s)return;
+    unsigned symbol_rate=s->symbol_rate,window=s->window,block=s->block;double carrier=s->carrier;
+    memset(s,0,sizeof(*s));s->symbol_rate=symbol_rate;s->window=window;s->block=block;s->carrier=carrier;
+}
 int v90_s_detect(V90SDetect *s,int16_t sample)
 {
-    static const double freq[3]={320,1920,3520};
-    double angle=2*M_PI*1920*s->samples/8000.0;
+    unsigned window=s->window?s->window:100,block=s->block?s->block:20;
+    double carrier=s->symbol_rate?s->carrier:1920,baud=s->symbol_rate?s->symbol_rate:3200;
+    double freq[3]={carrier-baud/2,carrier,carrier+baud/2};
+    double angle=2*M_PI*carrier*s->samples/8000.0;
     s->short_re+=sample*cos(angle);s->short_im+=sample*sin(angle);
     for(int k=0;k<3;++k) {
         angle=2*M_PI*freq[k]*s->samples/8000.0;
@@ -120,11 +138,11 @@ int v90_s_detect(V90SDetect *s,int16_t sample)
     s->block_energy+=(double)sample*sample;
     ++s->samples;
     int event=0;
-    if(s->samples%20==0) {
-        /* Hardware S ramps up from silence. Normalize each 2.5ms block
-           before the 12.5ms coherence test so the amplitude envelope does
+    if(s->samples%block==0) {
+        /* Hardware S ramps up from silence. Normalize each short block
+           before the coherence test so the amplitude envelope does
            not look like incoherent energy. Keep an absolute noise gate. */
-        double scale=sqrt(s->block_energy/20+1);
+        double scale=sqrt(s->block_energy/block+1);
         for(int k=0;k<3;++k) {
             s->normalized_re[k]+=s->re[k]/scale;
             s->normalized_im[k]+=s->im[k]/scale;
@@ -139,13 +157,13 @@ int v90_s_detect(V90SDetect *s,int16_t sample)
         }
         s->short_re=s->short_im=0;
     }
-    if(s->samples%100==0) {
+    if(s->samples%window==0) {
         double power[3],total=0;
         for(int k=0;k<3;++k) {
-            power[k]=2*(s->normalized_re[k]*s->normalized_re[k]+s->normalized_im[k]*s->normalized_im[k])/10000;
+            power[k]=2*(s->normalized_re[k]*s->normalized_re[k]+s->normalized_im[k]*s->normalized_im[k])/(window*window);
             total+=power[k];
         }
-        int good=s->energy>100*900 && total>0.85 && power[0]>0.10 && power[1]>0.20 && power[2]>0.10;
+        int good=s->energy>window*900 && total>0.85 && power[0]>0.10 && power[1]>0.20 && power[2]>0.10;
         if(good) {
             s->bad=0;
             if(++s->good>=2 && !s->latched) {

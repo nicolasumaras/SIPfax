@@ -150,7 +150,7 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
 
 ''')
     if baud==3000:
-        w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,3000,%d))abort();'%(rate,not options.low_carrier)))
+        w.write_text(w.read_text().replace('v90_upstream_init(s);','if(!v90_upstream_init_profile(s,%d,3000,%d))abort();'%(rate,not options.low_carrier)).replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,%d,3000,%d))abort();'%(rate,not options.low_carrier)))
     subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC','-I'+str(root/'vendor/linmodem'),str(w),
         *[str(root/'vendor/linmodem'/f) for f in ['v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c','v90training.c','v90pcm.c','v90cp.c','v90dil.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));cbtype=C.CFUNCTYPE(None,C.c_void_p,C.POINTER(C.c_uint8),C.c_uint)
@@ -184,7 +184,6 @@ unsigned phase4_acquired(V90Phase4*s){return s->upstream.b1_seen;}
             assert lib.acquired(s)
             verify_frames(received,fraction,ppm,'direct')
         finally:lib.destroy(s)
-        if baud==3000:continue # Phase4 still selects 3200; direct PCM qualification only.
         received.clear();s=lib.phase4_create(cb)
         try:
             lib.phase4_run(s,pcm,len(pcm))

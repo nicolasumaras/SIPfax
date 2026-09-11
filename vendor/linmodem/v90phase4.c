@@ -52,12 +52,21 @@ void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo)
 }
 void v90_phase4_init_rate(V90Phase4 *s,int alaw,int uinfo,unsigned rate)
 {
+    v90_phase4_init_profile(s,alaw,uinfo,rate>=4800 && rate<=31200 && rate%2400==0?rate:4800,3200,1);
+}
+int v90_phase4_init_profile(V90Phase4 *s,int alaw,int uinfo,unsigned rate,unsigned symbol_rate,unsigned high_carrier)
+{
+    V90Mapping mapping;
+    if(!s || high_carrier>1 || !v90_mapping_init(&mapping,rate,symbol_rate))return 0;
     memset(s,0,sizeof(*s));s->alaw=alaw;s->uinfo=uinfo;
     /* 9.4.1.2/3: at least 2040 samples, MP begins within 2000ms.
        Round down to complete six-sample frames. */
     s->trn_frames=training_frames("SIPFAX_V90_INITIAL_TRN2D_MS",255);
-    v90_training_init(&s->rx);s->rx.cp_mode=1;v90_upstream_init_rate(&s->upstream,rate);
+    v90_training_init_profile(&s->rx,symbol_rate,high_carrier);s->rx.cp_mode=1;
+    v90_upstream_init_profile(&s->upstream,rate,symbol_rate,high_carrier);
+    v90_s_detect_init_profile(&s->rate_detector,symbol_rate,high_carrier);
     fprintf(stderr,"[v90p4] transmit Ri; receive CPt\n");
+    return 1;
 }
 static void receive_cp(V90Phase4 *s)
 {
@@ -91,7 +100,7 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         int event=v90_s_detect(&s->rate_detector,input);
         if(event==1 && s->stage==4) {
             s->preceding_cp=s->cp;s->stage=5;
-            v90_training_init(&s->rx);s->rx.cp_mode=1;
+            v90_training_init_profile(&s->rx,s->upstream.symbol_rate,s->upstream.high_carrier);s->rx.cp_mode=1;
             s->have_cp=s->have_ack=s->mp_ack=s->rx_e_logged=0;
             s->generated=s->ed_frame=s->mp_announced=s->reneg_start=0;
             /* 9.6.1.2.2 permits optional TRN2d up to 2000ms. */
@@ -111,8 +120,8 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
            Reset here so an early E cannot lose B1 at Ed completion. */
         void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
         void *opaque=s->upstream.opaque;
-        unsigned rate=s->upstream.rate;
-        v90_upstream_init_rate(&s->upstream,rate);s->upstream.require_b1=1;
+        unsigned rate=s->upstream.rate,baud=s->upstream.symbol_rate,high=s->upstream.high_carrier;
+        v90_upstream_init_profile(&s->upstream,rate,baud,high);s->upstream.require_b1=1;
         s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
         /* The matched training detector can report E after B1 has begun.
          * Replay bounded pre-decision audio to retain the complete B1 and
@@ -133,7 +142,7 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
             fprintf(stderr,"[v90p4] Ed complete; CPs echo-training silence\n");
         } else if(v90_pcm_init(&s->encoder,&s->cp,data_bit,s)==0) {
             s->stage=4;s->data_start=s->samples;
-            s->data_bits=0;memset(&s->rate_detector,0,sizeof(s->rate_detector));
+            s->data_bits=0;v90_s_detect_reset(&s->rate_detector);
             fprintf(stderr,"[v90p4] Ed complete; transmit B1d K=%u S=%u at %.6fs\n",s->encoder.k,s->encoder.s,s->samples/8000.0);
         } else {s->stage=3;fprintf(stderr,"[v90p4] rejected unusable data constellation\n");}
     }

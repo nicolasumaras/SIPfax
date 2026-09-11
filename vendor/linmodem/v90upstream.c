@@ -29,7 +29,7 @@ int v90_upstream_init_profile(V90Upstream *s,unsigned rate,unsigned symbol_rate,
     V90Mapping mapping;
     if(!s || high_carrier>1 || !v90_mapping_init(&mapping,rate,symbol_rate))return 0;
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
-    s->rate=rate;s->symbol_rate=symbol_rate;s->symbol_period=32000.0/symbol_rate;
+    s->rate=rate;s->symbol_rate=symbol_rate;s->high_carrier=high_carrier;s->symbol_period=32000.0/symbol_rate;
     s->carrier=high_carrier?mapping.high_carrier:mapping.low_carrier;
     if(s->rate!=4800 || s->symbol_rate==3000)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;

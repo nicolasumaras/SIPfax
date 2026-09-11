@@ -28,12 +28,17 @@ void v90_training_init(V90Training *s);
 /* 3000/3200 baud and high/low carrier; invalid profiles leave state unchanged. */
 int v90_training_init_profile(V90Training *,unsigned symbol_rate,unsigned high_carrier);
 int v90_training_receive(V90Training *s,const int16_t *pcm,int count);
-/* S has coherent lines at fc and fc +/- baud/2. This detector is for
- * the currently negotiated 3200/high-carrier mode. Events: 1=S, 2=Sbar. */
+/* S has coherent lines at fc and fc +/- baud/2. A zero-initialized detector
+ * retains the legacy 3200/high-carrier mode. Events: 1=S, 2=Sbar. */
 typedef struct {
     unsigned samples,good,bad,latched,reversed;
+    unsigned symbol_rate,window,block;
+    double carrier;
     double re[3],im[3],energy,short_re,short_im,ref_re,ref_im;
     double normalized_re[3],normalized_im[3],block_energy;
 } V90SDetect;
 int v90_s_detect(V90SDetect *s,int16_t sample);
+/* Invalid profiles leave state unchanged. Reset retains the selected profile. */
+int v90_s_detect_init_profile(V90SDetect *,unsigned symbol_rate,unsigned high_carrier);
+void v90_s_detect_reset(V90SDetect *);
 #endif

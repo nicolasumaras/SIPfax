@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Decode configured renegotiation TRN/MP after an independent S/Sbar signal."""
+import sys
 import ctypes as C
 import os
 from pathlib import Path
@@ -7,6 +8,9 @@ import subprocess
 import tempfile
 import numpy as np
 
+baud=3000 if "--3000" in sys.argv else 3200
+high="--low-carrier" not in sys.argv
+carrier=(2000 if high else 1800) if baud==3000 else (1920 if high else 12800/7)
 root = Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory() as tmp:
     wrapper = Path(tmp)/'wrapper.c'
@@ -28,20 +32,23 @@ unsigned run(V90Phase4 *s,const int16_t *in,int16_t *out,unsigned n){
  for(unsigned i=0;i<n;++i){unsigned before=consumed;out[i]=v90_phase4_next(s,in[i]);if(s->stage!=4 && consumed!=before)++violations;}
  return violations;
 }
-unsigned get(V90Phase4 *s,unsigned field){return field==0?s->trn_start:field==1?s->trn_frames:field==2?s->reneg_start:field==3?s->stage:s->renegotiations;}
+unsigned get(V90Phase4 *s,unsigned field){if(field==5)return s->rx.symbol_rate;if(field==6)return s->upstream.symbol_rate;if(field==7)return s->rate_detector.symbol_rate;return field==0?s->trn_start:field==1?s->trn_frames:field==2?s->reneg_start:field==3?s->stage:s->renegotiations;}
 void destroy(void *s){free(s);}
 ''')
+    if baud==3000 or not high:
+        wrapper.write_text(wrapper.read_text().replace('v90_phase4_init(s,0,78);','if(!v90_phase4_init_profile(s,0,78,v90_upstream_configured_rate(),%d,%d))abort();'%(baud,high)))
     src=root/'vendor/linmodem';so=Path(tmp)/'test.so'
     subprocess.run(['gcc','-O2','-Wall','-Werror','-shared','-fPIC','-I'+str(src),str(wrapper),*[str(src/f) for f in ['v90pcm.c','v90training.c','v90cp.c','v90dil.c','v90upstream.c','v90trellis.c','v90qam8.c','v90equalizer.c','v90shell.c','v90mapping.c']],'-lm','-o',str(so)],check=True)
     lib=C.CDLL(str(so));lib.create.restype=C.c_void_p
     ptr=np.ctypeslib.ndpointer(dtype=np.int16,flags='C_CONTIGUOUS')
     lib.run.argtypes=[C.c_void_p,ptr,ptr,C.c_uint];lib.get.argtypes=[C.c_void_p,C.c_uint];lib.destroy.argtypes=[C.c_void_p]
     n=np.arange(19000);t=n/8000
-    x=(1300*np.cos(2*np.pi*1920*t+.8)+900*np.cos(2*np.pi*320*t+.2)+900*np.cos(2*np.pi*3520*t+1.4))*((n>=400)&(n<1240))
+    x=(1300*np.cos(2*np.pi*carrier*t+.8)+900*np.cos(2*np.pi*(carrier-baud/2)*t+.2)+900*np.cos(2*np.pi*(carrier+baud/2)*t+1.4))*((n>=400)&(n<1240))
     x[n>=1200]*=-1;x=x.astype(np.int16)
     levels=[((u%16*8+132)<<(u//16))-132 for u in [96,88,78,53]]
     os.environ['SIPFAX_V90_INITIAL_TRN2D_MS']='1500'
     for setting,frames,rate in [(setting,frames,rate) for setting,frames in [(None,340),('0',0),('1',1),('255',340),('1500',2000),('2000',2666),('-1',340),('2001',340),('junk',340),('999999999999999999999',340)] for rate in [None,'7200','9600','12000','14400','16800','19200','21600','24000','26400','28800','31200','invalid']]:
+        if baud==3000 and rate=='31200':continue
         if rate is None:os.environ.pop('SIPFAX_V90_UPSTREAM_RATE',None)
         else:os.environ['SIPFAX_V90_UPSTREAM_RATE']=rate
         if setting is None:os.environ.pop('SIPFAX_V90_RENEG_TRN2D_MS',None)
@@ -49,6 +56,7 @@ void destroy(void *s){free(s);}
         s=lib.create();out=np.zeros_like(x)
         try:
             assert lib.run(s,x,out,len(x))==0,'DTE consumed while clamped'
+            assert [lib.get(s,f) for f in [5,6,7]]==[baud]*3
             start=lib.get(s,0)-600;rd=lib.get(s,2)-600
             assert lib.get(s,1)==frames and lib.get(s,3)==2 and lib.get(s,4)==1
             assert start-rd==408 and (rd+600)%6==0

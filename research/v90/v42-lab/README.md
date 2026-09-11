@@ -37,6 +37,14 @@ The matrix covers 0/40/80/120 ms delay in each direction, receiver backpressure,
 
 A separate `long-stress` diagnostic retains continuous faults and allows up to 600 simulated seconds. The remaining case completes in 164.961250 seconds, with all data and acknowledgements correct after 424/666 injected bit flips. This demonstrates eventual recovery but does not change the original 120-second failure.
 
-The 46 primary corrected cases also ran under ASan/UBSan on CT105, with no sanitizer findings. Forty-five meet all test conditions; the same delivery-deadline case remains incomplete. The 600-second diagnostic was not part of that sanitizer run. Add `--sanitizers` to reproduce sanitizer builds where runtimes are installed; the original baselines intentionally still contain the detected undefined shift.
+The 46 primary corrected cases also ran under ASan/UBSan on CT105, with no sanitizer findings. Forty-five meet all test conditions; the same delivery-deadline case remains incomplete. The latest sanitizer run also includes the 600-second diagnostic and the framing checks below. Add `--sanitizers` to reproduce sanitizer builds where runtimes are installed; the original baselines intentionally still contain the detected undefined shift.
 
-The patches are supported by the standard and these tests, but two copies of one implementation are not independent protocol-interoperability evidence. Hardware interoperability, malformed-frame handling, severe-outage/disconnection behavior and integration with the native bit/byte boundaries remain required before enabling LAPM on CT105.
+The patches are supported by the standard and these tests, but two copies of one implementation are not independent protocol-interoperability evidence. Hardware interoperability, broader malformed-frame and parameter-value handling, severe-outage/disconnection behavior and integration with the native bit/byte boundaries remain required before enabling LAPM on CT105.
+
+## Framing qualification
+
+An exact-allocation empty-frame fixture reproduces a heap-buffer-overflow in the reference receive dispatcher under ASan. The correction checks the control-field length, requires the extra control octet for I/S frames and validates the entire XID group/TLV envelope before dispatch. All 14 explicit invalid-input fixtures are ignored without changing protocol state. This is envelope validation, not complete validation of parameter values, widths or negotiated limits.
+
+Independent byte fixtures also expose a missing four-byte pointer advance after the XID HDLC-options field. The correction prevents the following parameter from overwriting the options. Exact 26-byte uncompressed and 44-byte compression-advertisement fixtures pass; the latter tests serialization only and does not enable compression in transfer tests or production. The dictionary-size field already advances correctly and requires no patch.
+
+The pre-framing baseline fails both the wire and malformed-input checks. Corrected framing checks pass normally and under ASan/UBSan, with the primary transfer matrix unchanged at 45/46. No LAPM code is deployed by this lab.

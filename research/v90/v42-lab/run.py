@@ -38,12 +38,27 @@ def main():
     patched = patched.replace(shift_from, shift_to, 1)
     if final_bit_only == original:
         ap.error('Expected response helper was not found')
+    pre_framing = patched
+    insertion = 'SPAN_DECLARE(void) lapm_receive(void *user_data, const uint8_t *frame, int len, int ok)'
+    if patched.count(insertion) != 1:
+        ap.error('Expected LAPM receive entry point was not found')
+    patched = patched.replace(insertion, (HERE/'framing_guard.c').read_text()+'\n'+insertion, 1)
+    receive_guard = '    if (!ok)\n        return;\n\n    switch ((frame[1] & LAPM_FRAMETYPE_MASK))'
+    replacement = '    if (!ok || !frame || len < 2)\n        return;\n    if ((frame[1] & LAPM_FRAMETYPE_MASK) != LAPM_FRAMETYPE_U && len < 3)\n        return;\n    if ((frame[1] & LAPM_FRAMETYPE_MASK) == LAPM_FRAMETYPE_U\n        && (frame[1] & 0xEC) == LAPM_U_XID && !validated_xid(frame, len))\n        return;\n\n    switch ((frame[1] & LAPM_FRAMETYPE_MASK))'
+    if patched.count(receive_guard) != 1:
+        ap.error('Expected receive dispatch guard was not found')
+    patched = patched.replace(receive_guard, replacement, 1)
+    for old in ['put_net_unaligned_uint32(buf, 0x8A890000);  /* Bits 2, 4, 8 , 9, 12, and 16 set */']:
+        if patched.count(old) != 1:
+            ap.error('Expected XID serializer field was not found')
+        patched = patched.replace(old, old+'\n    buf += 4;', 1)
     results = []
     with tempfile.TemporaryDirectory(prefix='sipfax-v42-lab-') as td:
         build = Path(td)
         for variant, content, defines in [
             ('upstream', original, []),
             ('final-bit-only', final_bit_only, []),
+            ('pre-framing', pre_framing, []),
             ('corrected', patched, []),
             ('variable', patched, ['-DVARIABLE_FRAMES']),
             ('recovery', patched, ['-DERROR_STOP_SECONDS=30']),
@@ -59,6 +74,19 @@ def main():
                        *[str(source/(n+'.c')) for n in MODULES if n != 'v42'],
                        '-o', str(binary)]
             subprocess.run(command, check=True)
+            if variant in ('pre-framing', 'corrected'):
+                frame_binary = build / (variant+'-frames')
+                frame_command = [str(HERE/'frames.c') if arg == str(HERE/'check.c') else
+                                 str(frame_binary) if arg == str(binary) else arg for arg in command]
+                subprocess.run(frame_command, check=True)
+                for mode in ('wire', 'invalid'):
+                    frame_run = subprocess.run([str(frame_binary), mode], capture_output=True, text=True, timeout=30)
+                    results.append({'variant': variant+'-frames', 'parameters': {'mode': mode},
+                                    'exit_code': frame_run.returncode,
+                                    'results': [json.loads(line) for line in frame_run.stdout.splitlines()],
+                                    'diagnostics': frame_run.stderr.splitlines()})
+                if variant == 'pre-framing':
+                    continue
             if variant == 'upstream':
                 cases = [(0, 0, 1, 0, 0, 0), (0, 1, 1, 0, 0, 0)]
             elif variant == 'final-bit-only':
@@ -83,13 +111,13 @@ def main():
                 results.append(row)
                 print(variant, case, 'PASS' if run.returncode == 0 else 'INCOMPLETE', flush=True)
     report = {'source_revision': manifest['revision'],
-              'patch': 'Echo P in response F (8.4.2); replace T403 with T401 when sending an I frame (8.4.1); bound the detection shift register to ten bits.',
+              'patch': 'Echo P in response F (8.4.2); replace T403 with T401 when sending an I frame (8.4.1); bound the detection shift register to ten bits; validate complete XID envelopes before dispatch; advance past serialized HDLC options.',
               'scope': 'Two reference peers, 65536 exact bytes each direction; primary deadline 120 simulated seconds; long-stress diagnostic retains continuous errors up to 600 seconds; no hardware or full conformance claim.',
               'sanitizers': args.sanitizers,
               'cases': results}
     args.output.write_text(json.dumps(report, indent=2)+'\n')
     # Report actual failures instead of redefining them as passing regressions.
-    failures = [r for r in results if r['variant'] not in ('upstream', 'final-bit-only') and r['exit_code']]
+    failures = [r for r in results if r['variant'] not in ('upstream', 'final-bit-only', 'pre-framing-frames') and r['exit_code']]
     if failures:
         print(f'{len(failures)} corrected cases remain incomplete; see report.')
         return 1

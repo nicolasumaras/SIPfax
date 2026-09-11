@@ -1,4 +1,4 @@
-/* 7200/9600/12000/14400/16800/19200/21600/24000 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
+/* 7200/9600/12000/14400/16800/19200/21600/24000/26400/28800 at 3200 symbols/s mapping frames after symbol/trellis decoding. GPL-2.0. */
 #ifndef V90QAM8_H
 #define V90QAM8_H
 #include "v90shell.h"
@@ -48,6 +48,10 @@ int v90_qam256_frame(V90Qam256Frames *s,const uint8_t labels[8],uint8_t bits[60]
 typedef V90Qam8Frames V90Qam448Frames;
 void v90_qam448_frames_init(V90Qam448Frames *s,unsigned previous);
 int v90_qam448_frame(V90Qam448Frames *s,const uint16_t labels[8],uint8_t bits[66]);
+/* 28800/3200 minimum constellation: M=12, K=28, q=4. */
+typedef V90Qam8Frames V90Qam768Frames;
+void v90_qam768_frames_init(V90Qam768Frames *s,unsigned previous);
+int v90_qam768_frame(V90Qam768Frames *s,const uint16_t labels[8],uint8_t bits[72]);
 #define V90_QAM8_B1_SYMBOLS 128
 typedef struct {
     uint16_t labels[V90_QAM8_B1_SYMBOLS];
@@ -56,7 +60,7 @@ typedef struct {
     unsigned position,count,m,k,q;
 } V90Qam8B1;
 void v90_qam8_b1_init(V90Qam8B1 *s);
-/* 7200/9600/12000/14400/16800/19200/21600/24000 at 3200 symbols/s; invalid rate clears state and returns 0. */
+/* 7200/9600/12000/14400/16800/19200/21600/24000/26400/28800 at 3200 symbols/s; invalid rate clears state and returns 0. */
 int v90_qam_b1_init_rate(V90Qam8B1 *s,unsigned rate);
 /* Feed symbol-spaced matched-filter output. On a match, gain/phase describe
  * received = gain * exp(j*phase) * reference; score is normalized correlation.

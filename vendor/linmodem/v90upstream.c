@@ -1,4 +1,4 @@
-/* Experimental V.34 upstream receiver for V.90: 4800..26400 bit/s at 3200 symbols/s.
+/* Experimental V.34 upstream receiver for V.90: 4800..28800 bit/s at 3200 symbols/s.
  * Decode 4D pairs, GPA, 8N1, then verify PPP FCS before delivering a frame.
  * Ten timing phases and both pair alignments allow CRC-based acquisition.
  * Default receiver hard-slices; SIPFAX_V90_SOFT_RX=1 enables experimental
@@ -15,7 +15,7 @@ void v90_upstream_init(V90Upstream *s)
 {
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
     const char *rate=getenv("SIPFAX_V90_UPSTREAM_RATE");
-    s->rate=rate && !strcmp(rate,"26400")?26400:rate && !strcmp(rate,"24000")?24000:rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
+    s->rate=rate && !strcmp(rate,"28800")?28800:rate && !strcmp(rate,"26400")?26400:rate && !strcmp(rate,"24000")?24000:rate && !strcmp(rate,"21600")?21600:rate && !strcmp(rate,"19200")?19200:rate && !strcmp(rate,"16800")?16800:rate && !strcmp(rate,"14400")?14400:rate && !strcmp(rate,"12000")?12000:rate && !strcmp(rate,"9600")?9600:rate && !strcmp(rate,"7200")?7200:4800;
     if(s->rate!=4800)for(unsigned i=0;i<V90_UP_PHASES;++i) {
         V90UpQamLane *l=&s->qam[i];l->up=s;l->phase=i;l->lane.crc=0xffff;
         l->next_symbol=i;
@@ -159,7 +159,7 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             l->symbol_time[q->symbols%256]=l->next_symbol;
             /* Half-symbol FIR input: the earlier midpoint is available in
              * the same quarter-sample matched-filter history as this symbol. */
-            if(s->rate==26400 && l->next_symbol>=5) {
+            if(s->rate>=26400 && l->next_symbol>=5) {
                 filtered_at(s,l->next_symbol-5,&q->mid_re,&q->mid_im);q->have_mid=1;
             }
             int locked=v90_qam8_stream_symbol(q,ar,ai);
@@ -184,7 +184,9 @@ static void symbol(V90Upstream *s,long time,double re,double im)
             l->previous_time=l->next_symbol;
             /* Narrow the phase correction with the tracking integrator so
              * steady-state timing noise does not dominate the denser QAM. */
-            double phase_gain=s->rate>=19200 && q->symbols-q->origin>=9600?.02:.1;
+            /* Dense 28.8 kbit/s startup needs less Gardner phase jitter;
+             * retain the existing frequency integrator and steady-state gain. */
+            double phase_gain=s->rate>=19200 && q->symbols-q->origin>=9600?.02:s->rate==28800?.05:.1;
             l->next_symbol+=10+l->timing_frequency+phase_gain*error;
             l->previous_re=ar;l->previous_im=ai;l->have_timing_previous=locked>=0;
             if(locked==1 && !s->b1_seen) {

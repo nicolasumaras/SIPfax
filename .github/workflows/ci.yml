@@ -56,6 +56,7 @@ jobs:
           python3 tools/tests/v90-qam32.py --21600
           python3 tools/tests/v90-qam32.py --24000
           python3 tools/tests/v90-qam32.py --26400
+          python3 tools/tests/v90-qam32.py --28800
           python3 tools/tests/v90-equalizer.py --long
           python3 tools/tests/v90-qam8-wave.py --16800
           python3 tools/tests/v90-qam8-wave.py --16800 --clock-drift
@@ -77,6 +78,12 @@ jobs:
           python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep
           for seed in 43127 62091 98017; do
             python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
+          done
+      - name: Test experimental 28800 upstream waveform
+        run: |
+          python3 tools/tests/v90-qam8-wave.py --28800 --long-clock --isi --pcmu --random-payloads --timing-sweep
+          for seed in 43127 62091 98017; do
+            python3 tools/tests/v90-qam8-wave.py --28800 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
           done
       - name: Test automatic echo bridge framing
         run: SIPFAX_V90_LINE_ECHO=auto python3 tools/tests/linmodem-framing.py

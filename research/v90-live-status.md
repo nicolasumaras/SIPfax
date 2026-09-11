@@ -1729,3 +1729,16 @@ The TCP capture contained 4496 packets with zero kernel drops. Its 129 flows inc
 The baseline remains deployed. Service activity, exact binary hash, FreePBX availability, notebook disconnection and cleared SIPFAXRED state were verified. The runner, HTTP fixture, captures and retrieval jobs are terminal. The candidate remains available for further trials; clean sustained qualification is still outstanding.
 
 The next receiver investigation is startup distortion in the isolated 28.8 kbit/s prototype. Earlier provisional feedback improved one cached linear-PCM fixture but failed the full PCMU timing matrix and was reverted. No 28.8 kbit/s prototype code has been deployed.
+
+
+## 28.8 kbit/s receiver integration
+
+The development source now supports configured 28800 bit/s upstream at 3200 symbols/s: M=12, K=28, q=4, 768 constellation points and 72 bits per mapping frame. Ten-bit labels fit the existing packed pair history. MP advertises rate 12 and capability bit 46; independent training/MP decoding verifies the rate, capability and CRC. Symbol-rate selection remains 3200; this does not add 3000 or 3429 symbols/s.
+
+The first private prototype lost an early large PPP frame under imposed ISI and negative clock drift. On cached independent PCMU inputs, lowering initial Gardner phase gain from 0.1 to 0.05 closed all eight timing cases; 0.15 failed all eight. Ridge and frequency-integrator sweeps did not close the matrix. The integrated change applies only to the 28.8 profile, preserves the integrator, and retains the existing steady-state phase gain of 0.02. Earlier-feedback and half-symbol carrier-fit experiments were rejected.
+
+The integrated default and seeds 43127, 62091 and 98017 pass all 192 expected frame hashes in all eight phase/clock cases, for both direct reception and delayed-E replay. Symbol/mapping tests cover all 768 points and 16 trellis states, shell boundaries, ten-bit provisional feedback, continuous frames and reacquisition. The native synthetic/fixture suite passed; lower-rate mapping checks and the 26.4 seed-62091 waveform regression pass. An additional invocation of the recording-dependent phase4 test without its required recording argument was invalid and removed from CI; the independent renegotiation test supplies the MP coverage.
+
+CT105 ASan/UBSan feedback history/reacquisition checks pass, including 28.8 half-symbol input. A cached PCMU benchmark recovered 192 frames across 529 blocks, with 547.155 ms total receiver time and a 12.966 ms peak for one 20 ms audio block. This is a workload measurement, not a hard real-time guarantee.
+
+Hardware qualification is outstanding. The deployed runtime remains `5151eb5`, upstream 26400 with automatic initial echo acquisition. No 28.8 hardware success is claimed.

@@ -6,7 +6,7 @@
 static void mp_build(V90Phase4 *s)
 {
     memset(s->mp,0,sizeof(s->mp));memset(s->mp,1,17);
-    unsigned rate=s->upstream.rate==26400?11:s->upstream.rate==24000?10:s->upstream.rate==21600?9:s->upstream.rate==19200?8:s->upstream.rate==16800?7:s->upstream.rate==14400?6:s->upstream.rate==12000?5:s->upstream.rate==9600?4:s->upstream.rate==7200?3:2;
+    unsigned rate=s->upstream.rate==28800?12:s->upstream.rate==26400?11:s->upstream.rate==24000?10:s->upstream.rate==21600?9:s->upstream.rate==19200?8:s->upstream.rate==16800?7:s->upstream.rate==14400?6:s->upstream.rate==12000?5:s->upstream.rate==9600?4:s->upstream.rate==7200?3:2;
     for(unsigned i=0;i<4;++i)s->mp[24+i]=(rate>>i)&1;
     /* Advertise exactly the configured receiver rate, with 16-state trellis. */
     s->mp[34+rate]=1;s->mp[33]=s->mp_ack;

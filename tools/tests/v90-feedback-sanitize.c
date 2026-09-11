@@ -38,5 +38,25 @@ int main(void)
             s->mid_re=NAN;assert(v90_qam8_stream_symbol(s,1,1)==-1);
         }
     }
+    for(unsigned rate=4800;rate<=28800;rate+=2400)for(unsigned half=0;half<2;++half){
+        assert(v90_qam_stream_init_profile(s,rate,3000));s->have_mid=half;
+        for(unsigned repeat=0;repeat<2;++repeat){
+            double pr=0,pi=0;
+            for(unsigned n=0;n<2048;++n){
+                double r,i;point(s->b1.labels[n%120],&r,&i);
+                s->mid_re=.5*(pr+r);s->mid_im=.5*(pi+i);pr=r;pi=i;
+                assert(v90_qam8_stream_symbol(s,r,i)>=0);
+            }
+            assert(s->locked && s->output_frames>200);
+            assert(v90_qam8_stream_symbol(s,NAN,0)==-1);
+        }
+    }
+    V90Trellis trellis,before;v90_trellis_init(&trellis);before=trellis;
+    const unsigned invalid[]={0,1,3,5,1281,1284,~0u};
+    for(unsigned n=0;n<sizeof(invalid)/sizeof(*invalid);++n){
+        unsigned a=99,b=99;
+        assert(v90_trellis_qam_constellation_pair(&trellis,1,1,1,1,0,invalid[n],&a,&b)==-1);
+        assert(a==99 && b==99 && !memcmp(&trellis,&before,sizeof(trellis)));
+    }
     free(s);return 0;
 }

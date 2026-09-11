@@ -2,6 +2,7 @@
 #ifndef V90QAM8_H
 #define V90QAM8_H
 #include "v90shell.h"
+#include "v90mapping.h"
 #include "v90trellis.h"
 #include "v90equalizer.h"
 typedef struct { V90Shell shell; unsigned previous,q; } V90Qam8Frames;
@@ -84,6 +85,8 @@ int v90_qam8_b1_symbol(V90Qam8B1 *s,double re,double im,
 #endif
 typedef struct {
     V90Qam8B1 b1;
+    V90Mapping mapping;
+    unsigned label_bits,frame_bits;
     /* Optional half-symbol input, supplied before each symbol by the PCM
      * frontend. B1 history is aligned with b1.position. */
     double mid_re,mid_im,mid_b1_re[128],mid_b1_im[128];
@@ -101,11 +104,15 @@ typedef struct {
     /* Includes B1, starting with output_frames=1. NULL bits denotes an
      * invalid shell; framing/descrambling consumers must treat it as erasure.
      * output_symbol identifies the final symbol of the decoded frame.
-     * Frame length is b1.k+12+8*b1.q bits (rate/400 bits for the selected rate). */
+     * frame_bits gives the current length, including low/high switching. */
     void (*receive_bits)(void *,const uint8_t *bits);
 } V90Qam8Stream;
 void v90_qam8_stream_init(V90Qam8Stream *s);
 int v90_qam_stream_init_rate(V90Qam8Stream *s,unsigned rate);
+/* Symbol-spaced profile receiver. This does not configure the PCM frontend.
+ * 3000 permits 4800..28800, 3200 permits 4800..31200 in 2400 increments.
+ * receive_bits uses frame_bits (set before each callback), including erasures. */
+int v90_qam_stream_init_profile(V90Qam8Stream *,unsigned rate,unsigned symbol_rate);
 /* Returns -1 on invalid input/lost lock, 0 while acquiring, 1 when locked.
  * Acquisition replays B1 so downstream descrambling can start from zero.
  * Decision-directed carrier/gain tracking; symbol timing is supplied by caller.

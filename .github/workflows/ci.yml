@@ -51,6 +51,7 @@ jobs:
           python3 tools/tests/v90-qam8-wave.py --14400
           python3 tools/tests/v90-qam8-wave.py --14400 --clock-drift
           python3 tools/tests/v90-qam8-wave.py --14400 --isi
+          python3 tools/tests/v90-carrier-fit.py --120
           python3 tools/tests/v90-equalizer.py --120
           python3 tools/tests/v90-equalizer.py --long --120
           python3 tools/tests/v90-equalizer-half.py --120

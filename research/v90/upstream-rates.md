@@ -33,7 +33,11 @@ Equalizer training now accepts explicit 120/128-symbol B1 lengths for all three 
 
 B1 acquisition now has an explicit 3000/3200-profile initializer and uses the selected 120/128-symbol observation window. It obtains labels from the independently tested mapping generator, replacing duplicated 3200 generation. The legacy initializer retains its original rate contract, including exclusion of the separate 4800 PCM path. Tests verify exact B1 boundaries, gain/phase/correlation, noise tolerance, invalid-input resets and fresh acquisition for all 23 profiles. All 29 native-suite tests, 28.8 seed-98017 waveform matrix, 31.2 mapping/stream tests, native build and CT105 ASan/UBSan checks pass. Test link commands now include the shared mapping module.
 
-Next: connect the profile to streaming equalizer fitting and trellis/data-frame decoding, parameterize symbol/carrier timing, and carry per-call symbol-rate selection through negotiation. The new detector does not by itself enable 3000-symbol/s PCM reception. This module alone is not 3000-symbol/s reception or hardware qualification.
+The symbol-stream receiver now accepts explicit 3000/3200 profiles. B1 replay, carrier/equalizer fits and data-frame inversion use the selected length/framing. A bounded generic trellis entry point supports the additional 3000 constellations; existing 3200 kernels retain their paths. New-profile callbacks report each frame's actual bit count, including erasures, and maintain differential history across rejected shells. The legacy initializer still excludes the separate 4800 PCM mode.
+
+Independent symbol-stream tests cover all 23 profiles through B1/data transitions and data-frame switching, with ideal/impaired carrier and baud/half-symbol inputs. They compare exact bits, frame lengths and source-symbol positions. The complete 29-test native suite and 28.8 seed-98017 PCM/timing matrix pass. The carrier-fit fixture was updated to initialize the new length field and now checks both lengths. CT105 ASan/UBSan covers all 3000 profiles with history wrap, reacquisition, both sampling modes and generic-trellis size rejection. The native build passes. No production deployment or 3000 hardware qualification follows these symbol-level results.
+
+Next: parameterize PCM symbol/carrier timing and frame delivery, then carry per-call symbol-rate selection through negotiation. Live 3000-symbol/s PCM reception remains disabled. This module alone is not 3000-symbol/s reception or hardware qualification.
 
 ## Historical development record
 

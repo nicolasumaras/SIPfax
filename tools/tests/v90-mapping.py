@@ -29,6 +29,13 @@ void destroy(void*s){free(s);}
 void *detector(unsigned rate,unsigned baud){V90Qam8B1*s=malloc(sizeof(*s));if(!s)return NULL;if(!v90_qam_b1_init_profile(s,rate,baud)){free(s);return NULL;}return s;}
 unsigned detector_length(V90Qam8B1*s){return s->length;}
 unsigned detector_count(V90Qam8B1*s){return s->count;}
+typedef struct {V90Qam8Stream stream;void(*cb)(const uint8_t*,unsigned);} TestStream;
+static void delivered(void*opaque,const uint8_t*bits){TestStream*s=opaque;s->cb(bits,s->stream.frame_bits);}
+void*stream_create(unsigned rate,unsigned baud,void(*cb)(const uint8_t*,unsigned)){TestStream*s=calloc(1,sizeof(*s));if(!s)return NULL;if(!v90_qam_stream_init_profile(&s->stream,rate,baud)){free(s);return NULL;}s->cb=cb;s->stream.opaque=s;s->stream.receive_bits=delivered;return s;}
+unsigned long long stream_source(TestStream*s){return s->stream.output_symbol;}
+int stream_symbol(TestStream*s,double r,double i){return v90_qam8_stream_symbol(&s->stream,r,i);}
+void stream_mid(TestStream*s,double r,double i){s->stream.have_mid=1;s->stream.mid_re=r;s->stream.mid_im=i;}
+
 
 void params(V90Mapping*s,unsigned*out){out[0]=s->b;out[1]=s->k;out[2]=s->m;out[3]=s->q;out[4]=s->p;out[5]=s->j;}
 double carrier(V90Mapping*s,unsigned high){return high?s->high_carrier:s->low_carrier;}
@@ -38,6 +45,11 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
 ''')
  subprocess.run(['gcc','-shared','-fPIC','-O2','-Wall','-Wextra','-Werror','-I'+str(native),str(w),str(native/'v90mapping.c'),str(native/'v90shell.c'),str(native/'v90qam8.c'),str(native/'v90trellis.c'),str(native/'v90equalizer.c'),'-lm','-o',str(so)],check=True)
  lib=C.CDLL(str(so));lib.create.argtypes=[C.c_uint,C.c_uint];lib.create.restype=C.c_void_p
+ callback=C.CFUNCTYPE(None,C.POINTER(C.c_uint8),C.c_uint)
+ lib.stream_create.argtypes=[C.c_uint,C.c_uint,callback];lib.stream_create.restype=C.c_void_p
+ lib.stream_source.argtypes=[C.c_void_p];lib.stream_source.restype=C.c_ulonglong
+ lib.stream_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double]
+ lib.stream_mid.argtypes=[C.c_void_p,C.c_double,C.c_double]
  lib.detector.argtypes=[C.c_uint,C.c_uint];lib.detector.restype=C.c_void_p
  lib.detector_length.argtypes=[C.c_void_p];lib.detector_count.argtypes=[C.c_void_p]
  lib.v90_qam8_b1_symbol.argtypes=[C.c_void_p,C.c_double,C.c_double,C.POINTER(C.c_double),C.POINTER(C.c_double),C.POINTER(C.c_double)]
@@ -129,6 +141,41 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
     finally:lib.destroy(detector)
     generated[:]=[65535]*130
     assert not lib.v90_mapping_b1(s,generated,8*p-1) and list(generated)==[65535]*130
+    # Continue from the B1 encoder state through data-frame/superframe wraps.
+    expected=[];at=0
+    for n in schedule:expected.append(scrambled[at:at+n]);at+=n
+    transmitted=list(reference)
+    for f in range(p,4*p+20):
+     n=schedule[f%p];actual_k=k-(n<b);v=[rng.randrange(2) for _ in range(n)];expected.append(v)
+     rings=(C.c_int*8)();lib.legacy_encode(C.byref(oracle),sum(v[z]<<z for z in range(actual_k)),rings)
+     for pair in range(4):
+      at=actual_k+(3+2*q)*pair;a=(prev+v[at+1]+2*v[at+2])%4
+      pos=(4*f+pair+24*p)%(28*p);inv=pattern[pos//(2*p)] if pos%(2*p)==0 else 0
+      bb=(a+2*v[at]+((state&1)^inv))%4
+      qa=sum(v[at+3+z]<<z for z in range(q));qb=sum(v[at+3+q+z]<<z for z in range(q))
+      x=a+4*((rings[2*pair]<<q)|qa);y=bb+4*((rings[2*pair+1]<<q)|qb);transmitted.extend([x,y])
+      t=converter[subset(x)][subset(y)];u=state&1
+      state=(state>>1)^(t&1)^(((t>>1)&1)<<1)^((((t>>1)&1)^u)<<2)^(u<<3);prev=a
+    for impaired,half in [(False,False),(True,False),(False,True),(True,True)]:
+     received=[];sources=[]
+     def deliver(ptr,n):
+      received.append(list(ptr[:n]) if ptr else None);sources.append(lib.stream_source(stream))
+     cb=callback(deliver)
+     stream=lib.stream_create(rate,baud,cb);assert stream
+     try:
+      previous_point=0j
+      for index,label in enumerate(transmitted):
+       z=quarter[label>>2]*(-1j)**(label&3)
+       midpoint=.5*(previous_point+z);previous_point=z
+       if impaired:
+        z=z*1.7*cmath.exp(1j*(.31+.0002*index))+complex(rng.gauss(0,.01),rng.gauss(0,.01))
+        midpoint=midpoint*1.7*cmath.exp(1j*(.31+.0002*(index-.5)))
+       if half:lib.stream_mid(stream,midpoint.real,midpoint.imag)
+       assert lib.stream_symbol(stream,z.real,z.imag)>=0
+      assert sources==list(range(7,8*len(received),8)),(baud,rate,sources[:3])
+      assert len(received)>=4*p,(baud,rate,len(received))
+      assert received==expected[:len(received)],(baud,rate,'stream mismatch',next((i for i,(a,bits) in enumerate(zip(received,expected)) if a!=bits),None))
+     finally:lib.destroy(stream)
     previous=0
     for frame in range(7*p*3):
      n=schedule[frame%p];actual_k=k-(n<b)
@@ -160,4 +207,4 @@ void legacy_encode(V34DSPState*s,int index,int*rings){index_to_rings(s,(int(*)[2
    finally:lib.destroy(s)
  for rate,baud in [(0,3000),(4801,3000),(31200,3000),(33600,3200),(4800,3429)]:assert not lib.create(rate,baud)
  assert not lib.v90_mapping_frame_bits(None,0)
- print('PASS:',cases,'independent mapping frames; 23 profiles, published schedules, independent B1 labels, inversion, boundaries and rejection')
+ print('PASS:',cases,'independent mapping frames; 23 profiles, published schedules, independent B1/stream bits, carrier/noise, inversion, boundaries and rejection')

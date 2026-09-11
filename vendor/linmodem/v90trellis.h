@@ -116,4 +116,9 @@ int v90_trellis_qam768_pair(V90Trellis *s,double ar,double ai,double br,double b
 /* 31200/3200 minimum constellation, M=10/q=5, eleven-bit labels. */
 int v90_trellis_qam1280_pair(V90Trellis *s,double ar,double ai,double br,double bi,
                             unsigned inversion,unsigned *out_a,unsigned *out_b);
+/* Any prefix of the shared V.34 superconstellation: 4..1280 points in
+ * multiples of four. Same 63-pair lookahead and clockwise label convention.
+ * Invalid size/arguments return -1 without changing state or outputs. */
+int v90_trellis_qam_constellation_pair(V90Trellis *,double,double,double,double,
+    unsigned inversion,unsigned points,unsigned *,unsigned *);
 #endif

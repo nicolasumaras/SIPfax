@@ -326,3 +326,11 @@ int v90_trellis_qam448_pair(V90Trellis *s,double ar,double ai,double br,double b
 int v90_trellis_qam768_pair(V90Trellis *s,double ar,double ai,double br,double bi,unsigned inversion,unsigned *a,unsigned *b) {return qam_pair(s,ar,ai,br,bi,inversion,192,10,a,b);}
 
 int v90_trellis_qam1280_pair(V90Trellis*s,double ar,double ai,double br,double bi,unsigned inversion,unsigned*a,unsigned*b){return qam_pair(s,ar,ai,br,bi,inversion,320,11,a,b);}
+
+int v90_trellis_qam_constellation_pair(V90Trellis *s,double ar,double ai,double br,double bi,
+    unsigned inversion,unsigned points,unsigned *a,unsigned *b)
+{
+    if(!s || !a || !b || inversion>1 || points<4 || points>1280 || points%4)return -1;
+    unsigned bits=2;while((1u<<bits)<points)++bits;
+    return qam_pair(s,ar,ai,br,bi,inversion,points/4,bits,a,b);
+}

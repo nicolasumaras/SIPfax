@@ -51,7 +51,7 @@ static void odp(void *opaque,unsigned candidate,const uint8_t *bits,unsigned cou
     V90LapmLink *s=opaque;
     if(!s->detected)
         fprintf(stderr,"[v42] candidate %u completed ODP detection\n",candidate);
-    s->detected=1;
+    s->detected=1;s->adp_bits=0;
     for(unsigned i=0;i<count;i++)v42_rx_bit(&s->protocol,bits[i]);
 }
 
@@ -62,7 +62,8 @@ static void selected_output(void *opaque,int bit)
         int rate=s->protocol.tx_bit_rate;
         v42_restart(&s->protocol);
         s->protocol.tx_bit_rate=rate;
-        s->connected=s->detected=0;s->restarts++;
+        s->connected=s->detected=s->selection_count=0;
+        s->selected_candidate=(unsigned)-1;s->adp_bits=0;s->restarts++;
         return;
     }
     v42_rx_bit(&s->protocol,bit);
@@ -71,8 +72,23 @@ static void selected_output(void *opaque,int bit)
 static void selected(void *opaque,unsigned candidate)
 {
     V90LapmLink *s=opaque;
+    /* The selector has independently validated the originator's XID. Move the
+       reference answerer out of detection before replaying that frame. This
+       lets the runtime repeat ADPs until protocol evidence arrives, as
+       recommended by V.42 Appendix III.1, without losing an early XID. */
+    int rate=s->protocol.tx_bit_rate;
+    bool detect=s->protocol.detect;s->protocol.detect=false;
+    v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
     s->selected_candidate=candidate;s->selection_count++;
     fprintf(stderr,"[v42] selected CRC-valid LAPM candidate %u\n",candidate);
+}
+
+static int supported_adp_bit(unsigned n)
+{
+    unsigned at=n%36,byte=at<18?0x45:0x43;at%=18;
+    if(!at)return 0;
+    if(at<=8)return (int)((byte>>(at-1))&1);
+    return 1;
 }
 
 void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,
@@ -92,7 +108,14 @@ void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,
 int v90_lapm_link_tx_bit(void *opaque)
 {
     V90LapmLink *s=opaque;
-    return s->enabled?v42_tx_bit(&s->protocol):1;
+    if(!s->enabled)return 1;
+    if(s->detected && !s->selection_count){
+        int bit=supported_adp_bit(s->adp_bits++);
+        if(s->adp_bits==360)
+            fprintf(stderr,"[v42] transmitted ten ADPs; continue until valid XID\n");
+        return bit;
+    }
+    return v42_tx_bit(&s->protocol);
 }
 
 void v90_lapm_link_candidate_bit(void *opaque,unsigned candidate,int bit,long source_sample)

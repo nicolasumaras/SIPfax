@@ -29,7 +29,7 @@ typedef struct {
     uint8_t pending[V90_LAPM_PENDING_BYTES];
     unsigned pending_head,pending_count;
     unsigned enabled,initialized,detected,connected,disconnected,errors;
-    unsigned selected_candidate,selection_count,restarts,overflow;
+    unsigned selected_candidate,selection_count,restarts,overflow,adp_bits;
 } V90LapmLink;
 
 void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,

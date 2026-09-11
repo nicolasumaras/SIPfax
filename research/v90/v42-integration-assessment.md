@@ -102,4 +102,8 @@ XID before repeated retraining. Inspection found that the pinned answerer
 entered LAPM before emitting its tenth advertised detection pattern. The
 generator now emits all ten patterns, and a direct wire-count assertion covers
 the 360 detection bits. The corrected two-peer transfer matrix retains its
-49/50 primary deadline result; hardware retry remains required.
+49/50 primary deadline result. A second hardware call still received no XID.
+The runtime therefore follows the robustness guidance in V.42 Appendix III.1:
+after ODP it repeats supported ADPs until the selector observes the
+originator's CRC-valid XID, then changes the reference protocol state before
+replaying the buffered frame. Hardware retry remains required.

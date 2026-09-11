@@ -13,6 +13,7 @@
 #define V90_LAPM_HISTORY_BITS 128
 #define V90_LAPM_BUFFER_BITS 8192
 #define V90_LAPM_FLAG_EVIDENCE 10
+#define V90_LAPM_CANDIDATE_SAMPLES 16000
 typedef struct V90LapmSelect V90LapmSelect;
 typedef struct {
     V90LapmSelect *owner;
@@ -25,11 +26,13 @@ typedef struct {
     unsigned post_bits,post_zeros,post_transitions,post_flags,post_shift,post_previous;
     unsigned flag_run,last_flag_bit;
     unsigned hdlc_frames,hdlc_valid_frames;
+    unsigned compactions;
+    long odp_source_sample;
 } V90LapmCandidate;
 struct V90LapmSelect {
     V90LapmCandidate candidate[V90_UP_CANDIDATES];
     int selected;
-    unsigned detections,selections,flag_selections,selection_by_flags,invalidations,overflows;
+    unsigned detections,selections,flag_selections,selection_by_flags,invalidations,overflows,expirations;
     void *opaque;
     void (*odp)(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count);
     void (*output)(void *opaque,int bit);

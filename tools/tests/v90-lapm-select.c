@@ -61,13 +61,16 @@ int main(void)
     /* Continuous flags are the protocol-phase indication in V.42 7.2.1.3.
        Require a sustained run on the same ODP-qualified candidate. */
     feed_odp(&s,9);
+    for(unsigned i=0;i<V90_LAPM_BUFFER_BITS;i++)
+        v90_lapm_select_bit(&s,9,1,3000+i/4);
+    assert(s.overflows && s.candidate[9].active && s.candidate[9].buffered_count<V90_LAPM_BUFFER_BITS);
     feed_flags(&s,9,V90_LAPM_FLAG_EVIDENCE-1);assert(s.selected<0);
     feed_flags(&s,9,1);
     assert(s.selected==9 && chosen==9 && selection_events==2 && s.flag_selections==1);
     v90_lapm_select_bit(&s,9,-1,4000);assert(s.selected<0 && output_invalid==2);
     feed_odp(&s,10);
-    for(unsigned i=0;i<V90_LAPM_BUFFER_BITS;i++)v90_lapm_select_bit(&s,10,1,5000+i);
-    assert(s.overflows==1 && !s.candidate[10].active);
+    v90_lapm_select_bit(&s,10,1,25001);
+    assert(s.expirations==1 && !s.candidate[10].active);
     v42_free(answerer);
     return 0;
 }

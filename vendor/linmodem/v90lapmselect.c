@@ -11,6 +11,7 @@ static void reset_candidate(V90LapmCandidate *c)
     c->post_bits=c->post_zeros=c->post_transitions=c->post_flags=0;
     c->post_shift=c->post_previous=c->flag_run=c->last_flag_bit=0;
     c->hdlc_frames=c->hdlc_valid_frames=0;
+    c->compactions=0;c->odp_source_sample=0;
     hdlc_rx_restart(&c->hdlc);
 }
 
@@ -65,7 +66,7 @@ void v90_lapm_select_reset(V90LapmSelect *s)
 
 void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
 {
-    V90LapmSelect *s=opaque;(void)source_sample;
+    V90LapmSelect *s=opaque;
     if(id>=V90_UP_CANDIDATES)return;
     V90LapmCandidate *c=&s->candidate[id];
     if(bit<0){
@@ -89,17 +90,24 @@ void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
             c->buffered[c->buffered_count++]=c->history[(start+i)%V90_LAPM_HISTORY_BITS];
         return;
     }
-    if(c->buffered_count>=V90_LAPM_BUFFER_BITS){
-        fprintf(stderr,"[v42] candidate %u buffer expired: bits=%u zeros=%u transitions=%u flags=%u frames=%u valid=%u\n",
+    if(c->odp_reported && source_sample-c->odp_source_sample>V90_LAPM_CANDIDATE_SAMPLES){
+        fprintf(stderr,"[v42] candidate %u expired: bits=%u zeros=%u transitions=%u flags=%u frames=%u valid=%u\n",
                 id,c->post_bits,c->post_zeros,c->post_transitions,c->post_flags,
                 c->hdlc_frames,c->hdlc_valid_frames);
-        s->overflows++;reset_candidate(c);return;
+        s->expirations++;reset_candidate(c);return;
+    }
+    if(c->buffered_count>=V90_LAPM_BUFFER_BITS){
+        memmove(c->buffered,c->buffered+V90_LAPM_BUFFER_BITS/2,V90_LAPM_BUFFER_BITS/2);
+        c->buffered_count=V90_LAPM_BUFFER_BITS/2;c->compactions++;s->overflows++;
+        if(c->compactions==1)
+            fprintf(stderr,"[v42] candidate %u retained rolling handshake tail\n",id);
     }
     c->buffered[c->buffered_count++]=(uint8_t)bit;
     if(c->odp_pending){
         if(bit){if(c->trailing_marks<17)c->trailing_marks++;}
         else if(c->trailing_marks>=8 && c->trailing_marks<=16){
                 c->odp_pending=0;c->odp_reported=1;
+                c->odp_source_sample=source_sample;
                 if(s->odp)s->odp(s->opaque,id,c->buffered,c->buffered_count);
             }else{reset_candidate(c);return;}
     }

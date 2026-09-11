@@ -95,6 +95,10 @@ jobs:
           echo 'b8925e78622583552c92edf8f35dac491f3354f8eb6cb4aad5b5aa203bf41793  vendor/spandsp-v42/src/v42.c' | sha256sum -c -
           gcc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-maybe-uninitialized -fsanitize=address,undefined -fno-omit-frame-pointer -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v90-lapm-select.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/v42.c vendor/spandsp-v42/src/hdlc.c vendor/spandsp-v42/src/crc.c vendor/spandsp-v42/src/bit_operations.c vendor/spandsp-v42/src/logging.c vendor/spandsp-v42/src/alloc.c vendor/spandsp-v42/src/async.c -o /tmp/v90-lapm-select-sanitize
           /tmp/v90-lapm-select-sanitize
+      - name: Sanitize LAPM runtime bridge
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-maybe-uninitialized -fsanitize=address,undefined -fno-omit-frame-pointer -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v90-lapm-link.c vendor/linmodem/v90lapmlink.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/v42.c vendor/spandsp-v42/src/hdlc.c vendor/spandsp-v42/src/crc.c vendor/spandsp-v42/src/bit_operations.c vendor/spandsp-v42/src/logging.c vendor/spandsp-v42/src/alloc.c vendor/spandsp-v42/src/async.c -o /tmp/v90-lapm-link-sanitize
+          /tmp/v90-lapm-link-sanitize
       - name: Test upstream clock recovery
         run: |
           /usr/bin/python3 tools/tests/v90_shell_reference.py

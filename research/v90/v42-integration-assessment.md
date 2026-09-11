@@ -78,3 +78,21 @@ ignores a valid XID without ODP, rejects a bad FCS, isolates other candidates,
 reports invalidation, and fails closed on buffer overflow. A synthetic test
 exercises each condition under ASan/UBSan. Hardware has not sent an XID to this
 path yet, so selection is not an interoperability result.
+
+## Opt-in runtime bridge
+
+The native server now has an opt-in `SIPFAX_V90_V42=1` path that connects the
+candidate selector to the corrected V.42 answerer. It replaces downstream 8N1
+framing with LAPM HDLC bits, passes upstream selected bits to LAPM, preserves
+the bit callback across the phase-4 receiver reset, and exposes LAPM connection
+state to the PTY/PPP launcher. The default path remains the existing
+asynchronous PPP implementation.
+
+Received LAPM information is held in a 4096-byte queue before the native DTE
+FIFO. The bridge asserts V.42 local-busy before that bounded queue can fill and
+does not consume additional information while busy. A two-peer test holds the
+answering DTE closed, resumes with partial writes, and transfers 16384 verified
+bytes each way after ODP, CRC-valid XID candidate selection, and LAPM link
+establishment. The complete bridge test passes ASan/UBSan on CT105 and the full
+native modem links successfully. Hardware interoperability is still required
+before retaining this option in the service configuration.

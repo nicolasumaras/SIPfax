@@ -137,9 +137,12 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
            Reset here so an early E cannot lose B1 at Ed completion. */
         void (*receive_frame)(void *,const uint8_t *,unsigned)=s->upstream.receive_frame;
         void *opaque=s->upstream.opaque;
+        void (*receive_bit)(void *,unsigned,int,long)=s->upstream.receive_bit;
+        void *bit_opaque=s->upstream.bit_opaque;
         unsigned rate=s->upstream.rate,baud=s->upstream.symbol_rate,high=s->upstream.high_carrier;
         v90_upstream_init_profile(&s->upstream,rate,baud,high);s->upstream.require_b1=1;
         s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
+        s->upstream.receive_bit=receive_bit;s->upstream.bit_opaque=bit_opaque;
         /* The matched training detector can report E after B1 has begun.
          * Replay bounded pre-decision audio to retain the complete B1 and
          * warm the new receive filter. Current input is fed below once. */

@@ -750,7 +750,10 @@ static void v90_receive_CP(V90EncodeState *s)
 
 void V90_init(struct V90State *s, int calling)
 {
+    const char *lapm=getenv("SIPFAX_V90_V42");
     s->calling = calling;
+    s->lapm_requested=!calling && lapm && !strcmp(lapm,"1");
+    s->lapm.enabled=s->lapm.initialized=0;
     s->fpos = 0;s->serial_word=0;s->serial_remaining=0;
     v90_echo_init(&s->echo);
     if (calling) {
@@ -798,6 +801,21 @@ static void v90_ppp_frame(void *opaque,const uint8_t *frame,unsigned length)
     sm_put_bit(&sm->rx_fifo,0x7e);
 }
 
+static int v90_lapm_get(void *opaque,uint8_t *data,int maximum)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;int n=0;
+    while(n<maximum){int value=sm_get_bit(&sm->tx_fifo);if(value<0)break;data[n++]=(uint8_t)value;}
+    return n;
+}
+
+static int v90_lapm_put(void *opaque,const uint8_t *data,int length)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    int room=SM_FIFO_SIZE-sm_size(&sm->rx_fifo);if(length>room)length=room;
+    for(int i=0;i<length;i++)sm_put_bit(&sm->rx_fifo,data[i]);
+    return length;
+}
+
 int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
 {
     int i, j;
@@ -815,16 +833,31 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
             output[i] = 0;
         }
     } else {
+        if(s->lapm_requested && s->lapm.initialized)v90_lapm_link_drain(&s->lapm);
         if(!s->startup.phase4_active || s->startup.phase4.stage!=4 || !s->startup.phase4.rx_e_logged)
             v90_echo_pause(&s->echo);
         else if(v90_echo_due(&s->echo,s->startup.samples))
             v90_startup_data_retrain(&s->startup);
         if(s->startup.phase4_active) {
             V90Phase4 *p=&s->startup.phase4;
-            p->get_data_bit=v90_serial_bit;p->data_opaque=s;
-            p->upstream.receive_frame=v90_ppp_frame;p->upstream.opaque=s;
+            if(s->lapm_requested){
+                unsigned bits=p->encoder.k+p->encoder.s;
+                int rate=bits?(int)(bits*8000/6):49333;
+                if(!s->lapm.initialized)
+                    v90_lapm_link_init(&s->lapm,rate,s,v90_lapm_get,v90_lapm_put);
+                else s->lapm.protocol.tx_bit_rate=rate;
+                p->v42_decline_enabled=0;
+                p->get_data_bit=v90_lapm_link_tx_bit;p->data_opaque=&s->lapm;
+                p->upstream.receive_frame=NULL;p->upstream.opaque=NULL;
+                p->upstream.receive_bit=v90_lapm_link_candidate_bit;
+                p->upstream.bit_opaque=&s->lapm;
+            }else{
+                p->get_data_bit=v90_serial_bit;p->data_opaque=s;
+                p->upstream.receive_frame=v90_ppp_frame;p->upstream.opaque=s;
+            }
         }
         v90_startup_process(&s->startup, output, input, nb_samples);
+        if(s->lapm_requested && s->lapm.initialized)v90_lapm_link_drain(&s->lapm);
     }
     return 0;
 }

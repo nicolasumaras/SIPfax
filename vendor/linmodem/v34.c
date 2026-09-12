@@ -807,6 +807,9 @@ int V34_init_low(V34DSPState *s, V34State *p, int transmit)
   /* copy the params */
   s->calling = p->calling;
   s->rx_data_poly = 0;
+  s->p4_adv_info_len = 0;
+  s->p4_adv_ca = s->p4_adv_ac = 0;
+  memset(s->p4_adv_h, 0, sizeof(s->p4_adv_h));
   s->S = p->S;
   s->expanded_shape = p->expanded_shape;
   s->R = p->R;
@@ -1647,6 +1650,14 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     int i,j,crc;
 
     p = buf;
+    /* V.34 10.1.3.9: repeated MP/MP-prime information must be identical.
+       Freeze the first advertisement; only ACK and its CRC may change. */
+    if (s->p4_adv_info_len) {
+        memcpy(buf, s->p4_adv_info, s->p4_adv_info_len);
+        p += s->p4_adv_info_len;
+        type = s->p4_adv_type;
+        goto mp_crc;
+    }
     /* SIPFAX: mirror the parameters the caller proposed in its MP instead of
        advertising a fixed 28800/28800 + 16-state trellis. A peer will not
        acknowledge an MP whose parameters contradict its own proposal, and without
@@ -1783,6 +1794,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
                                 for(k=0;k<6;k++) fhv[k]=(s16)v[k]; fh=1; } }
                         if (fh) hv = fhv[i*2+j];
                     }
+                    s->p4_adv_h[i][j] = hv;
                     for (hb = 0; hb < 16; hb++)
                         put_bits(&p, 1, (hv >> hb) & 1);
                 }
@@ -1795,6 +1807,11 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
 
     put_bits(&p, 1, 0); /* start bit */
 
+    s->p4_adv_info_len = p - buf;
+    s->p4_adv_type = type;
+    memcpy(s->p4_adv_info, buf, s->p4_adv_info_len);
+mp_crc:
+    buf[33] = do_ack ? 1 : 0;
     {   /* spec CRC: over information bits only (exclude sync/start/fill) */
         u8 cov[200]; int cn = 0, bp, clen = p - (buf + 17);
         for (bp = 17; bp < 17 + clen; bp++) {
@@ -5402,8 +5419,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                              fprintf(stderr, "[data] symbol-timing offset %+.3f input samples"
                                      " (%.3f symbol)\n", t, t/(7.0/3.0)); }
                 }
-                int our_ca = 0, their_ca, R;   /* 0 = follow the caller, no cap */
-                { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
+                int our_ca = s->p4_adv_ca, their_ca, R;
+                /* Live decoding must use the frozen advertisement. Environment caps
+                   are only a fallback for standalone recordings with no TX bridge. */
+                if (our_ca <= 0) { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
                 their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
                 /* SIPFAX: 'ca' is the CALL-TO-ANSWER rate - what the caller TRANSMITS and
                    therefore what we must RECEIVE. our_ca defaulted to 4, hard-capping the
@@ -5438,11 +5457,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        the caller then precodes its TX toward us with THAT h, so our RX must
                        invert with OUR advertised h (p4_hest), not peer_h. */
                     int rxp = ep ? atoi(ep) : 0;   /* SIPFAX: default OFF - with our h only rho~0.88 the precoding leaves residual ISI, and the delta+THP path (0.584) is worse than CMA (0.559); needs a more accurate h and/or a residual EQ after the THP modulo before this helps */
-                    if (rxp && p4_have_h) {
+                    if (rxp && (s->p4_adv_ca > 0 || p4_have_h)) {
                         int hi5;
                         for (hi5 = 0; hi5 < 3; hi5++) {
-                            s->h[hi5][0] = p4_hest[hi5][0];
-                            s->h[hi5][1] = p4_hest[hi5][1];
+                            s->h[hi5][0] = s->p4_adv_ca > 0 ? s->p4_adv_h[hi5][0] : p4_hest[hi5][0];
+                            s->h[hi5][1] = s->p4_adv_ca > 0 ? s->p4_adv_h[hi5][1] : p4_hest[hi5][1];
                         }
                         s->rx_precode = 1;
                         fprintf(stderr, "[data] RX precoder inverse ON (our advertised h) = "
@@ -8171,11 +8190,24 @@ void V34_mptest(void)
     p.S = V34_S3429; p.R = 16800; p.use_high_carrier = 1; p.calling = 0;
     p.conv_nb_states = 64;
     V34_init_low(&s, &p, 0);
+    if (getenv("SIPFAX_MPTEST_STABLE")) {
+        int kind = atoi(getenv("SIPFAX_MPTEST_STABLE"));
+        s.p4_mp_rx=0; p4_have_h=1; p4_hest[0][0]=1234;
+        V34_send_MP(&s,kind,0);
+        s.p4_mp_rx=1; s.p4_mp_rate_ca=3; s.p4_mp_rate_ac=4;
+        s.p4_trellis=2; s.p4_mp_mask=0x3ffe; p4_hest[0][0]=5678;
+        V34_send_MP(&s,kind,0);
+        V34_send_MP(&s,kind,1);
+        V34_init_low(&s,&p,0);
+        V34_send_MP(&s,kind,0);
+        return;
+    }
     /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
     s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
     s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
     V34_send_MP(&s, 1, 0);      /* MP  */
     V34_send_MP(&s, 1, 1);      /* MP' */
+    V34_init_low(&s, &p, 0);    /* new negotiation clears the advertisement */
     s.p4_mp_rx = 0;             /* pre-negotiation fallback */
     V34_send_MP(&s, 1, 0);
     fprintf(stderr, "[mptest] 3 frames dumped\n");
@@ -8525,6 +8557,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_rx.p4_adv_trel = s->v34_tx.p4_adv_trel;
     s->v34_rx.p4_adv_ca = s->v34_tx.p4_adv_ca;
     s->v34_rx.p4_adv_shape = s->v34_tx.p4_adv_shape;
+    memcpy(s->v34_rx.p4_adv_h, s->v34_tx.p4_adv_h, sizeof(s->v34_rx.p4_adv_h));
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed

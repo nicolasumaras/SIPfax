@@ -1682,3 +1682,27 @@ errors over 2146096 bits and generated audio retains zero over 93760 settled
 bits (3035 startup errors retained). These are local generated tests, not a
 hardware call result. Stable MP exchange parameters and V.34 startup remain
 open, and production has not changed.
+
+
+### Freeze MP information within one startup exchange
+
+The first MP now snapshots the complete information field, format, and advertised
+precoder coefficients. Later MP and MP-prime reuse it; only ACK and the resulting
+CRC change. This prevents newly decoded peer requests or updated channel estimates
+from changing an exchange already in progress. V34_init_low invalidates the
+snapshot for a new negotiation. The receive bridge carries the frozen coefficient
+values, and live receive rate selection uses the actual advertised cap. Offline
+recording diagnostics retain their environment/global fallback when no advertisement
+exists.
+
+Independent raw-frame checks cover both MP formats, parameter/channel changes after
+the first MP, ACK transitions with recalculated CRC, and a fresh negotiation after
+initialisation. All pass, alongside 84 independent MP frames, 12 trellis selections,
+16 directional shaping/power cases, peer-role payload checks and generated audio.
+This does not establish hardware fallback. The corrected negotiation must still
+be built on CT105 and exercised with the notebook; production is unchanged.
+
+The preceding directional-shaping commit 9f46376 also passed the exact target build
+and loader check on CT105: native SHA256
+e701fc13c533c38d68529a391b2a31e796a29c80d51b34d669990cd7ecd918d0.
+Evidence: work/v34-shaping-9f46376-target-validation.log.

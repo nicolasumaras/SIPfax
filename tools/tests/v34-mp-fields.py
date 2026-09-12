@@ -32,6 +32,28 @@ for rate in (12000,24000):
  assert powers[rate,0]!=powers[rate,1], 'power estimator ignored shaping'
 with tempfile.TemporaryDirectory() as tmp:
  d=Path(tmp);frames=d/'frames';symbols=d/'symbols'
+ for kind in (0,1):
+  stable=d/f'stable-{kind}'
+  e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST=str(stable),SIPFAX_MPTEST_STABLE=str(kind),SIPFAX_MP_CA='5',SIPFAX_MP_AC='5')
+  subprocess.run([str(binary)],env=e,capture_output=True,check=True,timeout=10)
+  rows=[[int(b) for b in line] for line in stable.read_text().splitlines()]
+  assert len(rows)==4
+  co=171 if kind else 69
+  for row in rows:
+   assert len(row)==(188 if kind else 88)
+   crc=0xffff
+   for k in range(17,co):
+    start=k in (17,34) or (k>=51 and (k-51)%17==0 if kind else k in (51,68))
+    if not start:crc=(crc>>1)^(0x8408 if (crc^row[k])&1 else 0)
+   assert sum(row[co+j]<<j for j in range(16))==crc, 'invalid frozen-frame CRC'
+  assert rows[0]==rows[1], 'MP changed after later peer parameters/channel estimate'
+  assert [k for k in range(co) if rows[0][k]!=rows[2][k]]==[33], 'MP-prime changed information beyond ACK'
+  read=lambda row,start,n:sum(row[start+j]<<j for j in range(n))
+  assert (read(rows[0],20,4),read(rows[0],24,4),read(rows[0],29,2))==(5,5,0)
+  assert (read(rows[3],20,4),read(rows[3],24,4),read(rows[3],29,2))==(3,4,2), 'new negotiation retained stale advertisement'
+  if kind:
+   assert read(rows[0],52,16)==1234 and read(rows[3],52,16)==5678, 'coefficient snapshot/reset failed'
+
  if not a.receive_only:
   e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST=str(frames),SIPFAX_MP_CA='5',SIPFAX_MP_AC='5')
   subprocess.run([str(binary)],env=e,capture_output=True,check=True,timeout=10)
@@ -70,4 +92,4 @@ with tempfile.TemporaryDirectory() as tmp:
     assert got['frames']>=2 and (got['ca'],got['ac'],got['trellis'],got['ack'])==(ca,ac,trel,1),(kind,ca,ac,trel,got)
     count+=1
   assert decode(frame(5,13,2,kind,True))['frames']==0,'corrupt frame accepted'
- print(f'PASS: {count} independent MP cases and corrupt-frame controls; 12 trellis selections; 16 directional shaping/power cases; emitted fields checked={not a.receive_only}')
+ print(f'PASS: {count} independent MP cases and corrupt-frame controls; 12 trellis selections; 16 directional shaping/power cases; Type0/1 snapshot, ACK CRC and reset cases; emitted fields checked={not a.receive_only}')

@@ -174,3 +174,27 @@ calls resumed without changing the server. Their measured cleanup checks took
 about three seconds. This interruption is retained in the campaign report.
 These ten successful samples improve the startup evidence but do not erase
 previous failures or qualify other builds, V.34 fallback, or simultaneous calls.
+
+### Application update, rollback, and restoration
+
+Application `31f57b9` passed all 84 application tests in CT105 and installer
+preflight before deployment. Native `cc64526` was retained byte-for-byte.
+Configuration and PPP credential hashes were verified unchanged. The initial
+hardware smoke call `20a73069-f4e2-479e-b3d1-d058372c09d1` passed at 49,296 bit/s.
+
+The application rollback snapshot `pre-31f57b9-app.tar.gz` has SHA-256
+`505515dc43201968bc60244775292c97f692aae5ea025913345ae38788346579`.
+Restoring it returned the application to `1f58ee0`; the three changed JavaScript
+files matched the archive, service health passed, and native/configuration
+hashes were preserved. Hardware call `252dfec5-57f4-40d6-9e4d-ad34a16db70c`
+passed at 49,296 bit/s. Reinstalling the staged `31f57b9` application then passed
+those file and preservation checks, followed by successful hardware call
+`2f6dd99a-0357-4998-bc6b-a1dd1d36d3b8` at 49,296 bit/s.
+
+Both calls passed two complete matching public HTTP responses, zero reported
+link-error counters, and final Disconnected status. An independent audit
+verified their records and final server health with zero sessions, leases, and
+active lines. The server remains on application `31f57b9` / native `cc64526`.
+This qualifies the application update/rollback path; native-binary rollback,
+V.34 fallback, controlled impairment, bulk uploads, and concurrent hardware
+calls remain separate requirements.

@@ -1742,3 +1742,36 @@ work/v34-stable-restoration-call.log and
 work/v90-ppp-lifecycle-117e57f3-c860-4133-a7ce-c489b300e8f2.json.
 DialUpLab still reports1.1.1.0; actual bulk upload and multiple physical calls
 remain unqualified. PR29 remains draft.
+
+
+### Recorded advertisement replay and B1 match, capture61604
+
+Offline replay previously lacked the live TX-to-RX advertisement bridge and could
+select the peer's32-state request instead of the recorded local16-state request.
+Commit deff8a7 adds SIPFAX_STREAM_MP=rate,trellis,shape to supply recorded receive
+parameters explicitly. Generated audio with a contradictory peer trellis but the
+correct recorded advertisement yields identical decoded bits to the baseline;
+malformed/out-of-range inputs are rejected. These tests pass locally and on CT105.
+No live modem behavior was changed by this diagnostic addition.
+
+Retained capture61604 (RX SHA256
+61f14aebaadea5bef1b2d715e9e5797fdd6b4ec7b15b4169fca19a4075e1b3a4)
+was echo-cancelled and replayed entirely on CT105. The recorded12000/16-state/
+minimum-shaping advertisement produced lattice RMS0.235 versus0.232 live, but only
+56.5% ones over the first2400 decoded bits. Timing offsets minus/plus0.25 input
+samples worsened RMS to0.279/0.290 and did not produce valid startup decoding.
+Evidence: work/v34-recorded-61604-replay-audit.log. Target diagnostic binary SHA256
+d40d7fc095c9c73d0dd217bb0a91c5fe1842987c00375edd7f3eff16f308387b.
+
+A B1 reference comparison now shows a material match: recorded12000/minimum/zero-h
+with a32-state reference explains0.7732 of held-out symbol power; the16-state
+reference explains0.6412. Both best fits have zero symbol offset, zero carrier
+rotation, and no conjugation. Unrelated noise scores approximately0.13; the
+constructed positive control scores1.0. Four reference candidates cover16/32-state
+and minimum/expanded shaping. The search fits three complex linear taps on
+symbols2..79 and ranks symbols80..119; best-of-many ranking remains exploratory.
+It does not establish that the caller ignored our trellis request or that either
+reference encoder is independently correct. Next isolate the trellis-dependent
+symbol differences and residual channel error before another hardware change.
+Evidence: work/v34-recorded-61604-reference-audit.log. Audio and receiver traces
+remain on CT105; production is unchanged and V.34 PPP remains unqualified.

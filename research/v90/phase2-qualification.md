@@ -2357,3 +2357,28 @@ comparison must use answering role, shape1,trellis32, actual coefficients and
 nonlinear normalization, rather than the caller-direction/unprecoded reference.
 Evidence: work/v34-zero-66406-caller-mp.json and
 work/v34-zero-66406-tx-parameters.json.
+
+### Retained answering B1 matches the configured encoder waveform
+
+An in-place TX66406 comparison synthesizes the answering B1 reference with
+12000bit/s,32-state trellis, expanded shaping, hQ14
+1469,2069,-309,-1235,1213,804 and nonlinear mean9.47. The waveform model
+uses the actual7-phase pulse-shaping table, quantized carrier increment, symbol
+amplitude4369 and index2 pre-emphasis coefficients. It searches seven baud
+phases and a16.0..17.3s window, fitting two quadrature components to allow an
+unknown carrier phase/gain. Only the125..127-sample interior with fully known
+B1/filter support is scored; neighboring unknown training/data symbols are
+excluded. Synthetic quadrature self-fit is1.0.
+
+The negotiated model explains0.9999997447 of the selected125-sample window's
+energy at16.9495s (baud phase6). A wrong caller-role reference peaks at0.15747.
+Disabling nonlinear encoding still fits0.99816, so that control is weak and
+should not alone be used to identify nonlinear compliance. The result verifies
+consistency between the saved transmit waveform and this configured encoder
+model on the inspected interior. It is not an independent audit of all V34
+coding equations, the full E/B1 seam, or delivery through RTP/ATA. It does rule
+out a gross role/parameter mismatch or output-buffer corruption in this window.
+Evidence: work/v34-tx-b1-66406-wave-audit.json; model artifacts and all audio
+remain in /tmp/v34-tx-b1-66406 on CT105. Next obtain scoped transport timing
+across the server/PBX/ATA path during a hardware trial and compare the emitted
+and delivered startup windows. No production change was made for this audit.

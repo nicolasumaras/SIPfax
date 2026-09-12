@@ -240,6 +240,9 @@ typedef struct V34DSPState {
 #define DATA_ACQ_N 2000
     int data_acq_done, data_acq_n;                   /* SIPFAX: data-mode acquisition */
     double data_acq_i[DATA_ACQ_N], data_acq_q[DATA_ACQ_N];
+    double data_acq_raw_i[DATA_ACQ_N], data_acq_raw_q[DATA_ACQ_N];
+    double data_acq_srx[DATA_ACQ_N];
+    long data_source_n, data_acq_source[DATA_ACQ_N];
     int rx_j16;      /* SIPFAX: caller's J requested 16-point Phase 4 from US (0x0D91) */
     int jvar_wait, jvar_phase, jvar_c4, jvar_c16;  /* SIPFAX: J-variant vote in progress */
     int p4_key, p4_keyn, p4_mp_crcok, p4_trellis;

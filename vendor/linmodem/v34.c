@@ -5602,6 +5602,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    loop pulls down. SIPFAX_DATA_AGC=0 restores the open-loop gain. */
                 if (s->data_agc <= 0) s->data_agc = sqrt(s->data_meanc2 / s->rx16_rms);
                 gc = s->data_agc;
+                long source_symbol = s->data_source_n++;
+                int was_acquired = s->data_acq_done;
                 if (!s->data_acq_done) {
                     /* SIPFAX: the gain is no longer searched - v34_shaped_meanc2() measures
                        it from our own mapper, because the lattice objective is minimised by
@@ -5671,6 +5673,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                           acqdly = ea ? atol(ea) : 0; }
                         if (acqseen < acqdly) { acqseen++; }
                         else {
+                        s->data_acq_source[s->data_acq_n] = source_symbol;
+                        s->data_acq_raw_i[s->data_acq_n] = oi;
+                        s->data_acq_raw_q[s->data_acq_n] = oq;
+                        s->data_acq_srx[s->data_acq_n] = s->srx_th;
                         s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
                         s->data_acq_q[s->data_acq_n] = (oi*st0 + oq*ct0) * gc;
                         s->data_acq_n++;
@@ -6184,6 +6190,24 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     }
                 }
                 if (s->data_acq_done) {
+                /* Experimental lossless handoff: consume accepted acquisition samples
+                   once, in their original equalizer frame, then process the current
+                   symbol (acquisition runs on the sample after the buffer fills). */
+                static int replay_enabled = -1;
+                if (replay_enabled < 0) { const char *e=getenv("SIPFAX_ACQ_REPLAY"); replay_enabled=e ? atoi(e) : 0; }
+                int replay_n = replay_enabled && !was_acquired ? s->data_acq_n : 0;
+                double saved_oi=oi, saved_oq=oq, saved_srx=s->srx_th;
+                if (replay_n) {
+                    s->data_th -= s->data_frq * (replay_n-1)*0.5;
+                    fprintf(stderr,"[data] replaying %d accepted acquisition symbols\n",replay_n);
+                }
+                for (int replay_i=0; replay_i<(replay_n ? replay_n+1 : 1); replay_i++) {
+                if (replay_i < replay_n) {
+                    oi=s->data_acq_raw_i[replay_i]; oq=s->data_acq_raw_q[replay_i];
+                    s->srx_th=s->data_acq_srx[replay_i]; gc=s->data_agc;
+                } else if (replay_n) {
+                    oi=saved_oi; oq=saved_oq; s->srx_th=saved_srx; gc=s->data_agc;
+                }
                 if (s->data_nra && s->nra_n < 300) {
                     /* SIPFAX: bootstrap the carried gain from the received data power over
                        the first ~300 symbols (what a real modem's AGC holds across the
@@ -6268,9 +6292,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                        if (e5) df = fopen(e5, "w"); }
                             if (df) fprintf(df, "%d %d\n", si2, sq2);
                         }
+                        { static FILE *seqf; static int seq_opened;
+                          if (!seq_opened) { const char *e=getenv("SIPFAX_DATA_FEED_SEQUENCE"); seq_opened=1; if (e) seqf=fopen(e,"w"); }
+                          if (seqf) fprintf(seqf,"%ld\n",replay_i < replay_n ? s->data_acq_source[replay_i] : source_symbol);
+                        }
                         baseband_decode_impl(s, si2, sq2);
                     }
                 }
+                }
+                oi=saved_oi; oq=saved_oq; s->srx_th=saved_srx;
                 }
                 { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
                     fprintf(stderr, "[data] clock %+.1f ppm\n", s->cma_tinc/(7.0/6.0)*1e6),

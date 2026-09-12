@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const DEFAULT_DNS_SERVERS = ['1.1.1.1', '9.9.9.9'];
 
@@ -10,7 +10,15 @@ export function renderChapSecrets(credentials, path) {
   const lines = credentials.chapSecrets().map(({ username, password }) => {
     return `${quotePppSecret(username)} * ${quotePppSecret(password)} *`;
   });
-  writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
+  // Readers in other pppd processes must see a complete credential set.
+  const staging = mkdtempSync(join(dirname(path), '.sipfax-secrets-'));
+  try {
+    const pending = join(staging, 'secrets');
+    writeFileSync(pending, `${lines.join('\n')}\n`, { mode: 0o600 });
+    renameSync(pending, path);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
   return path;
 }
 

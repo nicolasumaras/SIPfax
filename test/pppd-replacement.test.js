@@ -1,11 +1,28 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PppCredentialStore } from '../src/ppp.js';
-import { PppdSupervisor } from '../src/pppd-supervisor.js';
+import { PppdSupervisor, renderChapSecrets } from '../src/pppd-supervisor.js';
+
+test('credential replacement preserves existing readers and restricts new file permissions', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sipfax-secrets-update-'));
+  const path = join(dir, 'chap-secrets');
+  writeFileSync(path, 'old complete credentials\n', { mode: 0o644 });
+  const reader = openSync(path, 'r');
+  try {
+    renderChapSecrets(new PppCredentialStore([{ username: 'new', password: 'secret' }]), path);
+    assert.equal(readFileSync(reader, 'utf8'), 'old complete credentials\n');
+    assert.equal(readFileSync(path, 'utf8'), '"new" * "secret" *\n');
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(dir), ['chap-secrets']);
+  } finally {
+    closeSync(reader);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('late events from a replaced PPP process cannot mutate its successor', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sipfax-replacement-'));

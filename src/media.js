@@ -754,7 +754,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
     const child = this.child;
     this.child = null;
     child.stdin.end();
-    child.kill('SIGTERM');
+    if (child.pid > 0) child.kill('SIGTERM');
   }
 
   diagnostics() {

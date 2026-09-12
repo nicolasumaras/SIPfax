@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callKey } from './sipfax-call-key.mjs';
 import { spawnSync } from 'node:child_process';
@@ -166,11 +166,26 @@ function setForwarding(descriptor, enabled) {
 }
 
 function run(command, args, input = null) {
-  const result = spawnSync(command, args, {
-    input,
-    encoding: 'utf8',
-    stdio: input === null ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
-  });
+  let directory;
+  let fd;
+  let result;
+  try {
+    if (input !== null) {
+      // Some nft versions reject Node's socket-backed stdin for `nft -f -`.
+      // Supply a private regular file while retaining one atomic ruleset load.
+      directory = mkdtempSync(join(activeDir, '.command-input-'));
+      const path = join(directory, 'input');
+      writeFileSync(path, input, { mode: 0o600 });
+      fd = openSync(path, 'r');
+    }
+    result = spawnSync(command, args, {
+      encoding: 'utf8',
+      stdio: [fd ?? 'ignore', 'pipe', 'pipe']
+    });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  }
   if (result.status !== 0) {
     const detail = (result.stderr || result.stdout || '').trim();
     throw new Error(`${command} ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`);

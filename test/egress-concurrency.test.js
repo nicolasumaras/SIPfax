@@ -15,7 +15,7 @@ test('parallel PPP hooks serialize rules and preserve forwarding for the survivi
   const active = join(root, 'active');
   const log = join(root, 'commands');
   mkdirSync(mockBin); mkdirSync(leases);
-  writeFileSync(join(mockBin, 'nft'), '#!/bin/sh\necho BEGIN >> "$SIPFAX_TEST_LOG"\ncat >> "$SIPFAX_TEST_LOG"\nsleep 0.1\necho END >> "$SIPFAX_TEST_LOG"\n', { mode: 0o755 });
+  writeFileSync(join(mockBin, 'nft'), '#!/bin/sh\ntest -f /dev/stdin || exit 65\necho BEGIN >> "$SIPFAX_TEST_LOG"\ncat >> "$SIPFAX_TEST_LOG"\nsleep 0.1\necho END >> "$SIPFAX_TEST_LOG"\n', { mode: 0o755 });
   writeFileSync(join(mockBin, 'sysctl'), '#!/bin/sh\nif test "$1" = -n; then if test -f "$SIPFAX_TEST_LOG" && grep -q "ip_forward=1" "$SIPFAX_TEST_LOG"; then echo 1; else echo 0; fi; else echo "$*" >> "$SIPFAX_TEST_LOG"; fi\n', { mode: 0o755 });
   const ids = ['caller/one', 'caller:one'];
   const policy = new EgressPolicy({ operatorUrl: '' });
@@ -44,6 +44,7 @@ test('parallel PPP hooks serialize rules and preserve forwarding for the survivi
     await run('down', ids[1]);
     assert.ok(readFileSync(log, 'utf8').includes('ip_forward=0'));
     assert.equal(readdirSync(active).filter(name => name.endsWith('.json')).length, 0);
+    assert.ok(!readdirSync(active).some(name => name.startsWith('.command-input-')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -73,6 +74,7 @@ test('rejected nft policy does not enable forwarding or publish an active lease'
     writeFileSync(fail, 'reject');
     await assert.rejects(run('rejected'));
     assert.deepEqual(markers(), []);
+    assert.ok(!readdirSync(active).some(name => name.startsWith('.command-input-')));
     assert.equal(readFileSync(log, 'utf8'), 'POLICY\n');
     rmSync(fail);
     await run('survivor');

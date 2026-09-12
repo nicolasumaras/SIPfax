@@ -675,3 +675,36 @@ synthetic/control logs; work/v90_erasure_feedback_control.py and
 work/v90_erasure_feedback_window_control.py with separate source copies/logs
 under work/v90-erasure-feedback[-window]-evidence. Production remains
 application1dc5cb2/nativecc64526; no native changes were deployed.
+
+## Automatic energy-based erasure guard candidate (2026-09-12)
+
+Commit cd1434a adds opt-in SIPFAX_V90_ERASURE_GUARD=1. An eight-sample power
+window detects energy below5% of the running reference after B1. It pauses
+provisional equalizer feedback through matched-filter, equalizer, survivor
+and saved-feedback history, while all clocks and decoding continue. It uses
+signal energy, not known injection timing. Defaults remain unchanged.
+
+The original20ms gap now recovers23/24 frames, and all six additional cases
+pass: clean28800,10ms gap, shifted20ms gap at6500,60ms gap, clean26400, and
+28800/3000baud20ms gap (PCMU with +/-100ppm). Native build passes. Added clean
+and20ms opt-in CI checks; remote completion not yet verified. Evidence:
+work/v90-erasure-guard-evidence and work/v90_guard_matrix.py.
+
+First hardware trial4cb31917-1f03-497a-bbf3-e323de172d56 failed before modem
+startup because the locally built executable required GLIBC_2.43. Qualified
+binary restored and idle health verified. Built committed source in CT105
+with bundled vendor/spandsp-v42 (first partial archive omitted that dependency;
+completed build and dynamic-loader check then passed). Compatible candidate
+SHA cdb345909a8a2793b58b72949263a314c47736bd609f9f9a9e502ef4ac298ca6.
+Trial645db964-4790-4b23-8374-a1163ed8e8b4 reached B1/ODP/XID/LAPM but ended
+with619 before PPP, so no packet was injected and hardware guard acceptance
+remains unproven. Qualified binary restored. A guard-disabled comparison of
+the identical candidate is needed to isolate startup behavior.
+
+The CT compiler additionally exposed b2s[4][2] being indexed at2 and3 during
+V.34 16-point training. Expanded its second dimension to4. Native rebuild
+and live-initialized replay pass frame-parameter checks, but replay lattice
+RMS remains0.566 (no lock). Local bounds-sanitizer linking failed because the
+runtime libubsan.so.1.0.0 is absent, so no sanitizer pass is claimed. The
+sanitizer attempt and logs are retained under work/v34-training-bounds-evidence.
+The V.34 fix is not deployed and does not qualify fallback.

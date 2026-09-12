@@ -5131,7 +5131,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             fclose(tf); tapdumped = 1; } }
         static u8 jpat[16]; static u8 jppat[16]; static int jpat_init = 0;
         unsigned int poly = (cma_t1 == 5) ? (1u|(1u<<18)) : (1u|(1u<<5));  /* GPA : GPC */
-        double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][2]; unsigned int regsnap[4];
+        double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][4]; unsigned int regsnap[4];
         static u8 jpat16[16];
         if (!jpat_init) { for (k = 0; k < 16; k++) { jpat[k] = (0x0991 >> (15-k)) & 1;
                                              jpat16[k] = (0x0D91 >> (15-k)) & 1;

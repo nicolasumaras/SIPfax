@@ -47,6 +47,8 @@ jobs:
         run: python3 tools/tests/v34-fig9-table.py
       - name: Test V34 corrected-label traceback and settled decoding
         run: python3 tools/tests/v34-fig9-state.py vendor/linmodem/lm
+      - name: Verify V34 clockwise mapper coordinates
+        run: python3 tools/audit-v34-mapper.py vendor/linmodem/lm
       - name: Verify V34 Table 11 current-interval ordering
         run: python3 tools/audit-v34-table11.py vendor/linmodem/lm
       - name: Test V34 precoded link and frame alignment

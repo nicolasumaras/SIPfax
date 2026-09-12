@@ -1227,8 +1227,9 @@ static void encode_mapping_frame(V34DSPState *s)
                     s->sync_count, s->half_data_frame_count, s->conv_reg);
           }
       }
-      /* rotation by Z[i] * 90 degress clockwise */
-      rotate_clockwise(x, y, x1, y1, Z[i]);
+      /* Clause 9.6.1 requires clockwise rotation. The legacy helper's
+         positive argument rotates counterclockwise, so negate it. */
+      rotate_clockwise(x, y, x1, y1, (4 - Z[i]) & 3);
       u_re = x;
       u_im = y;
 
@@ -3678,19 +3679,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
       }
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
-      /* SIPFAX: quadrant handedness. rotate_clockwise() is really CCW - case 1 is
-         (x,y)=(-y1,x1), i.e. multiplication by +j, and V34_baseband_to_carrier emits
-         Re{(si+j*sq)e^{+j phi}}. Phase 4 negates it to get spec CW (10.1.3.3), and that
-         negation was validated on a real caller (FINDINGS: TRN decodes to 0.998 ones with
-         CW, 0.32-0.51 the other way). Data mode's 9.6.1 mapper and the decoder's
-         constellation_to_code table were left UN-negated, so the two directions disagree
-         about handedness. That cannot move the trellis metric - Z is read long after mse
-         is computed, and data_slice scans all four rotations - but it does corrupt the
-         extracted BITS: with Z mirrored, I1 stays correct while I2 flips whenever I1=1 and
-         I0 flips whenever U0=1. Metric 23.3 with 50% ones is exactly that signature.
-         SIPFAX_Z_SIGN=1 negates on decode so the two arms can be compared. */
+      /* The lookup table encodes counterclockwise quadrant indices.
+         Convert to the clockwise Z used by the clause 9.6.1 mapper before
+         differential decoding. SIPFAX_Z_SIGN=0 retains the legacy diagnostic. */
       { static int zs = -1;
-        if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 0; }
+        if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 1; }
         Z[i] = zs ? ((4 - ((t >> 14) & 3)) & 3) : (t >> 14); }
       /* SIPFAX: the constellation_to_code cell packs i | (j << 14), so the index field is
          FOURTEEN bits, not eight. Masking to 0xff truncated the quarter-constellation index

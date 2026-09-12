@@ -1510,3 +1510,56 @@ Evidence: `work/v34-peer-role-{before,after}-oracle.json`,
 `work/v34-generated-audio-6d31989/` (generated content only).
 Production remains unchanged. CI run34718354507 at `39a21df` has now completed
 with both jobs successful; that result predates this new role correction.
+
+
+## Captured receive contrasts and clockwise mapper correction (2026-09-12)
+
+Replaying PID59456 with the CT105-built `5bc4919` descrambler correction
+left acquisition unchanged: lattice RMS0.562 and mean trellis metric241.7.
+The receiver emitted7867 bits in both runs, but the observed ones fraction
+remained near50 percent. Three existing receive configurations were tested
+on the same retained recording: CMA plus post-traceback inverse, a delta
+equalizer plus inverse, and the seeded block equalizer plus inverse.
+All activated the expected options and loaded the exact advertised h.
+None acquired a convincing signal; lattice RMS ranged0.562..0.566.
+These contrasts do not isolate the remaining cause. Aggregate evidence:
+`work/v34-peer-59456-replay-audit.json` and
+`work/v34-peer-59456-equalizer-audit.json`. Audio remained on CT105.
+
+A separate specification audit found that data mapping violated9.6.1:
+Z rotations must be clockwise. The legacy `rotate_clockwise` helper actually
+rotates counterclockwise for positive arguments. Phase4 already negated its
+argument, while the data mapper and its inverse lookup still agreed on the
+wrong direction. A mutually consistent loopback did not detect this error.
+
+`tools/audit-v34-mapper.py` independently checks the emitted u-coordinate
+residues against clockwise rotations of the Figure5 quarter-constellation.
+The old mapper violated59/120 checks with zero precoder taps and54/120 with
+the captured advertised taps. A prototype negated only the data-mapper
+rotation and converted the receive lookup's CCW index to clockwise Z.
+Both audits then had0/120 violations. The same correction is now integrated
+in source, with the independent audit enabled in CI. The generic helper and
+Phase4 rotation behavior are unchanged.
+
+The prototype passed12 exact precoded cases and their negative controls,
+48 alignment cases (0/6065920 settled bits), both peer-role contracts
+(0/2146096 bits), and generated audio (0/93760 settled bits,3035 startup
+errors retained). Integrated-source checks also passed known-phase startup
+(0/156486, wrong-phase control fails), Figure9 state/settled decoding,
+nonlinear projection, low-rate grouping and deterministic B1 generation.
+Automatic startup and hardware interoperability remain unqualified.
+
+The isolated CT105 prototype source SHA256 is
+`2acd3c8f8d9bdb55b1f17f47445f4cd84286f0938f066778c3b83c53f4dba11b`;
+native SHA256 is
+`8e70d64839fb021813a78538b8a3fdce6d2d300d82958bef0f53fc5b008a2478`.
+The corrected references still did not convincingly fit PID59456's received
+symbols: best capture0.18160 versus unrelated-noise0.20677, positive control1.0.
+This is another retained hardware-analysis failure, not a fallback pass.
+
+Evidence: `work/v34-mapper-clockwise-{before,prototype}.json`,
+`work/v34-clockwise-prototype-link.log`,
+`work/v34-clockwise-59456-reference-audit.json`,
+`work/v34-clockwise-target-build.json`, and
+`work/v34-clockwise-integrated-*`. The prototype lives under
+`/tmp/v34-clockwise-5bc4919` locally and on CT105. Production was not changed.

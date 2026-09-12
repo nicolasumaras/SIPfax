@@ -8270,6 +8270,19 @@ void V34_mptest(void)
         V34_send_MP(&s,kind,0);
         return;
     }
+    if (getenv("SIPFAX_MPTEST_CHANNEL_RESET")) {
+        static V34State session;
+        extern void v34_phase2_free(void *);
+        for (int attempt=0; attempt<3; attempt++) {
+            p4_have_h=1;
+            for (int k=0;k<3;k++) for (int j=0;j<2;j++) p4_hest[k][j]=4713+k+j;
+            memset(&session,0,sizeof(session)); V34_init(&session,0);
+            if (attempt==1) { p4_have_h=1; p4_hest[0][0]=1234; }
+            V34_send_MP(&session.v34_tx,1,0);
+            if (session.phase2) v34_phase2_free(session.phase2);
+        }
+        return;
+    }
     /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
     s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
     s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
@@ -8431,6 +8444,10 @@ extern void v34_phase2_free(void *p);
 
 void V34_init(struct V34State *s, int calling)
 {
+    /* A previous attempt's receive channel must not be advertised on a retrain.
+       Current-attempt estimation may populate these again during Phase 4. */
+    p4_have_h = 0;
+    memset(p4_hest, 0, sizeof(p4_hest));
     /* Fixed V.34 params for first bring-up (S=2400 baud, R=19200, 16-state).
        TODO: derive S/R from the V.34 phase-2 INFO/probing negotiation. */
     s->S = V34_S2400;

@@ -2019,3 +2019,34 @@ Qualified V90 restoration b9afb314-6805-4e2b-9568-f8574ba87ba4 passed49296, expe
 managed files match; guard enabled and trial flags removed. Evidence:
 work/v34-ready-hardware-final-audit.json, work/v34-ready-restoration-call.log,
 work/v90-ppp-lifecycle-b9afb314-6805-4e2b-9568-f8574ba87ba4.json. Production unchanged.
+
+
+### Retry channel estimate persists across V34 initialization
+
+Five clock-policy contrasts on retained63643 (automatic, unseeded, zero,-25,+25ppm)
+all acquire at approximately0.520 RMS. The replay's automatic seed is-36.3ppm,
+not the live retry's+388.7ppm, so it is not a faithful replay of every retraining
+state. Full-trace B1 correlation finds a moderate match at detected E (index61758)
+and a stronger later retry (index119173). These results do not justify changing
+clock policy. Evidence: work/v34-clock-63643-contrast.json and
+work/v34-boundary-63643-search.json.
+
+Decoding the retained TX MP frames reveals the missing condition: first-attempt
+MP at15.0..16.5s advertises zero coefficients, but every subsequent attempt at
+27..28s,38.5..40s and50.5..52s advertises hQ14
+4713,1865,-3920,449,2678,-610. Other fields remain12000/12000,16-state,minimum
+shaping,nonlinear off. The log's static one-time advertisement message concealed
+this retry change. Prior poor-retry replays assuming zero h therefore use wrong
+negotiation parameters; preserve them with this limitation. Evidence:
+work/v34-63643-tx-advertisements.json. Audio remains on CT105.
+
+V34_init now invalidates the previous attempt's global channel estimate and clears
+its coefficients. Phase4 can still establish a fresh current-attempt estimate.
+A raw emitted-frame test exercises the real answer initializer three times with
+stale values preloaded: zero advertisement, fresh1234 estimate advertisement,
+then zero again on the next attempt. Existing MP, readiness and acquisition-buffer
+tests pass locally. This addresses stale-state leakage; it does not qualify live
+precoder inversion, force all advertisements to zero, or establish V34 PPP.
+Next verify the exact target build and retry advertisements on hardware, and use
+actual advertised coefficients for any further retained-retry reference analysis.
+Production has not changed.

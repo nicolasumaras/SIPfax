@@ -32,6 +32,15 @@ for rate in (12000,24000):
  assert powers[rate,0]!=powers[rate,1], 'power estimator ignored shaping'
 with tempfile.TemporaryDirectory() as tmp:
  d=Path(tmp);frames=d/'frames';symbols=d/'symbols'
+ reset=d/'channel-reset'
+ e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST=str(reset),SIPFAX_MPTEST_CHANNEL_RESET='1')
+ subprocess.run([str(binary)],env=e,capture_output=True,check=True,timeout=10)
+ reset_rows=[[int(b) for b in line] for line in reset.read_text().splitlines()]
+ assert len(reset_rows)==3
+ for row,expected in zip(reset_rows,(0,1234,0)):
+  coefficients=[sum(row[52+17*k+j]<<j for j in range(16)) for k in range(6)]
+  assert coefficients==[expected,0,0,0,0,0], 'stale channel estimate survived V34 initialization'
+
  for kind in (0,1):
   stable=d/f'stable-{kind}'
   e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST=str(stable),SIPFAX_MPTEST_STABLE=str(kind),SIPFAX_MP_CA='5',SIPFAX_MP_AC='5')

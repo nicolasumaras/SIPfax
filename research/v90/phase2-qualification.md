@@ -1807,3 +1807,38 @@ Evidence: work/v34-trellis-61604-discrimination.json,
 work/v34-b1-61604-parity.json, work/v34-fig9-61604-discrimination.json and
 work/v34-fig9-61604-replay.json. All captured audio and receiver traces remain on
 CT105. No live service changes were made.
+
+
+### Complete Figure 9 tables and controlled hardware trial d675cea
+
+The branch generator now supports4/8/16 transitions and supplies corrected tables
+for16/32/64-state receivers under SIPFAX_FIG9=1. All768 tuples are independently
+classified using the fixed Figure9 grid; the same generator reproduces every
+legacy table when given legacy labels. The dataloop harness accepts explicit
+trellis selection. Nine clean-data cases (7200/16800/33600, allthree trellises)
+have exact traceback states and no settled bit errors, retaining startup errors
+and erasures in the reports. The qualified default remains unchanged.
+
+Exact CT105 build d675cea, SHA256
+05bdc59abc0903333db53bd13f2d8ad83f75812d8f7e6ecac44b264a6263478d,
+passed table/state tests. Capture61604 replay with the corrected16-state table
+improved first2400-bit ones fraction from56.5% to70.1% and mean trellis metric
+from227.5 to208.4; overall61.5% ones over7568 bits. This is still not correct
+payload/startup decoding. Evidence: work/v34-fig9-d675cea-target-replay.log.
+
+Controlled Figure9-enabled hardware attempt a3429cd2-c75e-48c4-a46a-304105e9a961
+failed with678 after four TX B1 entries. Two RX acquisition events had RMS0.546/
+0.545 and clock seeds-291.4/+322.9ppm, unlike the earlier good capture. Preserve
+this failure; the table correction alone does not provide repeatable acquisition.
+Capture62290 remains on CT105 (880640-byte RX); full trace is
+/tmp/v34-fig9-d675cea-hardware-native.log. Aggregate evidence:
+work/v34-fig9-cma-hardware-1789251146.{json,call.log,native-audit.json} and
+work/v34-fig9-hardware-diagnostics.json.
+
+Restored qualified V.90 call b7c2a184-0b86-4a8e-ace4-425f0a173b93 passed at49296,
+with the expected559-byte checksum, zero six-category RAS errors, ipcp-open and
+clean cleanup. All25 release-managed files match, erasure guard is enabled, the
+Figure9 trial flag is absent, and both endpoints are idle. Evidence:
+work/v34-fig9-restoration-call.log, work/v34-fig9-hardware-final-audit.json and
+work/v90-ppp-lifecycle-b7c2a184-0b86-4a8e-ace4-425f0a173b93.json.
+V.34 fallback, actual bulk upload, and multiple physical calls remain unqualified.

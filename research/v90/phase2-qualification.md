@@ -1775,3 +1775,35 @@ reference encoder is independently correct. Next isolate the trellis-dependent
 symbol differences and residual channel error before another hardware change.
 Evidence: work/v34-recorded-61604-reference-audit.log. Audio and receiver traces
 remain on CT105; production is unchanged and V.34 PPP remains unqualified.
+
+
+### Isolate Figure 9 mapping mismatch in capture61604
+
+Additional in-place discrimination compared all16/32/64-state references at the
+same zero offset and carrier rotation, with1/3/7 complex channel taps. Generated
+positive controls correctly identified each true trellis; noise explained at most
+0.0343 in the legacy fixed-offset comparison. A common-channel fit on reference-
+shared symbols showed all52 first symbols rounded exactly to the expected points,
+but only28/52 second symbols matched16-state or32-state and26/52 matched64-state.
+This localizes the discrepancy to the second-symbol redundant-bit mapping rather
+than general timing or channel acquisition.
+
+Generating references with the existing SIPFAX_FIG9=1 branch resolves the apparent
+32-state preference: the advertised16-state reference explains0.99788 with one
+complex gain and0.99867 with three taps, versus0.79444/0.78768 for32-state. Thus the
+legacy reference mapping caused the earlier misleading trellis ranking; this call
+now strongly agrees with the advertised16-state B1 sequence. This remains reference
+comparison, not a successful payload decoder.
+
+Full audio replay with SIPFAX_FIG9=1 still returns the same incorrect bit stream.
+Inspection shows that the corrected-label receive branch table is selected only in
+the64-state switch case. The16-state trellis_trans_4 and32-state trellis_trans_8
+paths remain legacy regardless of that flag. Next extend the corrected branch-table
+construction to these modes, independently verify membership and state traceback,
+then replay before another hardware trial. Do not change production based only on
+the reference correlation.
+
+Evidence: work/v34-trellis-61604-discrimination.json,
+work/v34-b1-61604-parity.json, work/v34-fig9-61604-discrimination.json and
+work/v34-fig9-61604-replay.json. All captured audio and receiver traces remain on
+CT105. No live service changes were made.

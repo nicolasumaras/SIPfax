@@ -1436,3 +1436,37 @@ This validates projection for supplied energy and generated symbols, not the
 live power estimate, nonlinear receive inverse, analog waveform acquisition,
 or hardware interoperability. It does not resolve the latest error678 or
 establish its cause. The retained production release was not changed.
+
+
+## Latest failed call: in-place negotiation and reference audit (2026-09-12)
+
+PID59456 is the `411f88b` call `a13ea357-dcb9-47ea-ae55-fdfb748242d1`.
+Its315392-byte RX/TX recordings remain on CT105. Echo replay reproduced
+live delay1426 and lock sample80800. Receive replay again reached E with
+12000-bit/s,64-state,K16/M4/L16 parameters and failed acquisition
+(lattice RMS0.562 in replay,0.564 live).
+
+Decoding the transmitted audio independently confirmed the advertised
+12000/12000 rates and minimum shaping. ACK=0 windows initially requested
+16-state trellis; the final ACK=1 window at16.0 seconds requested64-state.
+All decoded MP windows used nonlinear=0 for the remote transmitter and
+hQ14=`4415,2209,-3795,190,2700,-614`. The caller's separate nonlinear
+request applies to our transmitter, not to the caller's upstream signal.
+
+A16-configuration reference search used the corrected `411f88b` encoder,
+exact advertised or zero taps,12000/16800 rates,16/64-state trellis and both
+shaping modes. It varied nearby alignment, conjugation, and carrier rotation,
+with a3-tap complex fit. The best captured score was0.18136 explained power;
+the best unrelated-noise score was0.18057. A generated positive control scored
+1.0 at its known alignment. Thus the search did not find convincing B1
+agreement. Ranking uses held-out samples, so these best-of-many scores are
+exploratory, not statistical significance or a decoded-bit acceptance test.
+This preserves evidence against assuming that the symbol-level corrections
+already fixed the physical receiver.
+
+Metadata and aggregate results only were returned locally:
+`work/v34-table11-59456-stream-audit.json`,
+`work/v34-table11-59456-negotiation-audit.json`, and
+`work/v34-table11-59456-reference-audit.json`.
+The replay waveform, receiver trace, and search script remain on CT105 under
+`/tmp/v34-table11-59456-*`. No service, modem or network settings changed.

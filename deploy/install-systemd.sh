@@ -22,6 +22,15 @@ fi
 for asset in package.json package-lock.json public/admin.html src/index.js bin/sipfax-call-key.mjs bin/sipfax-egress-apply bin/sipfax-linmodem; do
   [[ -f "${repo_root}/${asset}" ]] || { echo "Missing ${asset}" >&2; exit 1; }
 done
+# ELF workers must be loadable on the deployment host, not just executable.
+# ldd can return success while reporting an unavailable symbol version.
+if [[ "$(head -c 4 "${repo_root}/${worker}")" == $'\177ELF' ]]; then
+  if ! dependencies=$(LC_ALL=C ldd "${repo_root}/${worker}" 2>&1) ||
+     [[ "$dependencies" == *"not found"* ]]; then
+    echo "Cannot load ${worker} on this host: ${dependencies}" >&2
+    exit 1
+  fi
+fi
 if [[ "$check_only" == true ]]; then
   echo "Install preflight passed: ${engine} (${worker})"
   exit 0

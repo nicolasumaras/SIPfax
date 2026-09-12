@@ -197,6 +197,10 @@ Run the migration below before deploying the atomic credential writer.
 ## systemd Install
 
 For the native V.90 backend, build and preflight before changing the service:
+ELF workers are checked against the deployment host’s shared libraries. Build
+on that host (or a compatible toolchain); an executable built against a newer
+glibc can be executable but still fail to load. Run preflight on the target host.
+
 
 ```bash
 make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'

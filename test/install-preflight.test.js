@@ -24,6 +24,14 @@ test('native installer preflight needs only the native worker and rejects incomp
     const native = run('--engine=linmodem', '--check');
     assert.equal(native.status, 0, native.stderr);
     assert.match(native.stdout, /preflight passed: linmodem/);
+    // The execute bit alone must not let an invalid ELF worker pass preflight.
+    write('vendor/linmodem/lm', '\x7fELFinvalid');
+    const invalidElf = run('--engine=linmodem', '--check');
+    assert.equal(invalidElf.status, 1);
+    assert.match(invalidElf.stderr, /Cannot load vendor\/linmodem\/lm/);
+    copyFileSync(process.execPath, join(root, 'vendor/linmodem/lm'));
+    const loadableElf = run('--engine=linmodem', '--check');
+    assert.equal(loadableElf.status, 0, loadableElf.stderr);
     assert.equal(run('--engine=spandsp', '--check').status, 1);
     assert.equal(run('--engine=unknown', '--check').status, 64);
   } finally { rmSync(root, { recursive: true, force: true }); }

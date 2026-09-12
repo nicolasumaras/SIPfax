@@ -2050,3 +2050,31 @@ precoder inversion, force all advertisements to zero, or establish V34 PPP.
 Next verify the exact target build and retry advertisements on hardware, and use
 actual advertised coefficients for any further retained-retry reference analysis.
 Production has not changed.
+
+
+### V34 serial path after the channel-reset trial
+
+The exact 5f7c5cd target build (native SHA a8d3fbfbbcb708a953c5abf7685760f91602a0f7d6e51e396f1899fa559244d8)
+passed target MP/reset, readiness and acquisition tests. Hardware attempt
+725b841a-bed0-410c-bfd1-b1571559bede had one B1 entry, opened the PTY,
+and entered PPP starting, but ended with Windows error721 without IPCP.
+It does not exercise retry advertisement reset. Evidence:
+work/v34-reset-hardware-1789253515.native-audit.json and
+work/v34-reset-hardware-diagnostics.json. Restoration attempt
+d9e47daa-64eb-4f86-9ad1-6ddd05586649 passed at49296bit/s with the expected
+559-byte public HTTP checksum, six zero RAS error counters, and clean teardown.
+The subsequent work/v34-reset-hardware-final-audit.json verifies all25 deployed
+files, the qualified native hash, erasure guard, removed trial flags and idle state.
+
+Source tracing finds that live V34 assigned legacy serial_get_bit/serial_put_bit,
+which transmit/recover MSB-first characters. The only serial_init callers were
+in lmsim, leaving live V34's serial_wordsize at zero. The V90 production path
+already has its own LSB-first framing and LAPM implementation.
+V34 now initializes serial state on selection and uses dedicated LSB-first 8N1
+callbacks. Independent fixed-wire and all256-octet tests check TX and RX separately,
+idle gaps, invalid stop rejection and partial-character reset. The native build,
+MP and readiness tests pass locally. Local sanitizer runtime libraries are missing;
+the new CI test requests address/undefined sanitizers. This is a byte-framing fix,
+not proof of correct V34 payload reception or V42 interoperability. Hardware
+qualification of this change remains pending; the deployed V90 release is unchanged.
+Wire framing reference: https://onlinedocs.microchip.com/oxy/GUID-173AD72D-41FE-4760-A93C-7078A02BD908-en-US-7.1.1/GUID-7F09657C-791A-43DC-9238-56BDE5EC97F7.html

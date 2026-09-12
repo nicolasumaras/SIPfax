@@ -337,9 +337,10 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     break;
                 case V8_MOD_V34:
                     V34_init(&sm->u.v34_state, sm->calling);
-                    sm->u.v34_state.v34_tx.get_bit = serial_get_bit;
+                    serial_init(sm, 8, 'N');
+                    sm->u.v34_state.v34_tx.get_bit = serial_8n1_get_bit;
                     sm->u.v34_state.v34_tx.opaque = sm;
-                    sm->u.v34_state.v34_rx.put_bit = serial_put_bit;
+                    sm->u.v34_state.v34_rx.put_bit = serial_8n1_put_bit;
                     sm->u.v34_state.v34_rx.opaque = sm;
                     sm->state = SM_V34;
                     break;

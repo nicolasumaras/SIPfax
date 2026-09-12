@@ -217,3 +217,7 @@ void lm_at_parser_init(struct lm_at_state *s, struct sm_state *sm);
 void lm_at_parser(struct lm_at_state *s);
 
 #include "display.h"
+
+/* LSB-first asynchronous octets for the V.34 PPP path. */
+int serial_8n1_get_bit(void *opaque);
+void serial_8n1_put_bit(void *opaque, int bit);

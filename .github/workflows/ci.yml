@@ -22,6 +22,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nftables iproute2
           sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
+      - name: Test V34 asynchronous wire framing
+        run: |
+          gcc -O1 -g -std=gnu99 -fcommon -fsanitize=address,undefined -Ivendor/linmodem -Ivendor/spandsp-v42/src -DHAVE_STDBOOL_H tools/tests/v34-serial.c vendor/linmodem/serial.c -o /tmp/v34-serial-test
+          /tmp/v34-serial-test
       - name: Test reproducible source packaging
         run: python3 -m unittest discover -s tools/tests -p test_package_source.py
       - name: Test RTP capture audit

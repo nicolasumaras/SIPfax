@@ -791,3 +791,54 @@ library is removed. Targeted regression passes. This prevents the observed
 class of executable-but-unloadable deployment failure; run checks on the
 target host. Commitsd577ddc and923f7f6. Production files were not changed by
 this installer edit.
+
+## Ten-call full-candidate repeatability passed (2026-09-12)
+
+Full f732aa0 native SHA58365ad1823ed7821561adb09b7de2778aa91330edaaff1e832696927e229a77
+with erasure guard enabled passed10/10 sequential hardware calls. Independent
+audit verified49,296bps on every call, source10.64.0.2, HTTP200/559 bytes with
+exact expected checksum, all six RAS error counters zero, ipcp-open/ppp0 and
+zero sessions/leases/media lines after every teardown. The trial then restored
+the qualified native65bd6c48...3cea15; final checksum, idle health and absence
+of the override were checked remotely.
+
+Evidence: work/v90_full_guard_repeatability.py and
+work/v90-full-guard-repeatability-1789234549.{json,native.log,progress.json},
+per-call logs and independently generated -audit.json. This qualifies this
+specific candidate's repeatability, not later V.34 changes made during the run.
+Candidate endurance, bulk POST, broader jitter/failure recovery and simultaneous
+hardware calls remain open.
+
+Build reproducibility: commit6c72c60 makes the tested GNU99/_GNU_SOURCE/fcommon
+flags default in the native Makefile. The default-build regression passed:
+fresh build, native and SpanDSP header-triggered rebuilds, no-op build and clean.
+Guard behavior/opt-in configuration is now documented in the deployment guide.
+CIcd1434a run34707635268 and991bf54 run34707424916 succeeded at the last check.
+
+## V.34 invalid-ring frame erasure (2026-09-12)
+
+Using a copied CT105 libubsan runtime locally enabled the blocked bounds replay.
+Both original and four-bit-buffer-only variants failed at rings_to_index:
+index178 into a137-element lookup array. The four-bit buffer fix alone did not
+address this separate noisy-data path. New ring validation rejects values
+outside0..M-1 before lookup. Invalid mapping frames and the following23-bit
+descrambler recovery interval are suppressed while frame and descrambler clocks
+advance. SIPFAX_RX_BIT_POSITIONS optionally records emitted bit positions for
+offline validation; default output remains unchanged for valid frames.
+
+The same captured replay now completes with no bounds runtime error. Clean
+Figure9 traceback/settled-data tests pass at7200/16800/33600: zero settled errors
+and no settled bits erased. At7200,239 invalid startup bits are suppressed;
+other rates suppress none. Position-aware comparison accounts for erased
+startup bits rather than misaligning every later comparison. The initial
+comparison failed after suppression shifted positions; at33600 the trace also
+outlived the capped saved-bit sink, so comparison now checks the corresponding
+trace prefix. Correct known-phase startup remains0/156486 errors; wrong-phase
+control still fails. These are decoder/memory-safety checks, not V.34 lock or
+hardware fallback qualification. The native used in the ten-call campaign
+predates this change and was not modified while running.
+
+Evidence: work/v34_ring_erasure_bounds_check.py,
+work/v34-ring-erasure-bounds-evidence/{audit.json,before.log,after.log}, and
+work/v34-training-bounds-runtime-evidence for the preceding failure. New change
+commit9a5b186 remains undeployed.

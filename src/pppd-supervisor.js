@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 const DEFAULT_DNS_SERVERS = ['1.1.1.1', '9.9.9.9'];
 
@@ -319,7 +320,7 @@ export class PppdSupervisor extends EventEmitter {
 
   writeEgressDescriptor(callId, descriptor) {
     mkdirSync(this.leaseDir, { recursive: true, mode: 0o750 });
-    const descriptorPath = join(this.leaseDir, `${sanitizePathPart(callId)}.json`);
+    const descriptorPath = join(this.leaseDir, `${callKey(callId)}.json`);
     writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o640 });
     return descriptorPath;
   }
@@ -348,5 +349,5 @@ function quotePppSecret(value) {
 }
 
 function sanitizePathPart(value) {
-  return String(value).replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return callKey(value);
 }

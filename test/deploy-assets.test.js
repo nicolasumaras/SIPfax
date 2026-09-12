@@ -45,6 +45,7 @@ test('deployment assets default to the spandsp soft-modem worker', async () => {
   assert.match(installer, /\/opt\/sipfax\/bin\/sipfax-softmodem/);
   assert.match(installer, /\/etc\/ppp\/ip-up\.d\/sipfax/);
   assert.match(installer, /\/etc\/ppp\/ip-down\.d\/sipfax/);
+  assert.match(installer, /bin\/sipfax-call-key\.mjs.*\/usr\/lib\/sipfax\/sipfax-call-key\.mjs/);
   assert.match(runbook, /spandsp soft-modem worker/);
   assert.match(runbook, /libspandsp2/);
   assert.match(runbook, /\/opt\/sipfax\/bin\/sipfax-softmodem/);

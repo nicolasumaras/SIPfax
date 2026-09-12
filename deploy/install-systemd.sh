@@ -27,6 +27,7 @@ install -d -m 0755 -o root -g sipfax /opt/sipfax/bin
 install -m 0755 -o root -g sipfax "${repo_root}/vendor/sipfax-softmodem/sipfax-softmodem" /opt/sipfax/bin/sipfax-softmodem
 install -d -m 0755 -o root -g root /usr/lib/sipfax
 install -m 0755 -o root -g root "${repo_root}/bin/sipfax-egress-apply" /usr/lib/sipfax/sipfax-egress-apply
+install -m 0644 -o root -g root "${repo_root}/bin/sipfax-call-key.mjs" /usr/lib/sipfax/sipfax-call-key.mjs
 install -d -m 0755 -o root -g root /etc/ppp/ip-up.d /etc/ppp/ip-down.d
 install -m 0755 -o root -g root "${repo_root}/deploy/ppp/ip-up" /etc/ppp/ip-up.d/sipfax
 install -m 0755 -o root -g root "${repo_root}/deploy/ppp/ip-down" /etc/ppp/ip-down.d/sipfax

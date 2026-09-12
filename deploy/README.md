@@ -196,6 +196,15 @@ Run the migration below before deploying the atomic credential writer.
 
 ## systemd Install
 
+When upgrading from descriptors named by sanitized Call-ID, stop SIPfax and
+wait for all PPP teardown hooks before replacing the application and helper.
+Install `bin/sipfax-call-key.mjs` beside `/usr/lib/sipfax/sipfax-egress-apply`;
+`install-systemd.sh` installs both. The application and helper must use the
+same version: new descriptors, active markers and firewall table names use a
+SHA-256 key of the complete Call-ID. Existing calls must finish using the old
+helper so their old firewall tables are removed before upgrade. Keep both
+helper files with the matching application version when rolling back.
+
 Install the unit and start the service:
 
 ```bash

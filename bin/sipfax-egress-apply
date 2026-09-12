@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
+import { callKey } from './sipfax-call-key.mjs';
 import { spawnSync } from 'node:child_process';
 
 const action = process.argv[2];
@@ -18,7 +19,7 @@ if (!['up', 'down'].includes(action) || !callId) {
   process.exit(64);
 }
 
-const safeCallId = basename(callId).replace(/[^a-zA-Z0-9_.-]/g, '_');
+const safeCallId = callKey(callId);
 const descriptorPath = join(leaseDir, `${safeCallId}.json`);
 if (!existsSync(descriptorPath)) {
   console.error(`sipfax egress descriptor not found: ${descriptorPath}`);
@@ -26,6 +27,9 @@ if (!existsSync(descriptorPath)) {
 }
 
 const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8'));
+if (descriptor.callId !== callId) {
+  throw new Error('PPP descriptor Call-ID does not match the hook invocation');
+}
 mkdirSync(activeDir, { recursive: true, mode: 0o750 });
 
 if (action === 'up') {

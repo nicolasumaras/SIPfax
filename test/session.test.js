@@ -23,6 +23,7 @@ import { SipFaxServer } from '../src/server.js';
 import { MultiSessionManager } from '../src/session.js';
 import { Line } from '../src/line.js';
 import { SipfaxConfig } from '../src/config.js';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 // A no-socket Line stub so session-manager unit tests don't bind real UDP ports.
 class FakeLine extends EventEmitter {
@@ -202,11 +203,11 @@ test('egress policy renders nftables rules and per-call descriptors', () => {
     lease: { localAddress: '10.70.0.1', clientAddress: '10.70.0.2' }
   });
 
-  assert.match(descriptor.nft.up.join('\n'), /add table inet sipfax_call_nft/);
+  assert.ok(descriptor.nft.up.includes(`add table inet sipfax_${callKey('call:nft')}`));
   assert.match(descriptor.nft.up.join('\n'), /oifname "eth0" masquerade/);
   assert.deepEqual(descriptor.nft.down, [
-    'delete table ip sipfax_nat_call_nft',
-    'delete table inet sipfax_call_nft'
+    `delete table ip sipfax_nat_${callKey('call:nft')}`,
+    `delete table inet sipfax_${callKey('call:nft')}`
   ]);
   assert.match(descriptor.iptables.down.join('\n'), /iptables -D FORWARD/);
 });
@@ -644,7 +645,7 @@ test('pppd supervisor writes egress lease descriptor before daemon start', () =>
     }
   });
 
-  assert.equal(started.egressDescriptorPath, join(leaseDir, 'call-descriptor.json'));
+  assert.equal(started.egressDescriptorPath, join(leaseDir, `${callKey('call-descriptor')}.json`));
   assert.equal(JSON.parse(readFileSync(started.egressDescriptorPath, 'utf8')).outboundInterface, 'eth0');
 });
 
@@ -677,7 +678,7 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
     callId: 'call-cycle',
     lease: { localAddress: '10.88.0.1', clientAddress: '10.88.0.2' }
   });
-  writeFileSync(join(leaseDir, 'call-cycle.json'), `${JSON.stringify(descriptor)}\n`);
+  writeFileSync(join(leaseDir, `${callKey('call-cycle')}.json`), `${JSON.stringify(descriptor)}\n`);
 
   const env = {
     ...process.env,
@@ -694,8 +695,8 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
   const log = readFileSync(logPath, 'utf8');
   assert.match(log, /sysctl -w net\.ipv4\.ip_forward=1/);
   assert.match(log, /sysctl -w net\.ipv4\.conf\.eth-test0\.forwarding=1/);
-  assert.match(log, /add table inet sipfax_call_cycle/);
-  assert.match(log, /delete table inet sipfax_call_cycle/);
+  assert.ok(log.includes(`add table inet sipfax_${callKey('call-cycle')}`));
+  assert.ok(log.includes(`delete table inet sipfax_${callKey('call-cycle')}`));
   assert.match(log, /sysctl -w net\.ipv4\.ip_forward=0/);
 });
 

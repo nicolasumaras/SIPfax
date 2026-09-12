@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EgressPolicy } from '../src/ppp.js';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 test('two PPP leases receive disjoint firewall and MSS rules', () => {
   const policy = new EgressPolicy({ clientCidr: '10.64.0.0/24', upstreamTcpMss: 536 });
@@ -44,6 +45,6 @@ test('MSS limits only advertisements to clients, never raises smaller values, an
   assert.match(clamp, /ip daddr 10\.64\.0\.0\/24/);
   assert.match(clamp, /tcp flags & \(syn \| rst\) == syn/);
   assert.match(clamp, /maxseg size > 536 tcp option maxseg size set 536$/);
-  assert.ok(policy.firewallRulesNft({ tableSuffix: 'mss_test', action: 'down' }).includes('delete table inet sipfax_mss_test'));
+  assert.ok(policy.firewallRulesNft({ tableSuffix: 'mss_test', action: 'down' }).includes(`delete table inet sipfax_${callKey('mss_test')}`));
   assert.equal(policy.diagnostics().upstreamTcpMss, 536);
 });

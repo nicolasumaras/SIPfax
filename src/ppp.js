@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 const DEFAULT_DNS_SERVERS = ['1.1.1.1', '9.9.9.9'];
 const DEFAULT_BLOCKED_DESTINATIONS = [
@@ -206,7 +207,7 @@ export class EgressPolicy {
   }
 
   firewallRulesNft({ tableSuffix = 'lease', action = 'up' } = {}) {
-    const suffix = sanitizeNftName(tableSuffix);
+    const suffix = callKey(tableSuffix);
     const filterTable = `sipfax_${suffix}`;
     const natTable = `sipfax_nat_${suffix}`;
     if (action === 'down') {
@@ -506,11 +507,6 @@ function cidrContains(cidr, addressInt) {
 
 function formatCidr(cidr) {
   return `${intToIp(cidr.network)}/${cidr.prefixLength}`;
-}
-
-function sanitizeNftName(value) {
-  const sanitized = String(value).replace(/[^a-zA-Z0-9_]/g, '_');
-  return sanitized || 'lease';
 }
 
 function ipToInt(address) {

@@ -1,6 +1,6 @@
 # V.42 error-control integration assessment
 
-The current V.90 link uses asynchronous PPP without LAPM. Occasional received errors therefore reach PPP and can require TCP retransmissions. V.42 would add modem-level error recovery; it would not repair an underlying PCM or playback problem, and should not be claimed as working until hardware interoperability is demonstrated.
+The native V.90 link now has a hardware-validated V.42/LAPM path. It negotiates error correction with the XP notebook's physical modem, carries PPP DTE octets through LAPM, and has completed authenticated internet probes. The earlier asynchronous PPP path remains available when `SIPFAX_V90_V42` is unset.
 
 The upstream [SpanDSP V.42 source](https://github.com/freeswitch/spandsp/blob/8f1e1646bdec99eac5fd2cd92c35563f736b9b89/src/v42.c) is explicitly labelled unfinished. It provides detection, HDLC and LAPM state handling under the source file's LGPL-2.1 terms. It is a reference candidate, not a drop-in dependency qualified for this server.
 
@@ -116,3 +116,37 @@ hardware build records bounded candidate metadata (transitions, flags and
 HDLC frame validity) to determine whether the notebook recognized ADP and the
 upstream receiver lost the subsequent XID. It passed the two-peer bridge under
 ASan/UBSan; the notebook was offline when that diagnostic call was attempted.
+
+## Hardware interoperability result
+
+The candidate metadata showed that the notebook recognized the repeated ADP
+and changed to continuous HDLC flags. V.42 7.2.1.3 permits protocol
+establishment to begin on continuous flags, so the selector now retains a
+rolling bounded tail and selects an ODP-qualified candidate after ten adjacent
+flags or a CRC-valid XID. The selected stream then decoded repeated CRC-valid
+77-byte XID commands from the notebook.
+
+Those XIDs exposed the final protocol defect. Their standard V.42 and V.42bis
+groups were followed by the V.42 User Data subfield containing V.44 parameters.
+Unlike the length-prefixed negotiation groups, the `0xff` User Data subfield
+occupies the rest of the XID information field. The inherited validator treated
+its first two parameter octets as a 16-bit group length and rejected the frame.
+The parser now validates the remainder as bounded parameter TLVs. A regression
+fixture uses the exact hardware XID, accepts all 77 bytes, queues an XID
+response, and rejects a one-byte truncation.
+
+Hardware attempt `c59c9a91-0fb5-4724-a920-7cb07aff45f3` then established LAPM,
+authenticated PPP, negotiated 49,296 bit/s, assigned `10.64.0.2` and fetched an
+HTTP resource with status 200. A follow-up fix marks LAPM establishment as the
+startup data evidence, preventing the raw asynchronous PPP watchdog from
+starting an unrelated retrain. Attempt
+`23d80f5e-b9b5-45ae-8889-d1d98ff156e5` stayed connected beyond that deadline
+and completed two HTTP 200 probes 15 seconds apart with zero CRC, timeout,
+alignment, framing or overrun errors.
+
+One intervening call established LAPM but stalled during PPP authentication
+after two caller information frames. Its captured downstream PCM contains a
+valid XID response, UA and three CRC-valid information frames, and a synthetic
+two-second downstream interruption recovers exact 16 KiB transfers in both
+directions. This single-call variability remains a reliability measurement to
+track; it does not invalidate the two complete hardware PPP/internet results.

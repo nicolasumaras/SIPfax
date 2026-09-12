@@ -1,0 +1,37 @@
+{
+  "commit": "fbaeb83",
+  "hardware": {
+    "computer": "HP Pavilion ze4900",
+    "operatingSystem": "Windows XP",
+    "modem": "SoftV90 Data Fax Modem with SmartCP",
+    "adapter": "Cisco ATA187"
+  },
+  "successfulAttempts": [
+    "c59c9a91-0fb5-4724-a920-7cb07aff45f3",
+    "23d80f5e-b9b5-45ae-8889-d1d98ff156e5",
+    "03dc1046-7b89-4a28-a77c-ba175c034e8d"
+  ],
+  "retainedProductionAttempt": "03dc1046-7b89-4a28-a77c-ba175c034e8d",
+  "linkBitsPerSecond": 49296,
+  "ppp": {
+    "clientIpv4": "10.64.0.2",
+    "serverIpv4": "10.64.0.1",
+    "authenticated": true
+  },
+  "stabilityAttempt": {
+    "httpStatuses": [200, 200],
+    "probeSeparationSeconds": 15,
+    "secondProbeAtMilliseconds": 19268,
+    "crcErrors": 0,
+    "timeoutErrors": 0,
+    "alignmentErrors": 0,
+    "framingErrors": 0,
+    "hardwareOverruns": 0,
+    "bufferOverruns": 0
+  },
+  "interveningFailure": {
+    "attempt": "e311c889-9b0d-4f82-938f-059cf46219ec",
+    "windowsError": 619,
+    "stage": "PPP authentication after LAPM establishment"
+  }
+}

@@ -2218,3 +2218,34 @@ public HTTP checksum, six zero RAS error counters and cleanup. Final audit
 work/v34-dte-hardware-final-audit.json verifies25 files, qualified native hash,
 guard and idle endpoints. Separately, CI run34724716055 for9e1c135 completed
 successfully in both application and native-modem jobs.
+
+### Clock-seed contrast on the call that reached ODP
+
+In-place replay of retained RX/TX66046 confirms zero advertised precoder
+coefficients and reconstructs ODP at decoded bit1212. Its position trace exposes
+ten early51-bit gaps, consistent with an invalid mapping frame plus the23-bit
+descrambler flush. The first12000 positions contain11439 delivered bits; later
+windows initially have no gaps. This quantifies discards rather than inferring
+them from irregular callback totals. Full-call replay does not reproduce each
+live reset; the controlled comparisons below use only the first24 seconds.
+
+With the recorded negotiation and automatic replay seed+22.9ppm, the actual
+LAPM bridge recovers four CRC-valid77-byte XID commands (address03, controlAF,
+valid envelope). Thus the caller did transmit meaningful negotiation traffic.
+The baseline has48 selected HDLC frames,4valid and10770 missing bit positions.
+Disabling equalizer adaptation gives50/4 and10905 missing; disabling AGC gives
+47/4 and9051 missing; disabling carrier correction gives101/0 and37013 missing.
+These counts are replay-specific, not live connection results. The selected
+frame logger limits early output, so its first-ten sample alone is not a count
+of every valid frame. Evidence: work/v34-dte-66046-tracking-contrast.json and
+work/v34-dte-66046-valid-frame-summary.json.
+
+The live first-attempt seed was+175.5ppm. Replaying the same cropped waveform
+with only SIPFAX_DATA_CLK_PPM=175.5 yields83frames,0valid and37203 missing bits;
+SIPFAX_DATA_CLK_PPM=0 yields49frames,4valid and10622 missing. All contrasts stay
+within the20ms callback deadline. This isolates a harmful live clock seed on
+this retained recording and supports a bounded zero-seed hardware comparison;
+it does not justify removing clock recovery or globally assuming zero drift.
+Evidence: work/v34-dte-66046-live-clock.json,
+work/v34-dte-66046-clock-contrast.json and work/v34-dte-66046-odp-audit.json.
+No service or deployed binary was changed during these analyses.

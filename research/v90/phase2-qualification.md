@@ -1868,3 +1868,33 @@ window and still dropping B1. Validate recovered known B1 bit positions on gener
 input and the retained recording before hardware use. Also verify tracking after
 acquisition and repeatability on the separate failed capture62290. Production is
 unchanged by these offline experiments.
+
+
+### Experimental acquisition-buffer handoff 0572a93
+
+SIPFAX_ACQ_REPLAY=1 preserves raw equalizer samples and their SRX phase separately
+from the acquisition workspace. After acceptance it processes the saved prefix
+in order and then the current sample. Sequence tests caught and corrected an
+initial off-by-one: acquisition runs on the sample after the buffer fills, so
+that current sample must follow the buffer. The default remains off. This adds
+per-instance storage and work to the acquisition callback; callback timing still
+requires qualification before hardware use.
+
+New CI test v34-acq-replay.py checks64/2000-symbol windows, explicit source-symbol
+indices, no duplicate/out-of-order feed, complete accepted-prefix/current-sample
+continuity, and zero settled generated-audio errors. Both pass locally and on
+CT105. Baseline generated-audio and MP tests also pass. This test supplies data
+entry time and does not claim automatic E or hardware B1/PPP qualification.
+
+Exact target native SHA256:
+db9f227e83928c4b7f4a2deab6e93a3c93f2320c2b8002a3d70d7a7e70a60d24.
+Capture61604 replay with Figure9 and recorded MP now feeds8215 symbols for either
+window. With64-symbol acquisition, first600/2400 emitted-bit ones are98.5%/84.2%,
+mean metric158.5,14550 decoded bits. With2000 they are98.5%/83.8%,158.5,14601 bits.
+The equal feed counts demonstrate retained samples; differing emitted bit counts
+still reflect decoder alignment/erasure behavior. Ones percentages are not BER.
+Next audit exact B1 output bit positions, tracking after acquisition and callback
+latency; repeat on capture62290 before hardware use.
+
+Evidence: work/v34-acq-0572a93-target-replay.log. Audio and complete receiver traces
+remain on CT105. Production is unchanged; the option is not enabled there.

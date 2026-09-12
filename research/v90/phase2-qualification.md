@@ -1842,3 +1842,29 @@ Figure9 trial flag is absent, and both endpoints are idle. Evidence:
 work/v34-fig9-restoration-call.log, work/v34-fig9-hardware-final-audit.json and
 work/v90-ppp-lifecycle-b7c2a184-0b86-4a8e-ace4-425f0a173b93.json.
 V.34 fallback, actual bulk upload, and multiple physical calls remain unqualified.
+
+
+### Acquisition discards B1 before bit decoding
+
+Trace indices on capture61604 with corrected Figure9 tables show E at row29910
+and the first decoder-fed symbol at31911:2001 symbols later, with2000 collected
+for acquisition (about584ms). B1 at these parameters is120 symbols. The collected
+acquisition samples are used for gain/phase fitting but are not replayed through
+the bit decoder. Consequently previous first600/2400 emitted-bit ones percentages
+are not B1 BER and must not be presented as such. They refer to later symbols,
+after the entire known B1 sequence was skipped.
+
+Existing SIPFAX_ACQ_N contrasts on the same retained call:
+64 gives acquisition RMS0.153, first600/2400 emitted-bit ones92.3%/80.7%,
+mean trellis metric160.1;120 gives0.215,96.5%/78.9%,161.2;400 gives0.123,
+67.5%/70.0%,166.8. The2000-symbol baseline gives0.235,69.0%/70.1%,208.4.
+These are receiver diagnostics, not measured BER or PPP qualification. In
+particular a low acquisition RMS does not by itself prove correct alignment.
+Evidence: work/v34-acq-window-61604-replay.json. Raw traces remain on CT105.
+
+Next preserve the buffered startup symbols through acquisition and pass them to
+the decoder in order, with matching gain/phase, rather than only shortening the
+window and still dropping B1. Validate recovered known B1 bit positions on generated
+input and the retained recording before hardware use. Also verify tracking after
+acquisition and repeatability on the separate failed capture62290. Production is
+unchanged by these offline experiments.

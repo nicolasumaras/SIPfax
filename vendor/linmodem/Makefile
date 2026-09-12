@@ -26,6 +26,10 @@ endif
 
 all: $(PROG) 
 
+# Include compiler-discovered headers, including bundled SpanDSP internals.
+DEPS = $(OBJS:.o=.d) v34gen.d v90gen.d
+-include $(DEPS)
+
 $(PROG): $(OBJS)
 	gcc -o $(PROG) $(OBJS) -lm $(LDFLAGS)
 
@@ -45,10 +49,10 @@ linmodem.dvi: linmodem.tex
 	latex2e linmodem.tex
 
 clean:
-	rm -f *.o $(V42_OBJS) *~ *.dat core gmon.out *.sw v34table.c v90table.c $(PROG) v34gen v90gen *.aux *.dvi *.log
+	rm -f *.o $(V42_OBJS) $(DEPS) *~ *.dat core gmon.out *.sw v34table.c v90table.c $(PROG) v34gen v90gen *.aux *.dvi *.log
 
 tar:
 	( cd .. ; tar zcvf linmodem.tgz linmodem --exclude CVS )
 
-%.o: %.c $(INCLUDES)
-	gcc $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+%.o: %.c $(INCLUDES) Makefile
+	gcc $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@

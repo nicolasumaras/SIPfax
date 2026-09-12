@@ -1,4 +1,5 @@
 *.o
+*.d
 lm
 v34gen
 v34table.c

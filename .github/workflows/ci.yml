@@ -37,6 +37,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
       - name: Build native modem
         run: make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+      - name: Test incremental native header dependencies
+        run: python3 tools/tests/native-build-dependencies.py
       - name: Test synthetic waveforms and committed training fixtures
         shell: bash
         run: |

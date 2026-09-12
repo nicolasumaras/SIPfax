@@ -82,13 +82,15 @@ static void selected_output(void *opaque,int bit)
 {
     V90LapmLink *s=opaque;
     if(bit<0){
-        if(s->connected) {
+        if(s->selection_count && !s->disconnected && !s->errors) {
             s->reacquiring=1;s->selector.resume=1;
-            /* Lose only the partial receive frame. Sequence numbers, pending
-               DTE bytes, retransmissions and the peer's LAPM session survive. */
+            /* ODP is already complete once a stream has been selected. The
+               peer may still be negotiating XID/SABM, or already connected;
+               neither phase requires another ODP after a physical reset. */
             hdlc_rx_restart(&s->protocol.lapm.hdlc_rx);
             hdlc_rx_restart(&s->selected_hdlc);
-            fprintf(stderr,"[v42] physical decoder reset; reacquire established LAPM stream\n");
+            fprintf(stderr,"[v42] physical decoder reset; reacquire %s LAPM stream\n",
+                    s->connected?"established":"negotiating");
             return;
         }
         s->reacquiring=s->selector.resume=0;

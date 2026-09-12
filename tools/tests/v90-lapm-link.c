@@ -73,7 +73,7 @@ static void verify_v44_user_data_xid(void)
     lapm_receive(&answerer,xid,sizeof(xid)-1,1);
     assert(answerer.lapm.ctrl_put==1);
 }
-static void transfer(unsigned reset_decoder)
+static void transfer(unsigned reset_decoder,int early)
 {
     max_pending=saw_busy=0;
     struct endpoint answer={.side=0},caller_ep={.side=1};
@@ -83,12 +83,13 @@ static void transfer(unsigned reset_decoder)
     v42_set_status_callback(&caller,caller_status,&caller_ep);v42_restart(&caller);
     unsigned up_acc=0,down_acc=0,reset_at=0,resets=0,candidate=7;
     for(test_sample=0;test_sample<8000*30;test_sample++){
-        if(resets<reset_decoder && test_sample>(4+2*resets)*8000 &&
-           answer.received>1024 && caller_ep.received>1024) {
-            assert(link.connected);
+        if(resets<reset_decoder && (early ? (link.selection_count && !link.connected && (early==1 || link.selected_valid_frames)) :
+           (test_sample>(4+2*resets)*8000 && answer.received>1024 && caller_ep.received>1024))) {
+            unsigned was_connected=link.connected;
+            assert(early || was_connected);
             unsigned vs=link.protocol.lapm.vs,va=link.protocol.lapm.va,vr=link.protocol.lapm.vr;
             v90_lapm_link_candidate_bit(&link,candidate,-1,test_sample);
-            assert(link.connected); /* A decoder reset is not a new LAPM connection. */
+            assert(link.connected==was_connected && link.detected && link.selection_count); /* Preserve ongoing negotiation too. */
             assert(link.protocol.lapm.vs==vs && link.protocol.lapm.va==va && link.protocol.lapm.vr==vr);
             hdlc_rx_restart(&caller.lapm.hdlc_rx);
             candidate+=2;reset_at=test_sample;resets++;
@@ -107,17 +108,20 @@ static void transfer(unsigned reset_decoder)
     assert(resets==reset_decoder);
     assert(link.resumptions==reset_decoder && !link.reacquiring && !link.restarts);
     assert(link.connected && !link.disconnected && !link.errors && !link.overflow);
-    assert(saw_busy && max_pending<=V90_LAPM_PENDING_BYTES);
+    /* Startup reacquisition can finish after the initial DTE busy interval. */
+    assert((early || saw_busy) && max_pending<=V90_LAPM_PENDING_BYTES);
     assert(answer.received==TOTAL && caller_ep.received==TOTAL && !link.pending_count);
-    printf("LAPM transferred %u bytes each way; decoder reset=%u\n",TOTAL,reset_decoder);
+    printf("LAPM transferred %u bytes each way; decoder reset=%u early=%d\n",TOTAL,reset_decoder,early);
 }
 
 int main(void)
 {
     verify_ten_adps();
     verify_v44_user_data_xid();
-    transfer(0);
-    transfer(1);
-    transfer(2);
+    transfer(0,0);
+    transfer(1,0);
+    transfer(2,0);
+    transfer(1,1);
+    transfer(1,2);
     return 0;
 }

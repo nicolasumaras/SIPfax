@@ -42,7 +42,10 @@ static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
         if(len<=0)return; /* Flag/abort notifications carry no candidate frame. */
         /* A retrained physical channel resumes LAPM, without another ODP/XID.
            Require two valid addressed frames, never flags alone or random bits. */
-        if(!ok || len<3 || (frame[0]!=0x01 && frame[0]!=0x03))c->resume_valid_frames=0;
+        /* SABM/UA have only address and control bytes; they can be the only
+           repeated frames while a pre-connected peer waits for our response. */
+        if(!ok || len<2 || (len==2 && (frame[1]&3)!=3) ||
+           (frame[0]!=0x01 && frame[0]!=0x03))c->resume_valid_frames=0;
         else if(++c->resume_valid_frames>=2)commit_candidate(c,0);
         return;
     }

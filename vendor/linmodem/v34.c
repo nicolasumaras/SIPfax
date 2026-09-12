@@ -7663,10 +7663,27 @@ void V34_stream_decode_file(const char *path)
 {
     extern int v34_dbg;
     V34State p; static V34DSPState rx; s16 buf[512]; FILE *f; int n, i;
+    unsigned stream_block_samples = 512;
     memset(&p, 0, sizeof(p)); memset(&rx, 0, sizeof(rx));
     p.S = V34_S3429; p.R = 33600; p.conv_nb_states = 16; p.use_high_carrier = 1; p.calling = 0;
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     rx.S = p.S; rx.use_high_carrier = 1;
+    {
+        const char *live = getenv("SIPFAX_STREAM_LIVE_INIT");
+        if (live && !strcmp(live, "1")) {
+            /* Match the answer server's Phase-2 -> Phase-3 RX handoff.
+               The DSP role describes the transmitting peer (the caller). */
+            const char *shape = getenv("SIPFAX_SHAPE");
+            const char *role = getenv("SIPFAX_STREAM_CALLING");
+            stream_block_samples = 160; /* default live media frame size */
+            p.R = 19200;
+            p.calling = role ? atoi(role) : 1;
+            p.expanded_shape = shape ? atoi(shape) : 1;
+            V34_demod_init(&rx, &p);
+            fprintf(stderr, "[stream] live RX initialization: peer calling=%d shape=%d R=%d S=%.0f\n",
+                    rx.calling, rx.expanded_shape, rx.R, rx.symbol_rate);
+        }
+    }
     rx.put_bit = stream_put_bit; rx.opaque = 0;
     {   /* SIPFAX: SIPFAX_FORCE_DATA=<rate> skips the handshake and drops the receiver
            straight into data mode, so a known-good modulated signal can be fed through
@@ -7710,7 +7727,7 @@ void V34_stream_decode_file(const char *path)
     { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     { long fed = 0;
-      while ((n = fread(buf, 2, 512, f)) > 0) {
+      while ((n = fread(buf, 2, stream_block_samples, f)) > 0) {
           if (g_force_at > 0 && fed >= g_force_at && !rx.p4_e_rx) {
               rx.p4_e_rx = 1;
               fprintf(stderr, "[stream] switching to data mode at t=%.2fs (cma_phase=%d)\n",

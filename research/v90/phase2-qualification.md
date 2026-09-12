@@ -354,3 +354,30 @@ transition. Added E ASan/UBSan coverage to CI; no CI pass is claimed yet.
 Artifacts: `work/v34-cma-candidate-evidence/data-replay-comparison.json`,
 `strict-crc-replay.json`, and associated replay logs. These changes are not
 deployed; qualified V.90 production was not modified in this work.
+
+### Live-initialized replay and echo reconstruction
+
+`SIPFAX_STREAM_LIVE_INIT=1` now initializes the offline stream receiver through
+the live demodulator initializer: peer role=caller, initial R=19200, negotiated
+3429 baud, expanded shaping by default, and 160-sample processing blocks.
+`SIPFAX_SHAPE` and `SIPFAX_STREAM_CALLING` remain explicit overrides. Existing
+standalone/synthetic replay behavior is retained without this option.
+
+The PID 47623 RX capture precedes line echo cancellation in `linpipe.c`.
+Reconstructing cancellation from the paired RX/TX captures using the existing
+`tools/tests/v90-echo-delay-file.c` reproduces the live delay=1428 and
+lock_sample=79680. These agree with the live log; they do not alone establish
+sample-for-sample equivalence throughout the call.
+
+Post-echo replay beginning at 44 s, with live initialization and block size,
+produces exactly the live negotiated RX frame parameters:
+R=16800, S=3429, J=8, P=15, N=588, b=40, r=3, K=28, q=0, M=14, L=56,
+shape=1, trellis=64. Lattice RMS remains 0.566, so matching initialization
+and echo processing does not resolve data acquisition. The initial crop still
+omits earlier receiver history; full DSP state parity is not claimed.
+
+Local native build and `tools/tests/v34-live-init-replay.py` pass, along with
+caller-J/silence and MP-CRC replays. An initial edit applied the variable block
+size to the wrong harness and failed compilation; it was corrected before these
+checks. Artifacts are under `work/v34-cma-candidate-evidence/`, including
+`postecho-audit.json`, reconstructed PCM and replay logs. No production changes.

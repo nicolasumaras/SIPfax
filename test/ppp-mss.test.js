@@ -2,6 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EgressPolicy } from '../src/ppp.js';
 
+test('two PPP leases receive disjoint firewall and MSS rules', () => {
+  const policy = new EgressPolicy({ clientCidr: '10.64.0.0/24', upstreamTcpMss: 536 });
+  const descriptors = [2, 3].map(octet => policy.leaseDescriptor({
+    callId: `caller${octet}`,
+    lease: { localAddress: '10.64.0.1', clientAddress: `10.64.0.${octet}` }
+  }));
+  for (const [index, descriptor] of descriptors.entries()) {
+    const address = `10.64.0.${index + 2}/32`;
+    assert.equal(descriptor.clientCidr, address);
+    for (const rules of [descriptor.nft.up, descriptor.iptables.up, descriptor.iptables.down]) {
+      const text = rules.join('\n');
+      assert.ok(text.includes(address));
+      assert.ok(!text.includes('10.64.0.0/24'));
+      assert.ok(!text.includes(`10.64.0.${index === 0 ? 3 : 2}/32`));
+    }
+    assert.ok(descriptor.nft.up.some(rule => rule.includes(address) && rule.includes('maxseg')));
+  }
+  assert.equal(policy.clientCidr, '10.64.0.0/24');
+});
+
 test('upstream MSS is optional and rejects unsafe or invalid limits', () => {
   const defaults = new EgressPolicy();
   assert.ok(defaults.firewallRules().every(rule => !rule.includes('TCPMSS')));

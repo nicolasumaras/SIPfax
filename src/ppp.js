@@ -255,22 +255,33 @@ export class EgressPolicy {
   }
 
   leaseDescriptor({ callId, lease }) {
+    ipToInt(lease.clientAddress);
+    const scoped = new EgressPolicy({
+      clientCidr: `${lease.clientAddress}/32`,
+      outboundInterface: this.outboundInterface,
+      operatorUrl: this.operatorUrl,
+      allowInternet: this.allowInternet,
+      allowDns: this.allowDns,
+      upstreamTcpMss: this.upstreamTcpMss,
+      allowedDestinations: this.allowedDestinations.map(formatCidr),
+      blockedDestinations: this.blockedDestinations.map(formatCidr)
+    });
     return {
       version: 1,
       callId,
       lease: { ...lease },
-      clientCidr: this.clientCidr,
+      clientCidr: scoped.clientCidr,
       outboundInterface: this.outboundInterface,
       operatorUrl: this.operatorUrl,
       allowInternet: this.allowInternet,
       upstreamTcpMss: this.upstreamTcpMss,
       nft: {
-        up: this.firewallRulesNft({ tableSuffix: callId, action: 'up' }),
-        down: this.firewallRulesNft({ tableSuffix: callId, action: 'down' })
+        up: scoped.firewallRulesNft({ tableSuffix: callId, action: 'up' }),
+        down: scoped.firewallRulesNft({ tableSuffix: callId, action: 'down' })
       },
       iptables: {
-        up: this.firewallRules({ action: 'up' }).filter((rule) => rule.startsWith('iptables ')),
-        down: this.firewallRules({ action: 'down' }).filter((rule) => rule.startsWith('iptables '))
+        up: scoped.firewallRules({ action: 'up' }).filter((rule) => rule.startsWith('iptables ')),
+        down: scoped.firewallRules({ action: 'down' }).filter((rule) => rule.startsWith('iptables '))
       }
     };
   }

@@ -94,10 +94,11 @@ static void *fake_aligned_alloc(size_t alignment, size_t size)
 #elif defined(HAVE_POSIX_MEMALIGN)
 static void *fake_aligned_alloc(size_t alignment, size_t size)
 {
-    void *ptr;
+    void *ptr = NULL;
 
     /* Make posix_memalign() look like the C11 aligned_alloc */
-    posix_memalign(&ptr, alignment, size);
+    if (posix_memalign(&ptr, alignment, size) != 0)
+        return NULL;
     return ptr;
 }
 /*- End of function --------------------------------------------------------*/

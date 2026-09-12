@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callKey } from './sipfax-call-key.mjs';
 import { spawnSync } from 'node:child_process';
@@ -45,6 +45,7 @@ if (descriptor.callId !== callId) {
 }
 mkdirSync(activeDir, { recursive: true, mode: 0o750 });
 
+const forwardingPath = join(activeDir, '.forwarding-state');
 const marker = activePath(safeCallId);
 const activeLease = existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')) : null;
 const sameLease = activeLease && activeLease.callId === callId
@@ -52,7 +53,7 @@ const sameLease = activeLease && activeLease.callId === callId
   && activeLease.localAddress === localAddress
   && activeLease.remoteAddress === remoteAddress;
 if (action === 'up' && activeLease) {
-  if (!sameLease) throw new Error('Call-ID already has another active PPP lease');
+  if (!sameLease || activeLease.rulesRemoved) throw new Error('Call-ID already has another active or unfinished PPP lease');
   process.exit(0); // Repeated notification for an already installed lease.
 }
 if (action === 'down' && !sameLease) {
@@ -64,9 +65,13 @@ if (action === 'up') {
   // A rejected atomic nft transaction must not enable an unfiltered path.
   applyRules(descriptor, 'up');
   try {
+    retainForwarding();
     setForwarding(descriptor, true);
   } catch (error) {
-    try { applyRules(descriptor, 'down'); }
+    try {
+      applyRules(descriptor, 'down');
+      if (!hasActiveLeases()) restoreRetainedForwarding();
+    }
     catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Forwarding activation and policy cleanup failed'); }
     throw error;
   }
@@ -80,11 +85,12 @@ if (action === 'up') {
   }, null, 2));
   await postOperatorEvent(descriptor, 'ip-up');
 } else {
-  applyRules(descriptor, 'down');
-  rmSync(activePath(safeCallId), { force: true });
-  if (!hasActiveLeases()) {
-    setForwarding(descriptor, false);
+  if (!activeLease.rulesRemoved) {
+    applyRules(descriptor, 'down');
+    saveState(marker, { ...activeLease, rulesRemoved: true });
   }
+  if (!hasActiveLeases(safeCallId)) restoreRetainedForwarding();
+  rmSync(marker, { force: true });
   await postOperatorEvent(descriptor, 'ip-down');
 }
 
@@ -182,8 +188,55 @@ function activePath(id) {
   return join(activeDir, `${id}.json`);
 }
 
-function hasActiveLeases() {
-  return existsSync(activeDir) && spawnSync('/bin/sh', ['-c', `find "$1" -type f -name '*.json' -print -quit | grep -q .`, 'sipfax-egress-active', activeDir]).status === 0;
+function hasActiveLeases(except = null) {
+  return readdirSync(activeDir).some(name => name.endsWith('.json') && name !== `${except}.json`);
+}
+
+function saveState(path, value) {
+  const temporary = `${path}.pending`;
+  writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+  renameSync(temporary, path);
+}
+
+function forwardingSnapshot(requireOutbound = true) {
+  const values = { 'net.ipv4.ip_forward': run(sysctlCommand, ['-n', 'net.ipv4.ip_forward']).trim() };
+  const listing = run(sysctlCommand, ['-a', '--pattern', '^net.ipv4.conf\\..*\\.forwarding$']);
+  for (const line of listing.split('\n')) {
+    const match = line.match(/^(net\.ipv4\.conf\..+\.forwarding)\s*=\s*([01])$/);
+    if (match) values[match[1]] = match[2];
+  }
+  if (requireOutbound && descriptor.outboundInterface) {
+    const key = `net.ipv4.conf.${descriptor.outboundInterface}.forwarding`;
+    values[key] ??= run(sysctlCommand, ['-n', key]).trim();
+  }
+  for (const value of Object.values(values)) {
+    if (!['0', '1'].includes(value)) throw new Error('Invalid forwarding snapshot');
+  }
+  return values;
+}
+
+function retainForwarding() {
+  // A leftover snapshot with no active leases means a previous cleanup failed.
+  // Restore it before recording another baseline; never overwrite that evidence.
+  if (!hasActiveLeases() && existsSync(forwardingPath)) restoreRetainedForwarding();
+  const current = forwardingSnapshot();
+  const retained = existsSync(forwardingPath) ? JSON.parse(readFileSync(forwardingPath, 'utf8')) : current;
+  for (const [key, value] of Object.entries(current)) retained[key] ??= value;
+  saveState(forwardingPath, retained);
+}
+
+function restoreRetainedForwarding() {
+  if (!existsSync(forwardingPath)) throw new Error('Missing original forwarding state; refusing to guess');
+  const retained = JSON.parse(readFileSync(forwardingPath, 'utf8'));
+  const current = forwardingSnapshot(false);
+  // Global first: its restoration can reset interface values. Re-read each
+  // interface after that write. Interfaces removed since capture need no write.
+  for (const [key, value] of Object.entries(retained)) {
+    if (!(key in current)) continue;
+    if (!['0', '1'].includes(value)) throw new Error('Invalid retained forwarding value');
+    if (run(sysctlCommand, ['-n', key]).trim() !== value) run(sysctlCommand, ['-w', `${key}=${value}`]);
+  }
+  rmSync(forwardingPath);
 }
 
 async function postOperatorEvent(descriptor, state) {

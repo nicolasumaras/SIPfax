@@ -346,10 +346,20 @@ Then query `http://127.0.0.1:8080` locally.
 
 PPP egress is applied by nftables when `nft` is available. The helper falls back
 to `iptables-nft` for systems where nftables is not present. On `ip-up`, the
-helper enables `net.ipv4.ip_forward=1` and
-`net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`, then applies the
-per-call ruleset. On `ip-down`, it removes the per-call ruleset and disables
-forwarding after the last active SIPfax PPP lease is gone.
+helper installs the per-call ruleset before enabling `net.ipv4.ip_forward=1`
+and `net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`. The first caller
+saves the original global and interface forwarding values in
+`/run/sipfax/ppp-egress-active/.forwarding-state`. On `ip-down`, the helper
+removes that call’s rules and restores the saved values after the last caller.
+Previously enabled routing therefore remains enabled. The helper requires
+procps `sysctl` with `--pattern` support.
+
+Keep the snapshot and active markers if restoration fails. Repeating the same
+`ip-down` invocation retries restoration without deleting successfully removed
+rules again. Finish all old calls before installing this helper; an old call
+has no saved baseline. Removal of an interface during a call skips restoring
+that vanished interface. Do not change forwarding settings concurrently with
+a SIPfax call group; its recorded baseline is restored at teardown.
 
 ## Multiple lines, admin UI, and the FreePBX trunk
 
@@ -490,7 +500,8 @@ curl -fsS http://127.0.0.1:8080/healthz | jq '.ppp'
 For PPP egress, an authenticated Linux client should be able to reach a public
 HTTP destination with `curl --interface ppp0 <url>`. After disconnect, confirm
 that `sudo nft list ruleset | grep sipfax_` no longer shows the call-specific
-table and forwarding is disabled when no other SIPfax PPP lease is active.
+table and forwarding matches the pre-call baseline when no other SIPfax PPP
+lease is active.
 
 From the FreePBX side:
 

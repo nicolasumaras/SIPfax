@@ -1986,3 +1986,36 @@ work/v34-short-buffer-ppp-journal-audit.json,
 work/v34-short-buffer-hardware-final-audit.json and
 work/v90-ppp-lifecycle-89c594dd-0252-4c7e-97e0-09305691f2b6.json.
 Production is unchanged. Actual bulk upload and multiple physical calls remain open.
+
+
+### V34 readiness notification 621c538
+
+lm_get_state now reports V34 ready after TX reaches DATA with B1 queued, peer E
+is received, receive acquisition completes, and at least8*P data symbols have
+been processed. It checks these conditions on every query and returns connecting
+after reset/retraining. This is a bridge-readiness gate, not a claim of valid
+payload decoding or error-control establishment. The public readiness API test
+covers64 startup combinations, unset P, retraining and idle; CI includes it.
+Local and exact CT105 readiness/acquisition tests pass. Target SHA256:
+54d13b160ab0f21e57d5fda9a05089c37b304dadca5eb1fd019447f91c8895bf.
+Evidence: work/v34-ready-621c538-target-validation.log.
+
+Hardware attempt ce7b9d80-ff11-4697-b261-8d50392a9410 emitted CONNECTED-to-PTY and
+the application health monitor recorded PPP state starting. This confirms the
+missing bridge notification is fixed. The call still failed with678 after four
+TX B1 entries; RX acquisitions were poor (RMS0.523/0.500, seeded clock+388.7/
++128.3ppm), so PPP did not complete. Capture63643 remains on CT105. The earlier
+DeviceConnected/721 result is preserved separately; this trial does not reproduce
+it and must not be counted as V34 success.
+
+Next examine the reliability of the Phase4 clock estimate and acquisition on poor
+captures, and the serial/error-control path once modem connection is repeatable.
+The readiness gate alone cannot repair incorrect received symbols. Evidence:
+work/v34-ready-hardware-1789252868.{json,call.log,native-audit.json} and
+work/v34-ready-hardware-diagnostics.json.
+
+Qualified V90 restoration b9afb314-6805-4e2b-9568-f8574ba87ba4 passed49296, expected
+559-byte checksum, all six RAS errors zero, ipcp-open and clean cleanup. All25
+managed files match; guard enabled and trial flags removed. Evidence:
+work/v34-ready-hardware-final-audit.json, work/v34-ready-restoration-call.log,
+work/v90-ppp-lifecycle-b9afb314-6805-4e2b-9568-f8574ba87ba4.json. Production unchanged.

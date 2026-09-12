@@ -373,14 +373,12 @@ static void index_to_rings(V34DSPState *s, int ring[4][2], int r0)
   
   m = s->M;
 
-  a = -1;
-  r1 = 0;
-  for(;;) {
-    tmp = r0 - s->z8_tab[a+1];
-    if (tmp < 0) break;
-    r1 = tmp;
-    a++;
-  }
+  /* z8 has one entry per shell, without a terminal sentinel. The final
+     shell contains the all-(M-1) tuple; do not read beyond it when a
+     minimum-shaping mapping uses the full M^8 index domain. */
+  a = 0;
+  while (a < 8*(m-1) && (unsigned)r0 >= (unsigned)s->z8_tab[a+1]) a++;
+  r1 = r0 - s->z8_tab[a];
   
   b = 0;
   for(;;) {

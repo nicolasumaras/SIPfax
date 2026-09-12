@@ -49,6 +49,8 @@ jobs:
         run: python3 tools/tests/v34-fig9-state.py vendor/linmodem/lm
       - name: Test V34 startup with specification-derived synchronization
         run: python3 tools/tests/v34-startup-sync.py vendor/linmodem/lm
+      - name: Sanitize V34 shell mapping boundaries
+        run: python3 tools/tests/v34-shell-boundary.py
       - name: Test V34 B1 reference initialization
         run: python3 tools/tests/v34-b1-reference.py vendor/linmodem/lm
       - name: Test V34 B1 scrambler and superframe placement

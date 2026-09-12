@@ -1081,3 +1081,52 @@ working V.34 fallback, broader impairment tolerance, or simultaneous physical
 calls. DialUpLab still reported 1.1.1.0 before this campaign. The exact source
 commit's application CI passed; its native CI was still running at the last
 observation, so a complete CI pass is not yet claimed.
+
+
+## V.34 shell endpoint defect found and repaired (2026-09-12)
+
+A broader B1 reference search exposed an encoder failure at 12000 bit/s,
+3429 symbols/s, minimum shaping. Its K=16, M=4 mapping domain includes
+index 65535, the all-(M-1) tuple. `index_to_rings` searched for a terminal
+cumulative-count sentinel that `build_rings` does not allocate, so the final
+shell read beyond the populated lookup table and could eventually produce
+invalid constellation indices. The B1 generator aborted for all six tested
+12000/minimum-shaping trellis/precoder combinations.
+
+The shell search now stops at the highest valid shell. Its cumulative-count
+comparison is unsigned, avoiding signed subtraction for thresholds above
+INT_MAX; the table representation itself is unchanged. This is not a general
+claim that every arithmetic operation in the full native modem is sanitized.
+
+`tools/tests/v34-shell-boundary.py` compiles the production mapper functions
+and exhausts M=1, M=2 and M=4 domains, checking range, uniqueness, inverse
+mapping, nondecreasing shell energy, and independently known first/last tuples.
+The pre-fix source failed the undefined/bounds sanitizer check; the fixed source
+passes all 1 + 256 + 65536 indices. Local linking used the previously retained
+UBSan runtime because the local system linker target is missing. CI runs this
+test with its installed compiler runtime.
+
+The B1 reference regression now covers every 4800..33600 rate in 2400-bit/s
+steps, three trellises, two shaping modes, and zero/exact advertised precoder
+coefficients: 156 configurations, each generated twice. All pass after the
+fix, along with independent 588-bit B1 framing, the clean startup/incorrect-phase
+control, and Figure 9 settled-decoding regressions. These remain offline tests;
+startup errors in the unsynchronized Figure 9 cases are not counted as passes
+for hardware startup.
+
+The captured B1 search still found no convincing match after all 156 references
+were generated: best held-out explained power 0.20705 versus 0.21334 for the
+full unrelated-noise search; the constructed positive control scored 1.0.
+The search spans rate/trellis/shaping/taps, either conjugation, 321 timing
+positions, and coarse/fine carrier rotations under a three-tap linear model.
+Its best-of-many score uses validation data for ranking, so it is exploratory
+and does not prove that the notebook transmitted the wrong waveform. The
+shell endpoint fix does not resolve the captured 16800-bit/s mismatch.
+
+Evidence: `work/v34-b1-parameter-search-{before-audit,audit}.json`,
+`work/v34-shell-boundary-{before,after,build}.log`, and
+`work/v34-shell-{startup,fig9}-regression.log`. Production remains on the
+qualified native binary; this source fix has not been deployed or hardware
+qualified. The deployed application source `9e0f242` has now completed CI run
+`34715252317` successfully in both application and native jobs, superseding
+the previous pending-CI observation.

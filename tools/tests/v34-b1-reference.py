@@ -27,10 +27,13 @@ with tempfile.TemporaryDirectory() as tmp:
     assert generate() == reference
     assert generate(SIPFAX_B1_H='0,0,0,0,0,0') == reference
     assert generate(SIPFAX_B1_H='4476,1768,-3722,329,2710,-924') != reference
-    for trellis in ('16', '32', '64'):
-        for shape in ('0', '1'):
-            opts = dict(SIPFAX_B1_TRELLIS=trellis, SIPFAX_SHAPE=shape)
-            assert generate(**opts) == generate(**opts)
+    for rate in range(4800, 33601, 2400):
+        for trellis in ('16', '32', '64'):
+            for shape in ('0', '1'):
+                for taps in ('0,0,0,0,0,0', '4476,1768,-3722,329,2710,-924'):
+                    opts = dict(SIPFAX_B1_RATE=str(rate), SIPFAX_B1_TRELLIS=trellis,
+                                SIPFAX_SHAPE=shape, SIPFAX_B1_H=taps)
+                    assert generate(**opts) == generate(**opts)
     for invalid in ('1,2,3', '32768,0,0,0,0,0', '1,2,3,4,5,6extra'):
         env = {k: v for k, v in os.environ.items() if not k.startswith('SIPFAX_')}
         env.update(SIPFAX_B1_REFERENCE=str(out), SIPFAX_B1_H=invalid)

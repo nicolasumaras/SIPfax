@@ -510,3 +510,26 @@ results), `fig9-state-after-parity-audit.json`, `fig9-emitted-membership.json`,
 and `fig9-parity-audit.json` under `work/v34-cma-candidate-evidence/`.
 The default labeling remains unchanged; no deployment or live call performed.
 Next: B1 and initial superframe alignment, rather than settled trellis tracking.
+
+### Startup error source isolated with independent synchronization control
+
+At 16800 with expanded shaping and corrected labeling, automatic synchronization
+has 579 startup bit errors, the last at bit 8873. Supplying the correct sync
+sequence through the existing diagnostic oracle produces 0 errors across all
+156486 compared bits. `tools/tests/v34-startup-sync.py` then reproduces this
+without using encoder dumps: it constructs the sequence independently from
+Table 12's J=8 pattern and the 30-four-dimensional-symbol half-frame interval.
+A one-4D-symbol phase shift produces 10423 errors, providing a negative control.
+
+This confirms that the corrected symbol decoder can decode the clean signal
+from the beginning *given the right synchronization phase*. It does not establish
+automatic alignment, correct B1 detection, or operation on captured audio. The
+next receiver requirement is to obtain and retain that alignment from B1 rather
+than an oracle, while preserving the samples currently discarded by acquisition.
+The new regression and the three-rate state/settled-decoding checks pass locally;
+new regression added to CI. CI for 6b2e439 was still running at last observation;
+bc02b04 run 34704994670 completed successfully. No deployment or hardware call.
+
+Evidence: `work/v34_startup_oracle_check.py` and
+`work/v34-cma-candidate-evidence/startup-oracle-audit.json`, with separately
+preserved automatic/known-sync input/output bits and logs.

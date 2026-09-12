@@ -39,6 +39,9 @@ typedef struct {
     unsigned have_timing_previous;
 } V90UpQamLane;
 typedef struct V90Upstream {
+    unsigned erasure_guard, erasure_hold, erasure_position, erasure_count;
+    double erasure_energy[8], erasure_sum, erasure_reference;
+
     double taps[4][V90_UP_TAPS],re[V90_UP_TAPS],im[V90_UP_TAPS];
     unsigned position,frames;
     /* A well-formed, uncompressed LCP Configure packet proves PPP startup.

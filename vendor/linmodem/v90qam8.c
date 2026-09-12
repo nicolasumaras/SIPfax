@@ -264,7 +264,7 @@ static void qam8_locked(V90Qam8Stream *s,double re,double im)
        final decoded data still retains the full 63-pair lookahead. */
     unsigned early_a,early_b;
     unsigned feedback_age=(s->b1.q>=4 || (s->b1.q==3 && s->b1.m==14))?4:V90_QAM_FEEDBACK_AGE;
-    if(s->b1.q>=3 && v90_trellis_peek(&s->trellis,feedback_age,s->label_bits,&early_a,&early_b)) {
+    if(!s->feedback_inhibited && s->b1.q>=3 && v90_trellis_peek(&s->trellis,feedback_age,s->label_bits,&early_a,&early_b)) {
         for(unsigned j=0;j<2;++j) {
             unsigned long long n=2*(s->pairs-1-feedback_age)+j;
             if(n<s->equalizer.taps)continue;

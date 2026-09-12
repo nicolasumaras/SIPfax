@@ -89,6 +89,7 @@ typedef struct {
     V90Mapping mapping;
     unsigned label_bits,frame_bits;
     unsigned odp_training_enabled;
+    unsigned feedback_inhibited;
     V90ODPTrainer odp;
     /* Optional half-symbol input, supplied before each symbol by the PCM
      * frontend. B1 history is aligned with b1.position. */

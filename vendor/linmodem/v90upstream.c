@@ -29,6 +29,8 @@ int v90_upstream_init_profile(V90Upstream *s,unsigned rate,unsigned symbol_rate,
     V90Mapping mapping;
     if(!s || high_carrier>1 || !v90_mapping_init(&mapping,rate,symbol_rate))return 0;
     memset(s,0,sizeof(*s));s->last_frame_sample=-1000;
+    const char *guard=getenv("SIPFAX_V90_ERASURE_GUARD");
+    s->erasure_guard=guard && !strcmp(guard,"1");
     s->rate=rate;s->symbol_rate=symbol_rate;s->high_carrier=high_carrier;s->symbol_period=32000.0/symbol_rate;
     s->carrier=high_carrier?mapping.high_carrier:mapping.low_carrier;
     if(s->rate!=4800 || s->symbol_rate==3000)for(unsigned i=0;i<V90_UP_PHASES;++i) {
@@ -255,6 +257,26 @@ static void symbol(V90Upstream *s,long time,double re,double im)
 }
 void v90_upstream_receive(V90Upstream *s,int16_t input)
 {
+    if(s->erasure_guard) {
+        double energy=(double)input*input;
+        s->erasure_sum+=energy-s->erasure_energy[s->erasure_position];
+        s->erasure_energy[s->erasure_position]=energy;
+        s->erasure_position=(s->erasure_position+1)%8;
+        if(s->erasure_count<8)++s->erasure_count;
+        double power=s->erasure_sum/s->erasure_count;
+        if(s->erasure_reference<=0)s->erasure_reference=power;
+        if(s->b1_seen && s->erasure_count==8 && power<.05*s->erasure_reference) {
+            /* Hold through the matched filter, equalizer, survivor and saved
+             * feedback histories; symbol/sample clocks continue throughout. */
+            s->erasure_hold=V90_UP_TAPS+(unsigned)ceil(
+                (V90_EQ_MAX_TAPS+2*V90_TRELLIS_DEPTH+V90_QAM_FEEDBACK_HISTORY)*8000.0/s->symbol_rate);
+        } else if(!s->erasure_hold) {
+            s->erasure_reference+=(power-s->erasure_reference)/1024;
+        }
+        for(unsigned i=0;i<V90_UP_PHASES;++i)
+            s->qam[i].stream.feedback_inhibited=s->erasure_hold!=0;
+        if(s->erasure_hold)--s->erasure_hold;
+    }
     double phase=2*M_PI*s->carrier*s->samples/8000.0;
     s->re[s->position]=input*cos(phase);s->im[s->position]=-input*sin(phase);
     /* Evaluate the matched filter at quarter-sample instants. Averaging

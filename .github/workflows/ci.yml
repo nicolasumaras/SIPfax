@@ -185,6 +185,10 @@ jobs:
           for seed in 43127 62091 98017; do
             python3 tools/tests/v90-qam8-wave.py --28800 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
           done
+      - name: Test opt-in upstream erasure guard
+        run: |
+          SIPFAX_V90_ERASURE_GUARD=1 python3 tools/tests/v90-qam8-wave.py --28800 --pcmu --clock-drift
+          SIPFAX_V90_ERASURE_GUARD=1 python3 tools/tests/v90-qam8-wave.py --28800 --pcmu --clock-drift --erase-sample 4000 --erase-samples 160
       - name: Test experimental 31200 upstream waveform
         run: |
           python3 tools/tests/v90-qam8-wave.py --31200 --long-clock --isi --pcmu --random-payloads --timing-sweep

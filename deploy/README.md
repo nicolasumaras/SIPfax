@@ -196,6 +196,22 @@ Run the migration below before deploying the atomic credential writer.
 
 ## systemd Install
 
+For the native V.90 backend, build and preflight before changing the service:
+
+```bash
+make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+bash deploy/install-systemd.sh --engine=linmodem --check
+sudo systemctl stop sipfax
+sudo bash deploy/install-systemd.sh --engine=linmodem
+```
+
+The installer copies the application, WebUI and selected native worker when
+run from a separate release directory. It preserves existing configuration;
+an existing configuration must select `linmodem` explicitly. Fresh native
+configuration seeds a one-call cap. Complete the PPP credential migration and
+PPP drop-in setup below before starting the service. `--check` performs no
+installation. The default installer engine remains `spandsp`.
+
 When upgrading from descriptors named by sanitized Call-ID, stop SIPfax and
 wait for all PPP teardown hooks before replacing the application and helper.
 Install `bin/sipfax-call-key.mjs` beside `/usr/lib/sipfax/sipfax-egress-apply`;

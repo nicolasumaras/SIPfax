@@ -8210,7 +8210,9 @@ void V34_p4block_test(void)
                        fprintf(stderr, " type=%d aux=%d asym=%d nonlin=%d h=%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj",
                              g_mp_type, g_mp_aux, g_mp_asym,
                              nlo, hco[0]/16384.0, hco[1]/16384.0, hco[2]/16384.0,
-                             hco[3]/16384.0, hco[4]/16384.0, hco[5]/16384.0); }
+                             hco[3]/16384.0, hco[4]/16384.0, hco[5]/16384.0);
+                       fprintf(stderr, " h_q14=%d,%d,%d,%d,%d,%d",
+                             hco[0], hco[1], hco[2], hco[3], hco[4], hco[5]); }
             fprintf(stderr, "\n");
         }
     }

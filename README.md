@@ -18,12 +18,18 @@ The first supported baseline follows the LKMA-168 decision:
 
 The native C backend in `vendor/linmodem` answers Windows XP hardware modems
 through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
-CT105 runs verified native `8aa8c5e`, with causal ODP training, index-2
-pre-emphasis for 3000 symbols/s and normal symbol-rate negotiation. The previous
-`9be7827` binary/configuration is retained for rollback.
+CT105 runs native `70614d7` with V.42/LAPM enabled, causal ODP training, index-2
+pre-emphasis for 3000 symbols/s and normal symbol-rate negotiation. Its binary
+SHA-256 and retained source/rollback artifacts are documented in
+[deployment provenance](research/v90/deployment-provenance.md).
+Physical calls have authenticated PPP and passed internet probes at a reported
+49,296 bit/s; see [hardware acceptance](research/v90/v42-hardware-acceptance.json).
+Repeated-call reliability, sustained LAPM traffic, fallback and concurrent-call
+qualification remain release gates.
 
 The receiver implements 3000-symbol/s upstream profiles from 4.8 to 28.8 kbit/s
-and 3200-symbol/s profiles through 31.2 kbit/s. Three consecutive 3000/28.8 calls
+and 3200-symbol/s profiles through 31.2 kbit/s. Earlier pre-LAPM qualification
+included three consecutive 3000/28.8 calls that
 started without fallback. Sustained calls at both 3000/28.8 and 3200/28.8 passed
 all 129 transfer checks at 49.333 kbit/s downstream, without application retries.
 They recorded eight and thirteen CRC errors respectively, with no alignment
@@ -67,6 +73,7 @@ Hardware qualification uses these service environment settings:
 
 | Variable | Default | Current test setting |
 | --- | --- | --- |
+| `SIPFAX_V90_V42` | off | `1` enables native V.42/LAPM |
 | `SIPFAX_V90_MAX_BPS` | `56000` | `49334` downstream ceiling |
 | `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
 | `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |

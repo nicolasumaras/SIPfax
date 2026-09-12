@@ -101,6 +101,8 @@ struct sm_state {
     V90LapmLink v34_lapm;
     int v34_lapm_requested;
     long v34_lapm_samples;
+    unsigned long long v34_dte_tx_bits, v34_dte_rx_bits, v34_dte_rx_ones;
+    unsigned v34_dte_retrains;
 
     /* serial state */
     int serial_data_bits; /* 5 to 8 */

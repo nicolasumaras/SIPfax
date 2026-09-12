@@ -38,6 +38,7 @@ static void run(int retrain) {
     caller.config.comp=0;caller.tx_bit_rate=14400;
     v42_set_status_callback(&caller,status,0);v42_restart(&caller);
     unsigned up=0,down=0,reset_at=0,max_pending=0,busy=0;
+    unsigned long long tx_bits=0,rx_bits=0,rx_ones=0;
     for(tick=0;tick<8000*60;tick++) {
         sm.v34_lapm_samples=tick;
         if(retrain && !reset_at && received>1024 && delivered>1024) {
@@ -50,9 +51,9 @@ static void run(int retrain) {
         while(queued<TOTAL && sm.tx_fifo.size<sm.tx_fifo.max_size)
             sm_put_bit(&sm.tx_fifo,datum(queued++,0));
         up+=14400;
-        while(up>=8000){up-=8000;v34_dte_put_bit(&sm,v42_tx_bit(&caller));}
+        while(up>=8000){up-=8000;int b=v42_tx_bit(&caller);rx_bits++;rx_ones+=b&1;v34_dte_put_bit(&sm,b);}
         down+=sm.u.v34_state.v34_tx.R;
-        while(down>=8000){down-=8000;v42_rx_bit(&caller,v34_dte_get_bit(&sm));}
+        while(down>=8000){down-=8000;tx_bits++;v42_rx_bit(&caller,v34_dte_get_bit(&sm));}
         v90_lapm_link_drain(&sm.v34_lapm);
         if(sm.v34_lapm.pending_count>max_pending)max_pending=sm.v34_lapm.pending_count;
         if(sm.v34_lapm.protocol.lapm.local_busy)busy=1;
@@ -68,7 +69,10 @@ static void run(int retrain) {
     assert(sm.v34_lapm.protocol.tx_bit_rate==(retrain?9600:12000));
     assert(busy && max_pending<=V90_LAPM_PENDING_BYTES && sm_size_max==128);
     assert(sm.v34_lapm.resumptions==(unsigned)retrain);
+    assert(sm.v34_dte_tx_bits==tx_bits && sm.v34_dte_rx_bits==rx_bits);
+    assert(sm.v34_dte_rx_ones==rx_ones && sm.v34_dte_retrains==(unsigned)retrain);
     v34_dte_init(&sm,1);assert(!sm.v34_lapm.initialized);
+    assert(!sm.v34_dte_tx_bits && !sm.v34_dte_rx_bits && !sm.v34_dte_rx_ones && !sm.v34_dte_retrains);
     printf("PASS: V34 LAPM 16KiB each direction, backpressure, retrain=%d\n",retrain);
 }
 int main(void) {run(0);run(1);return 0;}

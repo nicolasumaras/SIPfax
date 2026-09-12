@@ -24,6 +24,8 @@ void v34_dte_init(struct sm_state *s, int lapm)
     serial_init(s, 8, 'N');
     s->v34_lapm_requested = lapm;
     s->v34_lapm_samples = 0;
+    s->v34_dte_tx_bits = s->v34_dte_rx_bits = s->v34_dte_rx_ones = 0;
+    s->v34_dte_retrains = 0;
     s->v34_lapm.enabled = s->v34_lapm.initialized = 0;
     /* Initialize when DATA first requests bits, after the MP rate is known. */
 }
@@ -40,6 +42,7 @@ static void prepare(struct sm_state *s)
 int v34_dte_get_bit(void *opaque)
 {
     struct sm_state *s = opaque;
+    ++s->v34_dte_tx_bits;
     if (!s->v34_lapm_requested) return serial_8n1_get_bit(s);
     prepare(s);
     return v90_lapm_link_tx_bit(&s->v34_lapm);
@@ -48,6 +51,8 @@ int v34_dte_get_bit(void *opaque)
 void v34_dte_put_bit(void *opaque, int bit)
 {
     struct sm_state *s = opaque;
+    ++s->v34_dte_rx_bits;
+    s->v34_dte_rx_ones += bit & 1;
     if (!s->v34_lapm_requested) { serial_8n1_put_bit(s, bit); return; }
     prepare(s);
     /* V.34 currently supplies one demodulated stream, in 8-kHz block time. */
@@ -56,6 +61,7 @@ void v34_dte_put_bit(void *opaque, int bit)
 
 void v34_dte_retrain(struct sm_state *s)
 {
+    ++s->v34_dte_retrains;
     serial_init(s, 8, 'N');
     if (s->v34_lapm_requested && s->v34_lapm.initialized)
         v90_lapm_link_candidate_bit(&s->v34_lapm, 0, -1, s->v34_lapm_samples);

@@ -182,6 +182,22 @@ void pipe_modem(void)
                         protocol->local_busy, protocol->far_busy, link->protocol.bit_timer,
                         link->errors, link->restarts, link->reacquiring, link->resumptions);
             }
+            if (lapm_diagnostics && dce->state == SM_V34) {
+                V90LapmLink *link = &dce->v34_lapm;
+                fprintf(stderr, "[v34-dte] t=%d requested=%d initialized=%u "
+                        "tx_bits=%llu rx_bits=%llu rx_ones=%llu retrains=%u "
+                        "rate=%d detected=%u selected=%u connected=%u "
+                        "pending=%u errors=%u\n",
+                        frames/50, dce->v34_lapm_requested, link->initialized,
+                        dce->v34_dte_tx_bits, dce->v34_dte_rx_bits,
+                        dce->v34_dte_rx_ones, dce->v34_dte_retrains,
+                        dce->u.v34_state.v34_tx.R,
+                        link->initialized ? link->detected : 0,
+                        link->initialized ? link->selection_count : 0,
+                        link->initialized ? link->connected : 0,
+                        link->initialized ? link->pending_count : 0,
+                        link->initialized ? link->errors : 0);
+            }
             fflush(stderr);
             rx_acc = 0; rx_cnt = 0;
         }

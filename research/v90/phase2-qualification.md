@@ -2174,3 +2174,15 @@ caller transmitted an ODP, or distinguish transmitter handshake failure from
 receive tracking failure. Evidence: work/v34-lapm-65423-odp-audit.json.
 Production remains the restored qualified V90 release; these analyses make no
 service changes.
+
+Live DTE observability now uses the existing SIPFAX_V90_LAPM_DIAGNOSTICS=1
+switch for a bounded one-line-per-second V34 summary: requested/initialized,
+TX/RX bit counts, RX ones, retrain count, negotiated TX rate, detection, selection,
+connection, pending bytes and protocol errors. Counters are per call, persist
+across its retrains and reset for a new call. No payload bytes or raw bits are
+logged. The generated 16-KiB bidirectional transfer/backpressure/retrain test
+independently counts callback invocations and ones and checks these counters,
+including reset. Both scenarios and native readiness tests pass locally; the
+native build succeeds. The next hardware trial must verify requested=1 and
+initialized=1, then compare cumulative counter deltas around each training
+attempt. This closes an observation gap, not the underlying hardware failure.

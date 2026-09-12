@@ -32,6 +32,20 @@ test('native installer preflight needs only the native worker and rejects incomp
     copyFileSync(process.execPath, join(root, 'vendor/linmodem/lm'));
     const loadableElf = run('--engine=linmodem', '--check');
     assert.equal(loadableElf.status, 0, loadableElf.stderr);
+    // Exercise a real missing dependency, not only malformed executables.
+    write('library.c', 'int sipfax_dependency(void) { return 0; }\n');
+    write('worker.c', 'int sipfax_dependency(void); int main(void) { return sipfax_dependency(); }\n');
+    const compile = args => {
+      const result = spawnSync('cc', args, { cwd: root, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+    };
+    compile(['-shared', '-fPIC', 'library.c', '-o', 'libsipfax_preflight.so']);
+    compile(['worker.c', '-L.', '-lsipfax_preflight', `-Wl,-rpath,${root}`, '-o', 'vendor/linmodem/lm']);
+    assert.equal(run('--engine=linmodem', '--check').status, 0);
+    rmSync(join(root, 'libsipfax_preflight.so'));
+    const missingLibrary = run('--engine=linmodem', '--check');
+    assert.equal(missingLibrary.status, 1);
+    assert.match(missingLibrary.stderr, /libsipfax_preflight\.so.*not found/);
     assert.equal(run('--engine=spandsp', '--check').status, 1);
     assert.equal(run('--engine=unknown', '--check').status, 64);
   } finally { rmSync(root, { recursive: true, force: true }); }

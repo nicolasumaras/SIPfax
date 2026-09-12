@@ -50,3 +50,25 @@ test('terminating PPP retains its address until the child exits', async () => {
     assert.equal(pool.leases.size, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('failed pppd spawn releases a terminating lease without an exit event', { timeout: 3000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sipfax-lease-spawn-'));
+  const supervisor = new PppdSupervisor({
+    command: join(root, 'missing-pppd'), tempDir: root, secretsDir: root, leaseDir: root
+  });
+  const pool = new AddressPool({ cidr: '10.82.0.0/30' });
+  const controller = new PppSessionController({
+    addressPool: pool, pppdSupervisor: supervisor,
+    credentials: new PppCredentialStore([{ username: 'test', password: 'test' }])
+  });
+  try {
+    controller.begin('failed-spawn');
+    controller.startPppd('failed-spawn', { slavePath: '/dev/pts/1' });
+    const exited = supervisor.whenExited('failed-spawn');
+    controller.terminate('failed-spawn');
+    await exited;
+    await Promise.resolve();
+    assert.equal(pool.leases.size, 0);
+    assert.doesNotThrow(() => controller.begin('failed-spawn'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

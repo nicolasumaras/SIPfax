@@ -4241,12 +4241,17 @@ static void V34_demod(V34DSPState *s,
 {
     int si, sq, i, j, k , ph, spl;
     int v, frac, ph1;
+    static int state_trace = -1;
+    if (state_trace < 0) {
+        const char *e = getenv("SIPFAX_V34_STATE_TRACE");
+        state_trace = e && !strcmp(e, "1");
+    }
 
     for(i=0;i<nb;i++) {
         /* Automatic Gain Control */
         spl = samples[i];
 
-        if (v34_dbg) s->dbg_n++;
+        if (v34_dbg || state_trace) s->dbg_n++;
         if (s->state == V34_STARTUP3_WAIT_MD && s->md_wait_samples) s->md_wait_samples--;
         agc_estimate(s, spl);
         spl = (spl * s->agc_gain) >> 14;
@@ -4280,7 +4285,7 @@ static void V34_demod(V34DSPState *s,
 
             /* we have here EQ_FRAC = 3 symbols per baud */
 
-            if (v34_dbg && s->state != s->dbg_last) { fprintf(stderr, "[dec] demod state %d -> %d (si=%d) at %ld ms\n", s->dbg_last, s->state, si, s->dbg_n/8); fflush(stderr); s->dbg_last = s->state; }
+            if ((v34_dbg || state_trace) && s->state != s->dbg_last) { fprintf(stderr, "[dec] demod state %d -> %d (si=%d) at %ld ms\n", s->dbg_last, s->state, si, s->dbg_n/8); fflush(stderr); s->dbg_last = s->state; }
             switch(s->state) {
             case V34_STARTUP3_WAIT_S1:
                 /* wait for the S signal */
@@ -4405,6 +4410,7 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
 
     V34_init_low(s, p, 0);
     s->state = V34_STARTUP3_WAIT_S1;
+    s->dbg_last = -1;
 }
 
 

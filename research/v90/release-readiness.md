@@ -40,7 +40,7 @@ directions, constrained FIFO backpressure and retraining/rate-change tests,
 including CT105 ASan/UBSan. These generated protocol tests do not prove hardware
 interoperability. V.34 remains unqualified.
 
-The latest LAPM trial (`22628e55-93cd-4a3c-972b-ca2fae86105c`) failed with
+An earlier LAPM trial (`22628e55-93cd-4a3c-972b-ca2fae86105c`) failed with
 error 678 without LAPM establishment. Retained TX65423 wire decoding verifies
 correct zero precoder coefficients across all four retries. An in-place receive
 replay acquired at RMS 0.135 with no 20-ms callback overruns, but the actual ODP
@@ -50,6 +50,12 @@ these findings do not establish whether the caller sent ODP or whether tracking
 lost it. Next collect direct live DTE-path counts and determine the caller's
 post-B1 waveform before changing detection thresholds or claiming fallback.
 
+The later diagnostic trial (`7596e320-5d64-4b75-867d-2f341a1239de`)
+confirmed live ODP detection, ADP transmission and stream selection. The initially
+logged HDLC frames failed CRC and LAPM never connected; Windows ended with error
+777. This narrows the next investigation to post-startup receive integrity.
+The qualified V90 restoration check passed again at 49,296 bit/s.
+
 ## Immediate dependencies
 
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP
@@ -57,7 +63,6 @@ The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP
 A second physical modem is also needed for item 5. Neither dependency blocks
 continued V.34 diagnosis or release review.
 
-CI completed successfully for `c5962e0` (serial framing) and `5f7c5cd`
-(channel reset). At this review, runs for `9e1c135` (LAPM integration) and the
-latest documentation head are still active. Check GitHub for their final result;
-this document deliberately does not treat queued/running checks as passed.
+CI completed successfully for `c5962e0` (serial framing), `5f7c5cd`
+(channel reset) and `9e1c135` (LAPM integration, run 34724716055). Later
+heads require their own final result; queued/running checks are not passed checks.

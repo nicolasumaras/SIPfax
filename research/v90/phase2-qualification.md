@@ -2186,3 +2186,35 @@ including reset. Both scenarios and native readiness tests pass locally; the
 native build succeeds. The next hardware trial must verify requested=1 and
 initialized=1, then compare cumulative counter deltas around each training
 attempt. This closes an observation gap, not the underlying hardware failure.
+
+### Live V34 ODP detection and post-startup frame failure
+
+Exact15a266d target native SHA
+45024a4703124f7129574ec6705d44186b80d87a50fd52b4fa409dc0aedbfc2e
+passed the target build, serial/DTE sanitizers, readiness, MP and acquisition
+checks. Hardware attempt7596e320-5d64-4b75-867d-2f341a1239de ends error777.
+Unlike preceding trials, it logs completed ODP detection, ten transmitted ADPs,
+and stream selection after continuous flags. All ten initially logged selected
+HDLC frames are CRC-invalid; link connection never completes. Later retries
+attempt to reacquire the negotiating LAPM stream. This is a detection milestone,
+not PPP success or proof of valid payload reception.
+
+The new live counters verify requested=1, initialized=1, and actual traffic:
+at16s TX2688/RX560bits; at17s TX14672/RX9819, detected=1, selected=1,
+connected=0, negotiated TX12000. RX delivery advances irregularly in the next
+seconds, while TX remains near12000bit/s. By24s a retrain is counted. Final72s
+summary has TX342048/RX278586, three retrains and no connected link. Initial
+acquisition RMS0.185 and600bits98%ones establish a useful startup window;
+later acquisition alone cannot establish data integrity. Do not infer zero
+frame errors from the LAPM protocol errors counter, which remains zero even
+while the logged HDLC frames fail CRC. Next inspect the post-ODP receiver and
+mapping/erasure behavior in retained capture66046, with actual MP parameters.
+
+Evidence: work/v34-dte-hardware-1789255382.{json,call.log,native-audit.json},
+work/v34-dte-hardware-diagnostics.json and work/v34-dte-hardware-protocol.json.
+Full native log and audio remain on CT105. Restoration attempt
+24e13639-e1cc-4453-9732-a442363102d5 passes49296bit/s, expected559-byte
+public HTTP checksum, six zero RAS error counters and cleanup. Final audit
+work/v34-dte-hardware-final-audit.json verifies25 files, qualified native hash,
+guard and idle endpoints. Separately, CI run34724716055 for9e1c135 completed
+successfully in both application and native-modem jobs.

@@ -63,7 +63,13 @@ if (action === 'up') {
   // Install the lease policy before making packets eligible for forwarding.
   // A rejected atomic nft transaction must not enable an unfiltered path.
   applyRules(descriptor, 'up');
-  setForwarding(descriptor, true);
+  try {
+    setForwarding(descriptor, true);
+  } catch (error) {
+    try { applyRules(descriptor, 'down'); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Forwarding activation and policy cleanup failed'); }
+    throw error;
+  }
   writeFileSync(activePath(safeCallId), JSON.stringify({
     callId,
     interfaceName,
@@ -98,9 +104,35 @@ function applyRules(descriptor, ruleAction) {
 
 function setForwarding(descriptor, enabled) {
   const value = enabled ? '1' : '0';
-  run(sysctlCommand, ['-w', `net.ipv4.ip_forward=${value}`]);
+  const keys = ['net.ipv4.ip_forward'];
   if (descriptor.outboundInterface) {
-    run(sysctlCommand, ['-w', `net.ipv4.conf.${descriptor.outboundInterface}.forwarding=${value}`]);
+    keys.push(`net.ipv4.conf.${descriptor.outboundInterface}.forwarding`);
+  }
+  // Read both values before changing either. Missing interfaces fail without
+  // partially enabling forwarding; avoid rewriting a surviving caller's state.
+  const previous = keys.map(key => {
+    const original = run(sysctlCommand, ['-n', key]).trim();
+    if (!['0', '1'].includes(original)) throw new Error(`Invalid forwarding value for ${key}`);
+    return { key, original };
+  });
+  try {
+    for (const entry of previous) {
+      if (entry.original === value) continue;
+      run(sysctlCommand, ['-w', `${entry.key}=${value}`]);
+    }
+  } catch (error) {
+    const errors = [error];
+    // Restore the global switch before explicit per-interface values because
+    // changing ip_forward also changes interface forwarding defaults.
+    for (const entry of previous) {
+      try {
+        if (run(sysctlCommand, ['-n', entry.key]).trim() !== entry.original) {
+          run(sysctlCommand, ['-w', `${entry.key}=${entry.original}`]);
+        }
+      }
+      catch (restoreError) { errors.push(restoreError); }
+    }
+    throw new AggregateError(errors, 'Forwarding update failed; attempted restoration');
   }
 }
 
@@ -114,6 +146,7 @@ function run(command, args, input = null) {
     const detail = (result.stderr || result.stdout || '').trim();
     throw new Error(`${command} ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`);
   }
+  return result.stdout ?? '';
 }
 
 function commandExists(command) {

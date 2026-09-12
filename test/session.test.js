@@ -665,6 +665,7 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
   ].join('\n'));
   writeFileSync(join(mockBin, 'sysctl'), [
     '#!/bin/sh',
+    'if test "$1" = -n; then if grep -q "ip_forward=1" "$SIPFAX_TEST_LOG"; then echo 1; else echo 0; fi; exit 0; fi',
     'printf "sysctl %s\\n" "$*" >> "$SIPFAX_TEST_LOG"'
   ].join('\n'));
   chmodSync(join(mockBin, 'nft'), 0o755);

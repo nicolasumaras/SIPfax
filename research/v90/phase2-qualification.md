@@ -2382,3 +2382,45 @@ Evidence: work/v34-tx-b1-66406-wave-audit.json; model artifacts and all audio
 remain in /tmp/v34-tx-b1-66406 on CT105. Next obtain scoped transport timing
 across the server/PBX/ATA path during a hardware trial and compare the emitted
 and delivered startup windows. No production change was made for this audit.
+
+### Transport-instrumented V34 trial
+
+Trial f5c1c230-c546-4b36-9a7b-4f83ee1c1286 uses the same15a266d diagnostic
+binary with automatic clock seed and ends error678. CT105 retains the full
+scoped UDP capture; FreePBX records only selected RTP/IP/UDP header fields,
+without an audio payload file. Capture processes were verified alive before
+dialing and stopped by their exact PIDs afterward. The controller restored the
+qualified native release. Evidence prefix: work/v34-transport-1789257124;
+call controller: work/v34-dte-hardware-1789257128.
+
+FreePBX metadata contains13746 RTP packets across four legs. ATA->PBX has3442
+packets with no sequence gaps, median20.000ms and maximum26.567ms spacing;
+its first timestamp increment is120, then all3440 remaining increments are160.
+PBX->CT105 has3431 packets, maximum26.535ms spacing and continuous160-sample
+timestamps. CT105->PBX has3429 packets, maximum21.560ms spacing and continuous
+160-sample timestamps. The CT105 pcap independently has those same two packet
+counts,160-byte G711 payloads, and no sequence or timestamp anomalies.
+
+PBX->ATA has3444 packets with no sequence gap. Its only long interval is
+131.797ms at0.4115s after stream start, accompanied by a backward2400-sample
+timestamp step. Payload type changes from0 to96; subsequent timestamps advance
+160 samples and spacing stays below30ms. Dynamic payload96 UDP lengths are
+181/345 bytes; do not infer audio sample count by subtracting20 bytes from UDP
+length on that leg. Those larger packets are not timestamp gaps. This header-only
+capture does not establish dynamic payload contents or successful ATA reception.
+
+Sustained1200Hz Tone B is present in regularly sequenced incoming CT105 packets
+at relative17.220..18.340s,29.140..30.260s,41.060..42.180s, and later intervals.
+Thus the observed caller retraining in this call is not explained by missing
+incoming RTP at CT105 or a packet-sequence gap observed at the PBX. The capture
+does not exclude loss after PBX egress, ATA analog playout effects, or protocol
+mismatch. Retain the early timestamp discontinuities for future startup review;
+they precede the observed B1/retrain boundary and are not proven causal.
+Evidence: work/v34-transport-1789257124-pbx-audit.json,
+work/v34-transport-1789257124-pbx-timestamps.json,
+work/v34-transport-1789257124-ct-audit.json. Raw audio remains on CT105.
+
+Restoration attempt5901548f-c295-4402-b44b-de3b94e8b29b passes49296bit/s,
+expected559-byte HTTP checksum, six zero RAS error counters and cleanup.
+work/v34-transport-hardware-final-audit.json verifies25 managed files, qualified
+native hash, guard and idle endpoints. No experimental build remains deployed.

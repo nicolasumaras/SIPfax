@@ -266,3 +266,25 @@ independent symbol-domain fits within 1 ms. Silence, three unrelated tones and
 one deterministic noise stream were rejected. Other rates, channel conditions,
 noise distributions and live integration remain unqualified. The prototype is
 not linked to the production receiver yet.
+
+### Opt-in matched-S receiver integration
+
+The `SIPFAX_V34_MATCHED_S=1` experiment now uses the matched detector's
+S-bar timestamp in the legacy receiver. It synchronizes during acquisition,
+accounts for the receive FIR's coefficient-centre delay, and waits until the
+filtered sample reaches the actual S-bar end before starting MD or PP. It
+resets acquisition for the second pair after negotiated MD. Default operation
+retains the previous acquisition path; this experiment is not deployed.
+
+Replay of PID 47019's training segment (capture starts at 10.95 s) places
+first/second S-bar ends at 0.147875 / 0.900375 s, versus independent waveform
+fits of 0.147831 / 0.899785 s. The integration reaches PP and TRN with MD=700;
+MD=0 on the same recording checks only the skip branch. This is timing evidence,
+not decoded data or hardware PPP success. The replay checker additionally
+bounds the PP filtered-sample offset to two 3x-baud samples. The legacy replay
+check allows one millisecond of integer-log truncation at MD boundaries.
+
+Validation: local native build, strict standalone detector compilation and
+negative controls, `tools/tests/v34-matched-replay.py`, and legacy
+`tools/tests/v34-md-replay.py`. Live acquisition, equalizer convergence, other
+symbol rates, broader noise/channel tolerance, and fallback PPP remain open.

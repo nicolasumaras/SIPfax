@@ -1,5 +1,6 @@
 #ifndef V34PRIV_H
 #define V34PRIV_H
+#include "v34sdetect.h"
 
 #define MAX_MAPPING_FRAME_SIZE 96
 #define M_MAX 18
@@ -167,6 +168,10 @@ typedef struct V34DSPState {
     int sym_count;
     int caller_md_ms;
     unsigned md_wait_samples;
+    int matched_s_enabled;
+    V34SDetect s_detector;
+    uint64_t rx_sample_count;
+    double sbar_end_sample, md_end_sample;
 
     /* current V34 protocol state */
     int state;

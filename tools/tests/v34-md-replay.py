@@ -12,7 +12,8 @@ for md in (0,700):
  if md:
   entered=next(t for old,new,t in transitions if new==18)
   exited=next(t for old,new,t in transitions if old==18)
-  assert exited-entered==700,(entered,exited)
+  # Integer millisecond logs truncate two independently timed transitions.
+  assert abs(exited-entered-700)<=1,(entered,exited)
   assert any(old==19 and new==2 for old,new,t in transitions)
  else:
   assert not any(new in (18,19,2,3) for old,new,t in transitions)

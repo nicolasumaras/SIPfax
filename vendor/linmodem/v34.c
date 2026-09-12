@@ -4241,6 +4241,7 @@ static void V34_demod(V34DSPState *s,
 {
     int si, sq, i, j, k , ph, spl;
     int v, frac, ph1;
+    double filtered_sample;
     static int state_trace = -1;
     if (state_trace < 0) {
         const char *e = getenv("SIPFAX_V34_STATE_TRACE");
@@ -4250,6 +4251,20 @@ static void V34_demod(V34DSPState *s,
     for(i=0;i<nb;i++) {
         /* Automatic Gain Control */
         spl = samples[i];
+        s->rx_sample_count++;
+        if (s->matched_s_enabled &&
+            (s->state == V34_STARTUP3_WAIT_S1 || s->state == V34_STARTUP3_WAIT_S2) &&
+            v34_s_detect_sample(&s->s_detector, samples[i])) {
+            double transition = s->rx_sample_count - s->s_detector.samples +
+                                s->s_detector.transition_sample;
+            s->sbar_end_sample = transition + 16.0 * 8000 / s->symbol_rate;
+            s->state = s->state == V34_STARTUP3_WAIT_S1 ?
+                       V34_STARTUP3_SINV1 : V34_STARTUP3_SINV2;
+            s->sym_count = 0;
+            if (v34_dbg || state_trace)
+                fprintf(stderr, "[dec] matched Sbar sample=%.3f end=%.3f score=%.6f\n",
+                        transition, s->sbar_end_sample, s->s_detector.score);
+        }
 
         if (v34_dbg || state_trace) s->dbg_n++;
         if (s->state == V34_STARTUP3_WAIT_MD && s->md_wait_samples) s->md_wait_samples--;
@@ -4286,8 +4301,16 @@ static void V34_demod(V34DSPState *s,
             /* we have here EQ_FRAC = 3 symbols per baud */
 
             if ((v34_dbg || state_trace) && s->state != s->dbg_last) { fprintf(stderr, "[dec] demod state %d -> %d (si=%d) at %ld ms\n", s->dbg_last, s->state, si, s->dbg_n/8); fflush(stderr); s->dbg_last = s->state; }
+            /* The FIR output represents an earlier PCM instant. Its centre
+               is coefficient RC_FILTER_SIZE/2, interpolated at baud_phase. */
+            filtered_sample = (double)s->rx_sample_count - s->rx_filter_wsize +
+                ((double)(RC_FILTER_SIZE / 2) * 65536 - s->baud_phase) / s->baud_num;
             switch(s->state) {
             case V34_STARTUP3_WAIT_S1:
+                if (s->matched_s_enabled) {
+                    v34_symbol_sync(s, si);
+                    break;
+                }
                 /* wait for the S signal */
                 fprintf(stderr, "waiting S1 %d\n", si);
                 /* XXX: find a better test ! */
@@ -4307,7 +4330,9 @@ static void V34_demod(V34DSPState *s,
                 break;
             case V34_STARTUP3_SINV1:
                 v34_symbol_sync(s, si);
-                if (++s->sym_count >= 16 * EQ_FRAC) {
+                if (s->matched_s_enabled ? filtered_sample >= s->sbar_end_sample :
+                    ++s->sym_count >= 16 * EQ_FRAC) {
+                    s->md_end_sample = s->sbar_end_sample + s->caller_md_ms * 8.0;
                     s->state = s->caller_md_ms ? V34_STARTUP3_WAIT_MD : V34_STARTUP3_PP;
                     s->md_wait_samples = (unsigned)s->caller_md_ms * 8;
                     s->sym_count = 0;
@@ -4315,9 +4340,18 @@ static void V34_demod(V34DSPState *s,
                 break;
 
             case V34_STARTUP3_WAIT_MD:
-                if (!s->md_wait_samples) s->state = V34_STARTUP3_WAIT_S2;
+                if (s->matched_s_enabled ? filtered_sample >= s->md_end_sample :
+                    !s->md_wait_samples) {
+                    if (s->matched_s_enabled)
+                        v34_s_detect_init(&s->s_detector, s->symbol_rate, s->carrier_freq);
+                    s->state = V34_STARTUP3_WAIT_S2;
+                }
                 break;
             case V34_STARTUP3_WAIT_S2:
+                if (s->matched_s_enabled) {
+                    v34_symbol_sync(s, si);
+                    break;
+                }
                 if (abs(si) > 13000) {
                     s->state = V34_STARTUP3_S2;
                     s->sym_count = 0;
@@ -4333,13 +4367,17 @@ static void V34_demod(V34DSPState *s,
 
             case V34_STARTUP3_SINV2:
                 v34_symbol_sync(s, si);
-                if (++s->sym_count >= 16 * EQ_FRAC) {
+                if (s->matched_s_enabled ? filtered_sample >= s->sbar_end_sample :
+                    ++s->sym_count >= 16 * EQ_FRAC) {
                     s->state = V34_STARTUP3_PP;
                     s->sym_count = 0;
                 }
                 break;
 
             case V34_STARTUP3_PP:
+                if (s->matched_s_enabled && !s->sym_count && (v34_dbg || state_trace))
+                    fprintf(stderr, "[dec] matched PP input=%.3f filtered=%.3f target=%.3f\n",
+                            (double)s->rx_sample_count, filtered_sample, s->sbar_end_sample);
 #if 1
                 /* PP is used to fast train the equalizer */
 
@@ -4411,6 +4449,11 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
     V34_init_low(s, p, 0);
     s->state = V34_STARTUP3_WAIT_S1;
     s->dbg_last = -1;
+    {
+        const char *e = getenv("SIPFAX_V34_MATCHED_S");
+        s->matched_s_enabled = e && !strcmp(e, "1") &&
+            v34_s_detect_init(&s->s_detector, s->symbol_rate, s->carrier_freq);
+    }
 }
 
 

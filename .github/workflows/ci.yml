@@ -47,6 +47,10 @@ jobs:
         run: python3 tools/tests/v34-fig9-table.py
       - name: Test V34 corrected-label traceback and settled decoding
         run: python3 tools/tests/v34-fig9-state.py vendor/linmodem/lm
+      - name: Verify V34 Table 11 current-interval ordering
+        run: python3 tools/audit-v34-table11.py vendor/linmodem/lm
+      - name: Test V34 precoded link and frame alignment
+        run: python3 tools/tests/v34-table11-link.py vendor/linmodem/lm
       - name: Test V34 startup with specification-derived synchronization
         run: python3 tools/tests/v34-startup-sync.py vendor/linmodem/lm
       - name: Sanitize V34 shell mapping boundaries

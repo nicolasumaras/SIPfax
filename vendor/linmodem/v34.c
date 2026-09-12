@@ -90,19 +90,10 @@ int g_c0hist[U0H];   /* SIPFAX: the C0 folded into U0 at that time (9.6.3.3) */
 int  g_v0h[V0_PER];
 int  g_v0base[V0_PER];
 int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0, g_v0applied = 0;
-/* SIPFAX: automatic mapping-frame alignment, replacing the hand-set SIPFAX_DATA_SKIP.
-   Two things have to be right and the v0 lock pins both.
-   (1) 4D PAIRING. v0 recovery needs consecutive 2D symbols paired the way the encoder paired
-       them; measured, v0 locks for every ODD SIPFAX_DATA_SKIP and never for an even one. So a
-       failure to lock within the acquisition window means the pairing is off by one 2D symbol
-       - drop one and retry.
-   (2) FRAME GROUPING. With the pairing right, the locked phase phi and correctness are related
-       exactly: phi mod 20 == 19 decodes, everything else does not (measured over skip 1..39
-       plus 59: 99.8% and 99.7% at phi 59 and 79, 51-79% at all eighteen other phases). 20 4D
-       symbols is the rcnt cycle, P/gcd(r,P) = 5 mapping frames of 4. Dropping one 4D symbol
-       advances phi by one, so the correction is d = (19 - phi) mod 20 4D symbols. Verified
-       against the sweep: phi 51 -> d 8 -> skip 3+16 = 19; phi 58 -> d 1 -> 17+2 = 19;
-       phi 60 -> d 19 -> 21+38 = 59. */
+/* Automatic mapping-frame alignment. Sync correlation supplies the input's
+   4D-symbol phase. Align to phase zero modulo the bit-count cycle:
+   P/gcd(r,P) mapping frames, each containing four 4D symbols. Pairing
+   recovery remains separate: an odd 2D-symbol offset needs a pairing retry. */
 int  g_v0_pairtry = 0, g_v0_pairdrop = 0, g_v0_aligned = 0;
 long g_v0_realign = 0;
 static void v0_base_init(void)
@@ -1190,19 +1181,6 @@ static void encode_mapping_frame(V34DSPState *s)
     s->Z_1 = Z[0];
     
     /* (§ 9.6.1) mapping to 2D symbols */
-    Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
-    {   /* SIPFAX: encoder-side ground truth for the sync work - the Z pair actually
-           transmitted, the U0 folded into Z[1] (which is the PREVIOUS trellis_encoder
-           call's return), and the v0 this symbol will carry. Diffing this against the
-           decoder's recovered values localises the remaining fault without another round
-           of reasoning about the indexing. */
-        extern FILE *g_encf;
-        int v0e = (s->sync_count == 0)
-                ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
-        if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
-        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
-                            s->sync_count, s->half_data_frame_count, s->conv_reg);
-    }
 
     C0 = 0; /* for trellis coding */
     for(i=0;i<2;i++) {
@@ -1211,10 +1189,6 @@ static void encode_mapping_frame(V34DSPState *s)
       assert(t >= 0 && t < L_MAX/4);
       x1 = s->constellation[t][0];
       y1 = s->constellation[t][1];
-      /* rotation by Z[i] * 90 degress clockwise */
-      rotate_clockwise(x, y, x1, y1, Z[i]);
-      u_re = x;
-      u_im = y;
 
       /* (§ 9.6.2) precoder */
       x = 0;
@@ -1231,6 +1205,25 @@ static void encode_mapping_frame(V34DSPState *s)
       c_re = shr_round0(p_re, 7 + w) << w;
       c_im = shr_round0(p_im, 7 + w) << w;
       C0 += c_re + c_im;
+      /* Table 11: c(2m+1) is known after processing the first symbol,
+         so combine the CURRENT modulo and sync bits before mapping it. */
+      if (i == 1) {
+          int v0_current = s->sync_count == 0
+              ? ((SYNC_PATTERN >> (15-s->half_data_frame_count)) & 1) : 0;
+          s->U0 = (s->conv_reg & 1) ^ ((C0 >> 1) & 1) ^ v0_current;
+          Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
+          /* Record the actual current-symbol rotation and source state. */
+          { extern FILE *g_encf;
+            if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
+            if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n",
+                    Z[0], Z[1], s->U0, v0_current,
+                    s->sync_count, s->half_data_frame_count, s->conv_reg);
+          }
+      }
+      /* rotation by Z[i] * 90 degress clockwise */
+      rotate_clockwise(x, y, x1, y1, Z[i]);
+      u_re = x;
+      u_im = y;
 
       Y[i][0] = clamp(u_re + c_re, 255);
       Y[i][1] = clamp(u_im + c_im, 255);
@@ -1287,7 +1280,7 @@ static void encode_mapping_frame(V34DSPState *s)
 
       put_sym(s, xp_re, xp_im);
     }
-    s->U0 = trellis_encoder(s, (C0 >> 1) & 1, Y);
+    (void)trellis_encoder(s, (C0 >> 1) & 1, Y);
 
     /* 4D symbol count & data frame count for synchronisation */
     if (++s->sync_count == 2*s->P) {
@@ -2856,19 +2849,13 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
 
     trellis_ptr = s->trellis_ptr;
     v0_base_init();
-    {   /* SIPFAX: PRECODER FRONT CHAIN (9.6.2 + 9.6.3.3). When the peer precodes, the
-           encoder folds C0(m) - the modulo bit from c(2m), c(2m+1) - into U0, so the
-           branch half holding the transmitted tuple is (parity ^ v0 ^ C0), not
-           (parity ^ v0). c(n) depends only on the receiver's own reconstruction of
-           PAST symbols, so it is knowable before this 4D symbol is scored: run the
-           9.6.2 filter on zero-delay odd-lattice decisions of the incoming soft
-           symbols. The encoder applies U0 one 4D symbol late (it returns U0 at the end
-           of symbol m and folds it into m+1), so the half uses the PREVIOUS symbol's
-           C0, exactly like v0. Measured through a clean simulated channel with the
-           caller's own h: 55.9% bit match without this, vs 99.7% unprecoded. */
+    {   /* Legacy C0 experiment, disabled by default. Normal post-channel
+           decoding scores Y=u+c. Its trellis half is Y0 xor V0; adding C0
+           again corrupts that constraint. The post-traceback inverse below
+           removes c before constellation lookup. */
         int c0_new = 0;
         static int fcen = -1;
-        if (fcen < 0) { char *e = getenv("SIPFAX_FC"); fcen = e ? atoi(e) : 1; }
+        if (fcen < 0) { char *e = getenv("SIPFAX_FC"); fcen = e ? atoi(e) : 0; }
         if (fcen && s->rx_precode) {
             int i2, w3 = (s->b < 56) ? 1 : 2, csum = 0;
             for (i2 = 0; i2 < 2; i2++) {
@@ -3391,10 +3378,8 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                 extern int *g_v0orc; extern long g_v0orn, g_v0ori;
                 static int voff = -99; long vi;
                 int v0h = 0;
-                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : -1; }
-                /* SIPFAX: measured exactly - half == (conv_reg[t]&1) ^ v0[t-1] == U0[t],
-                   100.00% over 16000 noise-free symbols. The source-state parity is right;
-                   it needs the PREVIOUS symbol,s v0, hence the default offset of -1. */
+                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : 0; }
+                /* Equation 9-32 uses the current interval's sync bit. */
                 vi = g_v0ori + voff;
                 if (g_v0orc && vi >= 0 && vi < g_v0orn) v0h = g_v0orc[vi];
                 n = (((state & 1) ^ v0h ^ s->fc_c0_use) ? nb_trans : 0);
@@ -3613,9 +3598,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
 
       /* decision */
       x = (x >> 8) * 2 + 1;
-      x = clamp(x, C_RADIUS);
+      /* Precoded Y=u+c may exceed the base constellation. Preserve Y
+         until c has been reconstructed and removed below. */
+      x = clamp(x, (s->rx_precode && !s->rx_precode2) ? 255 : C_RADIUS);
       y = (y >> 8) * 2 + 1;
-      y = clamp(y, C_RADIUS);
+      y = clamp(y, (s->rx_precode && !s->rx_precode2) ? 255 : C_RADIUS);
 
       /* SIPFAX: (9.6.2) PRECODER INVERSE.
          x,y are now the DECIDED transmitted coordinate Y. The transmitter formed
@@ -3994,9 +3981,12 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             if (en) {
                 if (g_v0lock && !g_v0_aligned) {
                     g_v0_aligned = 1;
-                    g_v0_realign = ((19 - (long)g_v0ph) % 20 + 20) % 20;
-                    if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (mod20=%d) -> drop %ld "
-                                         "4D symbols\n", g_v0ph, g_v0ph % 20, g_v0_realign);
+                    int divisor = s->P, remainder = s->r;
+                    while (remainder) { int next = divisor % remainder; divisor = remainder; remainder = next; }
+                    int cycle = 4 * s->P / divisor;
+                    g_v0_realign = ((-(long)g_v0ph) % cycle + cycle) % cycle;
+                    if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (cycle=%d) -> drop %ld "
+                                         "4D symbols\n", g_v0ph, cycle, g_v0_realign);
                 }
                 /* no lock in twice the acquisition window: the 4D pairing is off by one */
                 {   /* SIPFAX: how long to wait before concluding the 4D pairing is wrong. v0_try_lock
@@ -7970,6 +7960,11 @@ static void dataloop_symsink(int si, int sq)
             }
         }
         if (dl_sigma > 0) { a += dl_sigma*dl_gauss(); b += dl_sigma*dl_gauss(); }
+        /* Diagnostic prefix loss for mapping-frame acquisition tests. */
+        { static long drop = -1;
+          if (drop < 0) { const char *e = getenv("SIPFAX_DL_DROP");
+              drop = e ? atol(e) : 0; if (drop < 0) drop = 0; }
+          if (drop > 0) { --drop; return; } }
         baseband_decode_pub(g_rx_state, (int)lrint(a), (int)lrint(b));
     }
 }

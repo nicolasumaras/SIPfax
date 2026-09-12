@@ -1295,3 +1295,58 @@ previous-interval C0 in several places and needs corresponding standards-based
 validation before this prototype becomes a hardware candidate. The previous
 on-server captured B1 mismatch also remains unresolved; clean unprecoded
 symbol recovery is not a replacement for that hardware requirement.
+
+
+## Table 11 and precoded receive corrections integrated in source (2026-09-12)
+
+The Table11 transmitter and rate-aware alignment corrections have now moved
+from the isolated prototype into `vendor/linmodem/v34.c`, with two additional
+precoded-receive fixes. They have not been deployed to CT105.
+
+The normal trellis input after a matching channel is Y=u+c. Its constraint is
+Y0 xor V0; adding the experimental front-chain C0 again is incorrect. With the
+corrected transmitter and a matching synthetic FIR channel, disabling that
+extra bit gave exact decoding at12000/16800 for both a single real tap and the
+captured call's three complex taps. Enabling it produced roughly half wrong
+bits. `SIPFAX_FC` therefore defaults to0; value1 remains an explicit legacy
+experiment, not a qualified receive mode.
+
+At33600, a second defect clipped Y to the unprecoded constellation's radius45
+before removing c. The retained trace shows the first failing symbol's correct
+Y=(51,-13) becoming(45,-13); inverse output u=(35,-13) became(29,-13), then
+subsequent precoder history diverged. Precoded Y now retains the transmitter's
+coordinate range through255 until c is removed. The first400 traced symbols
+then matched exactly, and both complete33600 cases decoded with zero errors.
+
+New CI gates run `tools/audit-v34-table11.py` and
+`tools/tests/v34-table11-link.py`. The integrated native build passes:
+
+- Equation9-32 trace checks with zero and exact nonzero coefficients.
+- Twelve exact precoded clean-channel cases: rates12000/16800/33600, both
+  shaping modes, and two tap sets, with specification-derived synchronization.
+- Negative controls for the extra-C0 constraint and a missing inverse. A missing
+  inverse can suppress invalid frames rather than emit wrong bits; both are
+  correctly treated as decoding failures by the control.
+- Forty-eight automatic-alignment cases, with and without precoding, four rates
+  and six even2D prefix drops: zero errors across6064690 settled bits. No sync
+  oracle is used for these cases. Nonzero drops must produce a positive matched
+  lag, guarding against an ignored test option.
+- Existing known-phase startup test (0/156486; wrong-phase control fails),
+  Figure9 exact-state/settled-bit checks,156-configuration B1 generation, and
+  independent B1 scrambler/framing checks. Figure9 startup errors/erasures remain
+  separately reported and are not hardware startup passes.
+
+Before-fix evidence: `work/v34-table11-precode-before-range-audit.json` and
+`work/v34-precode-range-before-audit.json`. After-fix evidence:
+`work/v34-table11-precode-audit.json`,
+`work/v34-precode-range-evidence/audit.json`, and
+`work/v34-table11-integrated-{audit.json,link.log,startup.log,fig9.log,b1-reference.log,b1-framing.log}`.
+
+These checks use generated symbols and ideal matching linear channels. They do
+not qualify nonlinear encoding, odd2D pairing recovery, analog timing/noise,
+the captured hardware acquisition problem, or V.34 PPP. The receive inverse
+still requires deliberate enabling and a correctly prepared Y signal. The
+alternative pre-trellis inverse remains experimental; it was not validated by
+these post-traceback inverse tests. The qualified deployed V.90 baseline is
+unchanged, and complete native CI/hardware qualification of this source change
+remains pending.

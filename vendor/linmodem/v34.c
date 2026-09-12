@@ -7840,6 +7840,23 @@ void V34_stream_decode_file(const char *path)
             fprintf(stderr, "[stream] FORCE_DATA: entering data mode at R=%d\n", atoi(fd));
         }
     }
+    /* Offline replay has no transmitting instance to bridge our advertisement.
+       Supply the recorded receive rate/trellis/shaping explicitly. Optional RX_H
+       above supplies its recorded coefficients; otherwise they remain zero. */
+    { const char *mp = getenv("SIPFAX_STREAM_MP");
+      if (mp) {
+          int rate, trellis, shape, used=0;
+          if (sscanf(mp,"%d,%d,%d%n",&rate,&trellis,&shape,&used)!=3 || mp[used] ||
+              rate<2400 || rate>33600 || rate%2400 || trellis<0 || trellis>2 ||
+              shape<0 || shape>1) {
+              fprintf(stderr,"[stream] invalid recorded MP; expected rate,trellis,shape\n");
+              exit(2);
+          }
+          rx.p4_adv_ca=rate/2400; rx.p4_adv_trel=trellis; rx.p4_adv_shape=shape;
+          memcpy(rx.p4_adv_h,rx.h,sizeof(rx.p4_adv_h));
+          fprintf(stderr,"[stream] recorded MP: ca=%d trellis=%d shape=%d\n",rate,trellis,shape);
+      }
+    }
     { char *db = getenv("SIPFAX_DATABITS"); if (db) g_databitf = fopen(db, "w"); }
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }

@@ -31,4 +31,11 @@ with tempfile.TemporaryDirectory() as tmp:
     settled=data[40000:]
     assert len(settled)>80000 and settled.count(b'0')==0, (len(data),settled.count(b'0'))
     assert b'RX params: R=12000' in r.stderr
+    bridged=dict(rx,SIPFAX_STREAM_MP='12000,2,0',SIPFAX_STREAM_TREL='0')
+    r2=subprocess.run([str(binary)],env=bridged,capture_output=True,check=True,timeout=60)
+    assert bits.read_bytes()==data, 'recorded MP replay differs from equivalent receive parameters'
+    assert b'recorded MP: ca=12000 trellis=2 shape=0' in r2.stderr
+    for invalid in ('12000,3,0','12001,0,0','12000,0,2','12000,0,0junk'):
+        rejected=subprocess.run([str(binary)],env=dict(rx,SIPFAX_STREAM_MP=invalid),capture_output=True,timeout=10)
+        assert rejected.returncode==2, invalid
     print(f'PASS: native generated audio, {len(settled)} settled bits, zero errors; startup {data[:40000].count(b"0")} errors retained')

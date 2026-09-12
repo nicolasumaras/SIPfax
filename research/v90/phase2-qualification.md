@@ -554,3 +554,25 @@ sessions, media lines and leases. The laptop still reported XP 1.1.1.0 and no
 connections at 16:45 UTC; installation of the built 1.2.0 package was requested.
 No real bulk upload has been qualified yet, and no production modem/application
 binary was changed. All five release objectives remain open.
+
+## Captured startup carry comparison (2026-09-12)
+
+Using the same live-initialized post-echo capture, the existing NO_REACQ option
+feeds 8,285 symbols and starts decoding 0.292 ms after E, versus 6,285 symbols
+and 583.667 ms with default 2,000-symbol acquisition. A 64-symbol acquisition
+starts at 18.958 ms and feeds 8,221 symbols; its lattice RMS is still 0.508
+(default 0.566, with 0.577 representing no lock). These are replay observations,
+not hardware qualification.
+
+A constant-complex-scale fit to the approximate precoded Figure 9 B1 reference,
+trained on alternate symbols and evaluated on the others, found at most 0.027
+explained power for carried startup across offsets 0..40 and conjugate variants.
+The default and short-acquisition streams scored at most 0.037 and 0.045.
+This limited model does not establish caller waveform validity, but it gives
+no basis for treating NO_REACQ as a B1 recovery fix. Startup symbols can already
+be preserved with an existing option; recovering their channel/timing and
+validating the B1 reference remain necessary before changing production.
+
+Evidence: `work/v34_startup_carry_check.py` and separate baseline/carry/short
+logs, symbol files, state traces, binary/capture hashes and audit JSON under
+`work/v34-startup-carry-evidence/`. No production changes or hardware calls.

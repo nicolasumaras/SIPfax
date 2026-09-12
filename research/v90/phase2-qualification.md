@@ -1185,3 +1185,64 @@ The remaining fallback investigation concerns legacy training and CMA data
 acquisition; repairing the shell endpoint alone does not solve either. The
 qualified application/native baseline remains installed, and DialUpLab still
 reported version 1.1.1.0 before the trials.
+
+
+## In-place V.34 negotiation audit and Table 11 ordering defect (2026-09-12)
+
+Analysis of PID58408's recordings ran entirely on CT105. Reconstructed echo
+cancellation matched the live delay 1428 and lock sample 75200. The transmitted
+MP in the 14.5-second window decoded as 12000/12000, minimum shaping, initial
+16-state trellis, ACK=0. The 15.0-second window decoded the final 64-state
+request, ACK=1, with the same rate/shaping and exact h coefficients
+`4413,1769,-3741,423,2586,-446` (Q14). This rules out an assumed final 16-state
+request in that trial. Replaying its receive capture reproduced R=12000,
+M=4, L=16, trellis64 and lattice RMS0.564.
+
+NumPy 2.2.4 and its Debian dependencies were installed on CT105 for this
+in-place analysis. No recordings or receiver symbol traces were exported.
+The files `/tmp/v34-shell-58408-postecho.s16` and
+`/tmp/v34-shell-58408-state.csv` remain on CT105. Metadata-only evidence:
+`work/v34-shell-tx-negotiation{-fine,}-audit.json`,
+`work/v34-shell-58408-postecho-audit.log`, and
+`work/v34-shell-58408-stream-audit.json`.
+
+A specification check found a separate concrete encoder ordering defect.
+V.34 (02/98) Table11 steps4-6 and equation9-32 require
+U0(m)=Y0(m) xor C0(m) xor V0(m), combining the current interval's modulo and
+superframe bits before mapping its second 2D symbol. The current transmitter
+instead saves the previous interval's C0/V0 in `s->U0`. The new diagnostic
+`tools/audit-v34-table11.py` checks generated B1 traces against the equation,
+using precoder c values before symbol mapping and the convolutional state
+before advancement. For 60 4D intervals at 12000/minimum shaping it reports
+2 violations with zero taps and 27 with the exact advertised taps above.
+The diagnostic deliberately exits nonzero on this known defect; it is not
+an enabled CI gate or a passing interoperability test.
+
+An isolated prototype in `/tmp/v34-table11-prototype` computes c(2m+1) after
+the first symbol, then combines current C0/V0 before the second-symbol rotation.
+Both trace audits report zero violations. Prototype construction is retained
+in `work/v34_table11_prototype.py` (source base `05033eb`), with
+`work/v34-table11{,-prototype}-audit.json`. Its target native hash is
+`6ef73bf8d6dd4aff70197dffdbd4df21a41e7b4797f09776ffe0d61142db8428`.
+It has not been promoted into the source implementation or deployed.
+
+The change is not ready for adoption. The existing clean-decoder oracle test
+fails with 72587 bit errors using the prototype; changing the diagnostic
+V0 offset to zero still gives73519. These failed controls are retained in
+`work/v34-table11-prototype-{startup,current-sync}.log`. The receiver contains
+additional assumptions about previous-interval C0/V0 and must be audited with
+the transmitter. The test that previously passed does not independently prove
+the old transmitter's standards compliance.
+
+On-server reference searches over 16 rate/trellis/shaping/tap configurations
+still show no convincing captured B1 match. Baseline best-fit explained power
+is0.17767 (noise0.16105); prototype is0.17268 (noise0.18159); positive generated
+controls score1.0. Best-of-many ranking is exploratory, not proof of a causal
+hardware fix. Evidence: `work/v34-shell-58408-reference-audit.json`,
+`work/v34-table11-58408-reference-audit.json`, and the corresponding scripts
+and detailed results retained under `/tmp` on CT105.
+
+Production continues to use the qualified native binary and integrated
+application. The next source work is to reconcile transmitter/receiver
+current-interval ordering against Table11/equation9-32 and independent clean
+reference vectors before another hardware candidate is justified.

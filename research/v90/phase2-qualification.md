@@ -1,5 +1,9 @@
 # Phase-two hardware qualification
 
+For the current deployment and all five release gates, start with
+[release-readiness.md](release-readiness.md). The sections below retain historical
+trials, including failed and superseded candidates.
+
 > Correction: earlier V.34 MP rate/trellis numbers below were decoded with
 > reversed field bit order. See “MP numeric field bit-order correction” before
 > using those numbers as evidence of negotiated settings.

@@ -140,6 +140,11 @@ int16_t v90_phase4_next(V90Phase4 *s,int16_t input)
         void (*receive_bit)(void *,unsigned,int,long)=s->upstream.receive_bit;
         void *bit_opaque=s->upstream.bit_opaque;
         unsigned rate=s->upstream.rate,baud=s->upstream.symbol_rate,high=s->upstream.high_carrier;
+        /* Every old timing hypothesis is invalid now. Do not wait for its
+         * first decoded frame: the previously selected lane may never acquire
+         * after retraining, leaving LAPM pinned to a silent candidate. */
+        if(receive_bit)for(unsigned id=0;id<V90_UP_CANDIDATES;++id)
+            receive_bit(bit_opaque,id,-1,s->upstream.samples);
         v90_upstream_init_profile(&s->upstream,rate,baud,high);s->upstream.require_b1=1;
         s->upstream.receive_frame=receive_frame;s->upstream.opaque=opaque;
         s->upstream.receive_bit=receive_bit;s->upstream.bit_opaque=bit_opaque;

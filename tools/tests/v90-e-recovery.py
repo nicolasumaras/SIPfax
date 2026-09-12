@@ -40,6 +40,14 @@ int detect(const unsigned char *bits,unsigned n,int other_lane){
  for(unsigned i=0;i<n;++i)bit(&s,&s.lanes[other_lane && i>=428?1:0],bits[i]);
  return s.e_seen;
 }
+static unsigned resets[V90_UP_CANDIDATES];
+static int bad_reset;
+static void reset_bit(void *p,unsigned id,int b,long sample){
+ V90Phase4 *s=p;(void)sample;
+ if(b>=0)return;
+ if(b!=-1 || id>=V90_UP_CANDIDATES || s->upstream.frames!=99)bad_reset=1;
+ else resets[id]++;
+}
 static void ignored_frame(void*p,const uint8_t*b,unsigned n){(void)p;(void)b;(void)n;}
 int early_e(const unsigned char *cp,unsigned n){
  V90Phase4 s;v90_phase4_init(&s,0,78);
@@ -48,10 +56,15 @@ int early_e(const unsigned char *cp,unsigned n){
  s.stage=2;s.ed_frame=1;s.trn_start=0;s.mp_length=102;
  s.rx.e_seen=1;s.upstream.samples=100;s.upstream.frames=99;
  s.upstream.receive_frame=ignored_frame;s.upstream.opaque=&s;
+ s.upstream.receive_bit=reset_bit;s.upstream.bit_opaque=&s;
+ memset(resets,0,sizeof(resets));bad_reset=0;
  for(unsigned i=0;i<30;++i){
   v90_phase4_next(&s,0);
   if(s.upstream.samples!=i+1)return -3;
  }
+ for(unsigned i=0;i<V90_UP_CANDIDATES;++i)if(resets[i]!=1)return -4;
+ if(bad_reset)return -5;
+ if(s.upstream.receive_bit!=reset_bit || s.upstream.bit_opaque!=&s)return -6;
  return s.stage==4 && s.upstream.require_b1 && !s.upstream.frames &&
         s.upstream.receive_frame==ignored_frame && s.upstream.opaque==&s;
 }
@@ -77,7 +90,8 @@ int finish(const unsigned char *cp,unsigned n,int have_cp,int have_e){
     lib.finish.argtypes = [C.c_char_p, C.c_uint, C.c_int, C.c_int]
     lib.early_e.argtypes = [C.c_char_p, C.c_uint]
     fixture=(root/'test/fixtures/v90-cpt-6417.bits').read_bytes()
-    assert lib.early_e(fixture,len(fixture)) == 1, 'early E receiver reset or stopped at Ed'
+    early = lib.early_e(fixture,len(fixture))
+    assert early == 1, ('early E receiver reset or stopped at Ed', early)
 
     for kind, silence, corrupt in [(1,0,False), (0,0,False), (1,1,False), (1,0,True)]:
         cp = message(kind, silence, corrupt)

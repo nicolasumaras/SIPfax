@@ -88,7 +88,10 @@ static void transfer(unsigned reset_decoder,int early)
             unsigned was_connected=link.connected;
             assert(early || was_connected);
             unsigned vs=link.protocol.lapm.vs,va=link.protocol.lapm.va,vr=link.protocol.lapm.vr;
-            v90_lapm_link_candidate_bit(&link,candidate,-1,test_sample);
+            /* Global upstream reset invalidates all lanes before any can
+             * produce a frame. The old selected lane never returns below. */
+            for(unsigned id=0;id<V90_UP_CANDIDATES;++id)
+                v90_lapm_link_candidate_bit(&link,id,-1,test_sample);
             assert(link.connected==was_connected && link.detected && link.selection_count); /* Preserve ongoing negotiation too. */
             assert(link.protocol.lapm.vs==vs && link.protocol.lapm.va==va && link.protocol.lapm.vr==vr);
             hdlc_rx_restart(&caller.lapm.hdlc_rx);

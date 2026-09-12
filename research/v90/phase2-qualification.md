@@ -980,3 +980,30 @@ These results establish the same candidate's one-hour session, ten-call
 repeatability, one observed natural renegotiation and a three-packet loss case.
 They do not establish arbitrary impairment tolerance, working V.34 fallback,
 bulk POST throughput, simultaneous physical calls, or final release validation.
+
+## Qualified native baseline promoted on CT105 (2026-09-12)
+
+CT105 now retains native `9c493c3` with SHA-256
+`e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea`.
+The guard is enabled by persistent systemd drop-in
+`/etc/systemd/system/sipfax.service.d/v90-erasure-guard.conf`; its presence in
+the service process environment was verified. Application code remains
+`1dc5cb2`, and the existing one-call cap remains in effect.
+
+`/opt/sipfax/releases/native-9c493c3/` holds the previous binary, qualified
+binary, and a manifest with both hashes. Local procedure
+`work/rollback_v90_recovery.py` restores the previous native and removes the
+persistent guard, requiring an idle server and matching expected hashes. It
+has been prepared but not exercised as a separate release rollback campaign.
+Earlier trial restoration and this post-deployment call are distinct evidence.
+
+Post-deployment attempt `c7df5692-dbd3-48dc-8c87-f37251b530c7` passed at
+49,296 bit/s with expected response checksum, PPP source, zero RAS errors,
+`ipcp-open` and clean teardown. Final SSH verification confirmed the promoted
+hash, persistent guard, and zero active resources. Evidence:
+`work/v90-recovery-promotion{,-final-audit}.json`,
+`work/v90-ppp-lifecycle-c7df5692-dbd3-48dc-8c87-f37251b530c7.json`.
+
+Older local trial scripts that assert the pre-promotion hash must be updated
+before reuse; do not blindly restore that older baseline after new trials.
+This native-only deployment is not the final merged application release.

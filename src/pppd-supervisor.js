@@ -251,6 +251,13 @@ export class PppdSupervisor extends EventEmitter {
         continue;
       }
 
+      // With nodetach, pppd also writes ordinary diagnostic lines to stdout.
+      // Only object-shaped notifications belong to the JSON event protocol.
+      if (!line.startsWith('{')) {
+        this.emit('pppd-log', { callId, line });
+        continue;
+      }
+
       try {
         this.acceptEvent(callId, JSON.parse(line));
       } catch (error) {

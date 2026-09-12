@@ -576,3 +576,36 @@ validating the B1 reference remain necessary before changing production.
 Evidence: `work/v34_startup_carry_check.py` and separate baseline/carry/short
 logs, symbol files, state traces, binary/capture hashes and audit JSON under
 `work/v34-startup-carry-evidence/`. No production changes or hardware calls.
+
+## Controlled single incoming RTP loss fails recovery (2026-09-12)
+
+Baseline hardware call 87ab3991-3cac-4291-8b15-1a882dc07976 connected at
+49,296 bps, completed the example.com probe with zero RAS errors, and cleaned
+up. The first fault attempt ddb15fbc-70a0-4a96-93f0-234b15fae59a failed nft's
+syntax check before installing any rule; it is retained as a harness failure.
+
+Corrected attempt d08c3a08-f09f-43ec-8f9a-67e7aac1de56 connected at 49,296 bps.
+After a successful baseline probe, a temporary input rule on its allocated RTP
+port 40000 dropped exactly one packet (nft counter verified), then was removed.
+The next probe failed with ConnectFailure after 10,854 ms. Native logs show a
+physical decoder reset followed by reacquiring=1 and resumptions=0 until call
+teardown. Thus this run fails one-packet recovery; nominal endurance is not
+impairment tolerance. Three post-loss successful probes were required but the
+first failed. No claim is made about eventual recovery after a longer wait.
+
+Cleanup verified zero SIP sessions, PPP leases and media lines. A subsequent
+firewall inventory showed only the original inet filter table. Reports and
+native log: `work/v90-controlled-loss-*.json` and
+`work/v90-controlled-loss-d08c3a08-native.log`; scoped injector and harness are
+`work/v90_scoped_packet_loss.py` and `work/v90_controlled_loss_qualification.py`.
+No production binary or persistent firewall configuration changed.
+
+The health snapshots also exposed ordinary pppd stdout log lines being parsed
+as notification JSON. The supervisor now emits plain lines as pppd-log and
+reserves JSON parsing for object-shaped messages. A regression covers split
+logs mixed with a split ip-up event and malformed JSON. All 85 application
+tests pass using the bundled Node runtime with local socket permissions.
+The initial run without Node on PATH/socket permissions failed and was rerun
+with those prerequisites. This change is not deployed. It removes false JSON
+errors; the live missing lifecycle notification (state remains starting despite
+PPP connectivity) still requires correction and hardware verification.

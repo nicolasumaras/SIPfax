@@ -75,3 +75,40 @@ test('late events from a replaced PPP process cannot mutate its successor', () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('ordinary pppd stdout logs coexist with split JSON lifecycle notifications', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sipfax-pppd-logs-'));
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  child.pid = 123; child.kill = () => {};
+  const supervisor = new PppdSupervisor({
+    secretsDir: dir, tempDir: dir, spawnProcess: () => child
+  });
+  const logs = [], errors = [];
+  supervisor.on('pppd-log', event => logs.push(event.line));
+  supervisor.on('pppd-error', event => errors.push(event.error));
+  try {
+    supervisor.start({
+      callId: 'mixed-output', slavePath: '/dev/pts/1',
+      lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' },
+      credentials: new PppCredentialStore([{ username: 'test', password: 'test' }])
+    });
+    child.stdout.emit('data', Buffer.from('local  IP address 10.64.0.1\nremote IP add'));
+    child.stdout.emit('data', Buffer.from('ress 10.64.0.2\n{"state":"ip-'));
+    child.stdout.emit('data', Buffer.from('up","interfaceName":"ppp0"}\n'));
+    assert.deepEqual(logs, ['local  IP address 10.64.0.1', 'remote IP address 10.64.0.2']);
+    assert.deepEqual(errors, []);
+    const session = supervisor.snapshot('mixed-output');
+    assert.equal(session.state, 'ipcp-open');
+    assert.equal(session.interfaceName, 'ppp0');
+    assert.equal(session.lastError, null);
+    child.stdout.emit('data', Buffer.from('{malformed notification}\n'));
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /invalid pppd notify JSON/);
+  } finally {
+    child.emit('exit', 0, null);
+    supervisor.stop('mixed-output');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

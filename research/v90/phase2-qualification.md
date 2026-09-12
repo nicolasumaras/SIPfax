@@ -1350,3 +1350,31 @@ alternative pre-trellis inverse remains experimental; it was not validated by
 these post-traceback inverse tests. The qualified deployed V.90 baseline is
 unchanged, and complete native CI/hardware qualification of this source change
 remains pending.
+
+
+## Low-rate B1 determinism fix and CT105 validation (2026-09-12)
+
+CI run34717920914 at `5d73032` passed the application job but failed the
+B1 reproducibility gate. Investigation found that low-rate mapping read a
+bit beyond the short frame and flattened the I-bit array in an order that
+did not follow clause9.3.2. Commit `411f88b` groups I1/I2 for every4D symbol
+and includes I3 only in the first mp_size-8 groups, with matching receive
+packing. A new regression checks emitted4800-bit/s B1 rotations against
+independently derived GPC bits and verifies clean data roundtrips for both
+shaping modes. The rotation check failed before the fix.
+
+The exact `411f88b` source was built separately on CT105 at
+`/tmp/v34-table11-411f88b`; it was not installed into the running service.
+Source archive SHA256:
+`1a56a530ed638f7547fc258f4c208069eecf61753e0046c7b975c7017451d58a`.
+Native binary SHA256:
+`5148293e0faa98fead8328a05307ea5d3ca5472a5b83a400abe48bf844a535ad`.
+Loader preflight, low-rate framing,156-configuration deterministic B1,
+Table11 trace audit,12 exact precoded cases and their negative controls,
+48 alignment cases (0/6064690 settled bits), and known-phase startup
+(0/156486; wrong-phase control fails) passed on CT105.
+Local target evidence: `work/v34-table11-411f88b-target-validation.log`.
+
+These are offline checks on the target host. Full CI and physical V.34
+acquisition/PPP remain required. Production remains application `9e0f242`
+with the qualified `9c493c3` native binary and persistent erasure guard.

@@ -188,13 +188,11 @@ not write firewall state. The root-side pppd hooks installed by
 NAT/MASQUERADE, rolls rules back on `ip-down`, and posts best-effort loopback
 diagnostics to operator HTTP.
 
-For each PPP session, SIPfax renders the configured `SIPFAX_PPP_USERS` into a
-private temporary `chap-secrets` file, or `pap-secrets` when
-`SIPFAX_PPP_AUTH=pap`. The file is created with `0600` permissions, passed to
-`pppd` with the matching `chap-secrets`/`pap-secrets` option, and removed when
-the pppd session exits. Do not create persistent entries in `/etc/ppp/chap-secrets`
-for SIPfax users unless an Operator explicitly chooses to replace this per-call
-secret lifecycle.
+SIPfax renders all configured PPP users into a shared `0600` credential file.
+It is retained when individual sessions exit and replaced atomically on launch.
+pppd reads `/etc/ppp/chap-secrets` or `/etc/ppp/pap-secrets`; root-managed links
+point to the service-owned files in `/var/lib/sipfax/ppp-secrets`.
+Run the migration below before deploying the atomic credential writer.
 
 ## systemd Install
 
@@ -261,15 +259,24 @@ interface. Three things the base VM does not provide by default:
    grep NoNewPrivs /proc/$(systemctl show -p MainPID --value sipfax.service)/status
    ```
 
-3. **Secrets files the service can rewrite.** `pppd` always reads
-   `/etc/ppp/chap-secrets`; the service renders per-call credentials there and
-   clears them on teardown, so pre-create them owned by `sipfax`:
+3. **Secrets files the service can replace atomically.** Stop SIPfax and wait
+   for its PPP sessions to exit, then migrate existing credentials:
 
    ```bash
-   sudo touch /etc/ppp/chap-secrets /etc/ppp/pap-secrets
-   sudo chown sipfax:sipfax /etc/ppp/chap-secrets /etc/ppp/pap-secrets
-   sudo chmod 600 /etc/ppp/chap-secrets /etc/ppp/pap-secrets
+   sudo systemctl stop sipfax
+   sudo python3 deploy/prepare-ppp-secrets.py
+   sudo systemctl daemon-reload
+   sudo systemctl start sipfax
    ```
+
+   Install the updated PPP drop-in before restarting. The helper preserves
+   existing credentials in root-owned `0600` `.pre-sipfax` copies and creates
+   links to files in a `0700` service-owned directory. Reruns preserve the
+   managed files and the original backups. `/etc/ppp` remains root-owned.
+   To roll back, stop SIPfax, restore the previous application/drop-in, and
+   replace each credential link with its `.pre-sipfax` copy (owned by sipfax,
+   mode `0600` for the previous writer). Preserve any credential changes made
+   after migration before restoring an older backup.
 
 ## Modulation Note (V.8 vs forced V.22bis)
 

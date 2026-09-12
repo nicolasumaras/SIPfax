@@ -203,7 +203,7 @@ glibc can be executable but still fail to load. Run preflight on the target host
 
 
 ```bash
-make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+make -C vendor/linmodem
 bash deploy/install-systemd.sh --engine=linmodem --check
 sudo systemctl stop sipfax
 sudo bash deploy/install-systemd.sh --engine=linmodem
@@ -552,3 +552,16 @@ bind failure returns SIP 503 and tears down that call; the port is returned to
 the pool after socket closure. Retransmitted INVITEs share the same pending
 startup result. Check the service log for the bind error when a call receives
 503, including whether another process already owns the configured RTP port.
+
+
+### Incoming RTP erasure guard
+
+The native receiver supports `SIPFAX_V90_ERASURE_GUARD=1` as an opt-in setting
+in the service environment. It pauses provisional equalizer feedback when
+received energy indicates an erasure, while retaining the sample and symbol
+clocks. It does not reconstruct lost audio or guarantee recovery from all
+network impairments. Hardware tests have passed isolated one- and three-packet
+incoming loss; qualification results and exact builds are recorded in
+`research/v90/phase2-qualification.md`. Repeatability and endurance gates apply
+before selecting a candidate as the permanent native binary. Unset the variable
+or set it to `0` to retain the default behavior.

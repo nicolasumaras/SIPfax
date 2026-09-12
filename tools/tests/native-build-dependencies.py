@@ -13,8 +13,7 @@ with tempfile.TemporaryDirectory(prefix="sipfax-build-deps-") as temporary:
         shutil.copytree(ROOT / "vendor" / name, vendor / name,
                         ignore=shutil.ignore_patterns("*.o", "*.d"))
     modem = vendor / "linmodem"
-    command = ["make", "-C", str(modem), "-j2",
-               "CFLAGS=-O2 -Wall -g -D_GNU_SOURCE -fcommon"]
+    command = ["make", "-C", str(modem), "-j2"]
 
     def build(*targets):
         result = subprocess.run(command + list(targets), text=True,

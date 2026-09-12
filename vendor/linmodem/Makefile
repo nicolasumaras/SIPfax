@@ -1,7 +1,7 @@
 # uncomment to use X11 debug interface
 #USE_X11=y
 
-CFLAGS= -O2 -Wall -g
+CFLAGS= -O2 -Wall -g -D_GNU_SOURCE -std=gnu99 -fcommon
 CPPFLAGS += -I../spandsp-v42/src -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN
 LDFLAGS= -g
 V42_OBJS= ../spandsp-v42/src/v42.o ../spandsp-v42/src/hdlc.o \

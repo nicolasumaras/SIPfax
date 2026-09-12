@@ -1953,3 +1953,36 @@ Evidence: work/v34-audit-c39a0e4-target-timing.log. The acquisition replay optio
 remains off by default; production has not changed. Next replay the separate
 failed capture62290 with the short-window candidate and resolve/measure initial
 B1 errors, then perform a controlled call with qualified V.90 restoration.
+
+
+### Short-buffer hardware reaches DeviceConnected; PPP readiness gap
+
+Separate failed capture62290 still acquires poorly with the short-buffer path
+(RMS0.543), but replay timing peaks14.873ms with zero overruns; baseline long-window
+replay overruns twice. This is not robust acquisition qualification.
+Evidence: work/v34-second-62290-replay.json.
+
+Controlled c39a0e4 hardware trial a772b4d6-d1a2-4005-99e2-b26a01758a91 reached
+Windows DeviceConnected and Authenticate at22:33:32.420UTC on2026-09-12, then failed
+at22:34:11 with721. Prior trials failed in ConnectDevice with678. One TX B1 entry;
+RX acquisition RMS0.163, clock seed-141.7ppm,64 samples replayed, first600 emitted
+bits97.0% ones. This is later-stage progress, not PPP success or proof of bad
+credentials. Retained RX capture63164 is999424 bytes on CT105.
+
+Code inspection identifies a PPP readiness gap: lm_get_state handles V90/V21/V23
+but not SM_V34, so V34 always returns LM_STATE_CONNECTING. linpipe.c emits the
+pty-opened event only for LM_STATE_CONNECTED. The native log had no CONNECTED
+notification, and the unit journal interval had no pppd/LCP/IPCP events (journal
+absence alone is not definitive). Next add and test a V34 readiness predicate
+based on completed startup/data readiness, not merely selecting SM_V34. Also
+inspect V34 serial versus error-control handling if PPP still fails afterward.
+
+Qualified V90 restoration call89c594dd-0252-4c7e-97e0-09305691f2b6 passed49296,
+559-byte expected checksum, zero six-category RAS errors and clean cleanup.
+All25 managed files match; guard enabled, Figure9 and acquisition-replay flags
+removed, endpoints idle. Evidence: work/v34-short-buffer-hardware-1789252372.*,
+work/v34-short-buffer-hardware-diagnostics.json,
+work/v34-short-buffer-ppp-journal-audit.json,
+work/v34-short-buffer-hardware-final-audit.json and
+work/v90-ppp-lifecycle-89c594dd-0252-4c7e-97e0-09305691f2b6.json.
+Production is unchanged. Actual bulk upload and multiple physical calls remain open.

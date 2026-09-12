@@ -6160,7 +6160,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                     used*4 < s->L*3 ? "  <-- COLLAPSED, score is an artifact" : "");
                         }
                         gc = s->data_agc;
-                        {   /* SIPFAX: is the acquisition FINDING the optimum, or is there
+                        static int acquisition_audit = -1;
+                        if (acquisition_audit < 0) { const char *e=getenv("SIPFAX_ACQ_AUDIT"); acquisition_audit=e ? atoi(e) : 0; }
+                        if (acquisition_audit) { /* Offline diagnostic only: this exhaustive
+                               scan does not select or modify receive parameters. */
+                            /* SIPFAX: is the acquisition FINDING the optimum, or is there
                                no optimum to find? The only transforms between the equaliser
                                output and the lattice score are a rotation and a scale, and
                                the acquisition fixes the gain by measurement and searches the

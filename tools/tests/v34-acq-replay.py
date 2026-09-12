@@ -24,6 +24,12 @@ with tempfile.TemporaryDirectory() as tmp:
    indices=[int(x) for x in seq.read_text().splitlines()];assert indices
    assert all(b>a for a,b in zip(indices,indices[1:])), 'duplicate/out-of-order sample'
    first.append(indices[0])
+   original_bits=bits.read_bytes();original_seq=seq.read_bytes()
+   assert '2-D (gain,phase) sweep' not in r.stderr
+   audit=subprocess.run([str(binary)],env=dict(env,SIPFAX_ACQ_AUDIT='1'),capture_output=True,text=True,check=True,timeout=60)
+   assert '2-D (gain,phase) sweep' in audit.stderr
+   assert bits.read_bytes()==original_bits and seq.read_bytes()==original_seq, 'diagnostic scan changed decoder output'
+
    if replay:
     assert indices[:count+1]==list(range(indices[0],indices[0]+count+1)), 'accepted acquisition samples lost'
     assert f'replaying {count} accepted acquisition symbols' in r.stderr

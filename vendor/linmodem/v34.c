@@ -4528,6 +4528,8 @@ int V34_b1_reference(const char *path)
     V34State p;
     static V34DSPState tx;
     const char *rate = getenv("SIPFAX_B1_RATE");
+    const char *role = getenv("SIPFAX_B1_CALLING");
+    if (role && strcmp(role,"0") && strcmp(role,"1")) return 2;
     const char *shape = getenv("SIPFAX_SHAPE");
     const char *trellis = getenv("SIPFAX_B1_TRELLIS");
     const char *h = getenv("SIPFAX_B1_H");
@@ -4540,7 +4542,7 @@ int V34_b1_reference(const char *path)
     }
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = rate ? atoi(rate) : 16800;
-    p.calling = 1; p.use_high_carrier = 1;
+    p.calling = role ? atoi(role) : 1; p.use_high_carrier = 1;
     p.expanded_shape = shape ? atoi(shape) : 1;
     p.conv_nb_states = trellis ? atoi(trellis) : 64;
     p.use_non_linear = norm != NULL;

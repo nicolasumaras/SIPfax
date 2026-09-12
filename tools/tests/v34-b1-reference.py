@@ -25,6 +25,10 @@ with tempfile.TemporaryDirectory() as tmp:
         return pairs
     reference = generate()
     assert generate() == reference
+    assert generate(SIPFAX_B1_CALLING="1") == reference
+    answer = generate(SIPFAX_B1_CALLING="0")
+    assert answer != reference
+    assert generate(SIPFAX_B1_CALLING="0") == answer
     assert generate(SIPFAX_B1_H='0,0,0,0,0,0') == reference
     assert generate(SIPFAX_B1_H='4476,1768,-3722,329,2710,-924') != reference
     for rate in range(4800, 33601, 2400):
@@ -34,6 +38,11 @@ with tempfile.TemporaryDirectory() as tmp:
                     opts = dict(SIPFAX_B1_RATE=str(rate), SIPFAX_B1_TRELLIS=trellis,
                                 SIPFAX_SHAPE=shape, SIPFAX_B1_H=taps)
                     assert generate(**opts) == generate(**opts), opts
+    for invalid_role in ('', '2', '-1', '1extra'):
+        env = {k: v for k, v in os.environ.items() if not k.startswith('SIPFAX_')}
+        env.update(SIPFAX_B1_REFERENCE=str(out), SIPFAX_B1_CALLING=invalid_role)
+        assert subprocess.run([str(a.binary.resolve())], env=env, capture_output=True,
+                              timeout=10).returncode == 2
     for invalid in ('1,2,3', '32768,0,0,0,0,0', '1,2,3,4,5,6extra'):
         env = {k: v for k, v in os.environ.items() if not k.startswith('SIPFAX_')}
         env.update(SIPFAX_B1_REFERENCE=str(out), SIPFAX_B1_H=invalid)

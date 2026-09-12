@@ -1045,3 +1045,46 @@ test('per-call NAT translates TCP and UDP low source ports with symmetric cleanu
   assert.ok(!disabled.firewallRulesNft().some(rule => rule.includes('masquerade')));
   assert.ok(!disabled.firewallRules().some(rule => rule.includes('MASQUERADE')));
 });
+
+
+test('failed modem or line construction releases capacity without disturbing another call', async () => {
+  for (const failure of ['modem', 'line']) {
+    const pool = new RtpPortPool({ range: [46000, 46002] });
+    let reject = false;
+    const stopped = [];
+    const manager = makeManager({
+      maxSessions: 2, rtpPortPool: pool,
+      modemFactory(callId) {
+        if (reject && failure === 'modem') throw new Error('modem construction failed');
+        return { stop() { stopped.push(callId); } };
+      },
+      lineFactory(options) {
+        if (reject && failure === 'line') throw new Error('line construction failed');
+        return fakeLineFactory(options);
+      }
+    });
+    const invite = callId => parseSipMessage(makeInvite({ callId, payloads: '0' }));
+    const survivor = manager.startFromInvite(invite('survivor'));
+    await survivor.ready;
+    manager.acknowledge('survivor');
+    const entry = manager.sessions.get('survivor');
+    reject = true;
+    for (let i = 0; i < 3; i++) {
+      const result = manager.startFromInvite(invite('failed-' + i));
+      assert.equal(result.accepted, false);
+      assert.equal(result.statusCode, 500);
+      assert.equal(manager.activeCount, 1);
+      assert.equal(pool.available, 1);
+      assert.equal(manager.sessions.get('survivor'), entry);
+      assert.equal(entry.line.stopped, false);
+      assert.equal(entry.session.state, 'established');
+    }
+    assert.deepEqual(stopped, failure === 'line' ? ['failed-0', 'failed-1', 'failed-2'] : []);
+    reject = false;
+    assert.equal(manager.startFromInvite(invite('replacement')).accepted, true);
+    assert.equal(pool.available, 0);
+    manager.terminate('replacement'); manager.terminate('survivor');
+    await Promise.resolve();
+    assert.equal(pool.available, 2);
+  }
+});

@@ -99,14 +99,26 @@ export class MultiSessionManager {
       return { accepted: false, statusCode: 486, reason: 'Busy Here' };
     }
 
-    const modem = this.modemFactory ? this.modemFactory(invite.callId) : null;
-    const line = this.lineFactory({
-      callId: invite.callId,
-      codec: supportedCodec,
-      rtpHost: this.rtpHost,
-      rtpPort,
-      modem
-    });
+    let modem;
+    let line;
+    try {
+      modem = this.modemFactory ? this.modemFactory(invite.callId) : null;
+      line = this.lineFactory({
+        callId: invite.callId,
+        codec: supportedCodec,
+        rtpHost: this.rtpHost,
+        rtpPort,
+        modem
+      });
+    } catch (error) {
+      // No Line has started, so no socket owns this allocation yet.
+      this.rtpPortPool.release(rtpPort);
+      const cleanupFailed = cleanupError => console.error(`modem ${invite.callId} construction cleanup failed: ${cleanupError.message}`);
+      try { Promise.resolve(modem?.stop?.()).catch(cleanupFailed); }
+      catch (cleanupError) { cleanupFailed(cleanupError); }
+      console.error(`line ${invite.callId} construction failed: ${error.message}`);
+      return { accepted: false, statusCode: 500, reason: 'Server Internal Error' };
+    }
     const ownsCall = callId => callId === invite.callId && this.sessions.get(callId)?.line === line;
     line.on('pty-opened', ({ callId, slavePath }) => {
       if (ownsCall(callId)) this.openPty(callId, { slavePath });

@@ -1,5 +1,19 @@
 # CT105 native deployment provenance
 
+## Current deployment: 70614d7
+
+The current installed native binary is `/opt/sipfax/vendor/linmodem/lm`, built from commit `70614d7`, with SHA-256 `62b8190eed86cb4267447229d9ac1e8af0af0e4cdac93c67dda77204ae922623`. CT105 retains `/opt/sipfax/releases/native-70614d7-source.tar.gz` and `/opt/sipfax/releases/native-70614d7.json`. V.42/LAPM is enabled by `/etc/systemd/system/sipfax.service.d/v90-lapm.conf` with `Environment=SIPFAX_V90_V42=1` under `[Service]`.
+
+Physical Windows XP calls have authenticated PPP and passed public internet probes at a reported 49,296 bit/s. See `v42-hardware-acceptance.json` for the accepted calls and known failures. The next-phase campaign tests this unchanged native build. Short-call success does not yet qualify the build for sustained reliability or multiple simultaneous calls.
+
+The native rollback artifact is `/opt/sipfax/releases/lm-pre-lapm-fbaeb83.rollback`, SHA-256 `cac0ea0c9f93a4ce2d4479b339047ec019a3709e499f95e44d4f8cfe5d456c7c`. Restoring this pre-LAPM binary also requires removing the `v90-lapm.conf` drop-in, then reloading systemd and restarting SIPfax. This is a native-modem rollback, not a complete application/configuration rollback.
+
+The application checkout under `/opt/sipfax` contains deployment overlays. Native source provenance does not by itself identify all running JavaScript. The subsequent PPP/modem process lifecycle fixes on the development branch have not been deployed during baseline collection. Full application deployment reproducibility and rollback qualification remain release gates.
+
+## Historical deployment: 8aa8c5e
+
+The following record describes the earlier deployment, not the currently installed binary.
+
 The installed native binary is built from commit `8aa8c5e5a5af389aa3f060a50d668498adede909`, with SHA256 `cac0ea0c9f93a4ce2d4479b339047ec019a3709e499f95e44d4f8cfe5d456c7c`. The service uses an initial upstream ceiling of 28800, automatic initial echo acquisition and a downstream ceiling of 49334. Both upstream symbol rates are offered according to caller capabilities. Causal ODP training is enabled, with index-2 pre-emphasis requested for 3000 symbols/s. Both sustained hardware profiles passed all transfer hashes, with residual CRC errors documented in `upstream-rates.md`.
 
 The historical `/opt/sipfax` Git checkout predates the deployment overlays. All fourteen deployed JavaScript source files matched the development branch in the 2026-09-11 audit; its top-level Git HEAD alone does not identify the running native code.

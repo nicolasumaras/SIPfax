@@ -137,7 +137,7 @@ export class PppdSupervisor extends EventEmitter {
 
     // pppd has no command-line option to select a secrets file; it always
     // reads /etc/ppp/{chap,pap}-secrets. Render the per-call credentials there
-    // before launch (single active call) and remove the file on teardown.
+    // before launch. The shared file is retained on per-call teardown.
     // secretsDir defaults to /etc/ppp; tests inject a writable temp dir.
     const secretsFile = join(
       this.secretsDir,
@@ -153,9 +153,11 @@ export class PppdSupervisor extends EventEmitter {
     session.args = args;
 
     child.stdout?.on('data', (chunk) => {
+      if (this.sessions.get(callId) !== session) return;
       this.acceptNotifyChunk(callId, chunk);
     });
     child.stderr?.on('data', (chunk) => {
+      if (this.sessions.get(callId) !== session) return;
       const text = chunk.toString('utf8').trim();
       if (text) {
         session.lastError = text;
@@ -163,10 +165,16 @@ export class PppdSupervisor extends EventEmitter {
       }
     });
     child.on('error', (error) => {
+      if (this.sessions.get(callId) !== session) return;
       session.lastError = error.message;
       this.acceptEvent(callId, { state: 'failed', error: error.message });
     });
     child.on('exit', (code, signal) => {
+      // A stopped process may exit after a replacement has reused its Call-ID.
+      if (this.sessions.get(callId) !== session) {
+        this.removeSessionFiles(session);
+        return;
+      }
       session.endedAt = new Date();
       session.sessionDurationSeconds = Math.max(0, Math.floor((session.endedAt.getTime() - session.startedAt.getTime()) / 1000));
       this.acceptEvent(callId, { state: 'closed', code, signal });

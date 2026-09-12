@@ -952,3 +952,31 @@ this exact candidate. It does not replace repeated-call qualification of this
 new build, broader controlled impairments, genuine bulk uploads, V.34 hardware
 fallback, full release deployment/rollback or simultaneous hardware calls.
 The failed predecessor run remains retained.
+
+## Exact recovery candidate loss and repeatability PASS (2026-09-12)
+
+The same CT105-built `9c493c3` binary, SHA-256
+`e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea`,
+with the erasure guard enabled passed two additional hardware gates:
+
+- Three deliberately dropped incoming RTP packets on the active call's port.
+  The nftables counter confirmed exactly three drops. Attempt
+  `c4fc7b59-09ee-482a-9858-e5fdc955132d` retained PPP and completed three
+  post-loss HTTP probes, all matching the expected 559-byte response hash,
+  using the PPP source address with zero RAS errors. The rule was removed.
+- Ten consecutive calls, all at 49,296 bit/s, with independently verified HTTP
+  checksum, zero RAS errors, `ipcp-open` state, and zero sessions/leases/media
+  lines after each teardown. Campaign `v90-reset-guard-repeatability-1789241429`
+  completed without a failure.
+
+The original production binary was restored after both campaigns. Final SSH
+verification confirmed its expected hash, no guard override, and an idle server
+and notebook. Evidence: `work/v90-controlled-loss-c4fc7b59-09ee-482a-9858-e5fdc955132d-audit.json`,
+`work/v90-reset-guard-three-1789241306.*`,
+`work/v90-reset-guard-repeatability-1789241429{,-audit}.json`, per-call reports,
+and `work/v90-reset-guard-repeatability-restoration-audit.json`.
+
+These results establish the same candidate's one-hour session, ten-call
+repeatability, one observed natural renegotiation and a three-packet loss case.
+They do not establish arbitrary impairment tolerance, working V.34 fallback,
+bulk POST throughput, simultaneous physical calls, or final release validation.

@@ -24,6 +24,8 @@ jobs:
           sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
       - name: Test RTP capture audit
         run: python3 -m unittest discover -s tools/tests -p test_audit_rtp.py
+      - name: Test PPP bulk upload receiver
+        run: python3 -m unittest discover -s tools/tests -p test_ppp_upload_fixture.py
       - name: Test redundant audio packet bridge
         run: python3 -m unittest discover -s tools/tests -p test_sipfax_red.py
       - name: Test ATA call preparation

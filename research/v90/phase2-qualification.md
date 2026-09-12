@@ -533,3 +533,24 @@ bc02b04 run 34704994670 completed successfully. No deployment or hardware call.
 Evidence: `work/v34_startup_oracle_check.py` and
 `work/v34-cma-candidate-evidence/startup-oracle-audit.json`, with separately
 preserved automatic/known-sync input/output bits and logs.
+
+## Bulk upstream fixture and XP client ready (2026-09-12)
+
+DialUpLab commit 4e3361013ee4de3d74105470ec6a71d78c73f034 adds bounded,
+PPP-source-bound POST uploads in XP 1.2.0. Windows CI run 34705848796 passed,
+including exact 12,345-byte and 1 MiB receipt, checksum/source binding,
+cancellation and lock recovery. PR1 includes the change. Portable ZIP SHA256:
+`0c3506ca3f2098adaaa9f1d641b6e40f3cd8d9a75f162cff98d0e68976fc6a91`.
+
+The new `tools/ppp-upload-fixture.py` records actual received length, SHA256,
+pattern validity and peer. Four tests pass, including real HTTP receipt and
+corruption rejection. The initial loopback test was denied by the local socket
+sandbox; rerunning with network permission passed. `--freebind` allows staging
+on the idle PPP address. See `tools/ppp-upload-fixture.md` for acceptance gates.
+
+CT105's temporary sipfax-ppp-upload-fixture service was verified active and
+listening on 10.64.0.1:8084 with a two-hour lifetime. SIPfax health showed zero
+sessions, media lines and leases. The laptop still reported XP 1.1.1.0 and no
+connections at 16:45 UTC; installation of the built 1.2.0 package was requested.
+No real bulk upload has been qualified yet, and no production modem/application
+binary was changed. All five release objectives remain open.

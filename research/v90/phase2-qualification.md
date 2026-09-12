@@ -125,12 +125,36 @@ Hardware attempt `de96b0a5-0457-4875-a3ec-899a40b7fb70` passed at 49,296 bit/s
 with two matching public HTTP responses and zero reported modem errors. Cleanup
 left no PPP process, address lease, retained forwarding snapshot, or per-call
 firewall tables. This is one successful short call, not a reliability campaign.
-A new captured one-hour run, `8b43d200-3179-43d7-b82a-1cb20f331a88`, is in progress;
-no final endurance result is claimed here. The later RTP-readiness application
-change `10b8228` remains undeployed during this run.
+The captured one-hour run `8b43d200-3179-43d7-b82a-1cb20f331a88` subsequently
+passed as recorded below. The later RTP-readiness application change `10b8228`
+and modem PID guard `668732c` were not deployed during this run.
 
 During the new hardware run, read-only connection tracking confirmed the actual
 PPP client using the new NAT mapping: source ports 1189 and 1200 were translated
 to 51381 and 58200 for completed public HTTP connections. An interim independent
 audit at 377 seconds verified 47 download/upload pairs with zero reported modem
 errors. This confirms live rule use; it is not the final endurance result.
+
+### Completed one-hour qualification on the recovery and NAT fixes
+
+Attempt `8b43d200-3179-43d7-b82a-1cb20f331a88` completed 3600.063 seconds
+on the unchanged application `1f58ee0` / native `cc64526` combination.
+The independent final audit passed 445 downloads of 32 KiB, 445 uploads of
+1 KiB carried in request URLs, and 90 public internet checks. All payload
+hashes matched, final fixture verification passed, and reported CRC, timeout,
+alignment, hardware-overrun, framing, and buffer-overrun counters were zero.
+Median download payload throughput was 40,617 bit/s including request overhead.
+These URL uploads do not qualify bulk upstream capacity.
+
+The harness exited successfully and recorded no remaining notebook connections.
+A subsequent server check found zero sessions, active lines, PPP leases, or
+pppd processes, and no per-call nftables tables. Capture SHA-256:
+`e6b8910d7afe4132993ea685d8ad843102f63fbf70963823cf26592120aadde4`.
+
+The final report and independent audit are named
+`v90-sustained-8b43d200-3179-43d7-b82a-1cb20f331a88.json` and its `-audit.json`
+companion in the operator workspace. Prior failed runs remain part of the
+qualification record. This pass establishes one hour on this build, not
+repeatable startup, controlled impairment, V.34 fallback, bulk upload, or
+simultaneous hardware-call qualification. Both CI jobs for `668732c` also passed;
+its pending application changes still need deployment qualification.

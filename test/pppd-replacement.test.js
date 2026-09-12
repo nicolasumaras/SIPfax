@@ -1,11 +1,24 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { closeSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, lstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PppCredentialStore } from '../src/ppp.js';
 import { PppdSupervisor, renderChapSecrets } from '../src/pppd-supervisor.js';
+
+test('credential updates preserve the root-managed link to a writable secret file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sipfax-linked-secrets-'));
+  const target = join(dir, 'managed-secrets');
+  const link = join(dir, 'chap-secrets');
+  try {
+    writeFileSync(target, '', { mode: 0o600 });
+    symlinkSync(target, link);
+    renderChapSecrets(new PppCredentialStore([{ username: 'new', password: 'secret' }]), link);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(readFileSync(target, 'utf8'), '"new" * "secret" *\n');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('credential replacement preserves existing readers and restricts new file permissions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sipfax-secrets-update-'));

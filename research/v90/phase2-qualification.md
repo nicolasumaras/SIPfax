@@ -708,3 +708,13 @@ RMS remains0.566 (no lock). Local bounds-sanitizer linking failed because the
 runtime libubsan.so.1.0.0 is absent, so no sanitizer pass is claimed. The
 sanitizer attempt and logs are retained under work/v34-training-bounds-evidence.
 The V.34 fix is not deployed and does not qualify fallback.
+
+The identical compatible candidate with guard=0 also failed619 before PPP
+(attempt02621e5f-36fe-4e6e-880b-80fe870569fe). Both failures occurred before
+packet injection; they do not qualify or disqualify post-connect guard recovery.
+The qualified native was restored in each case. Comparison with cc64526 shows
+additional V.34 training/init changes in the full candidate, so the next
+isolation is a build from cc64526 with only the four guard files changed,
+plus a qualified-binary hardware control. Preserve both failed candidates:
+work/v90-guard-hardware-1789233409.* and
+work/v90-guard-disabled-control-1789233522.*.

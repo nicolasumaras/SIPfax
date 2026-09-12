@@ -165,6 +165,8 @@ typedef struct V34DSPState {
 
     /* rx state */
     int sym_count;
+    int caller_md_ms;
+    unsigned md_wait_samples;
 
     /* current V34 protocol state */
     int state;
@@ -319,6 +321,8 @@ enum {
 
     /* receive only */
     V34_STARTUP3_WAIT_S1,
+    V34_STARTUP3_WAIT_MD,
+    V34_STARTUP3_WAIT_S2,
 };
 
 void put_bits(u8 **pp, int n, int bits);

@@ -239,3 +239,14 @@ chunks of 1, 13, and 160 samples. Tests cover all single-bit mutations of the
 captured frame, every truncation, silence, and all 128 legal MD values. This
 module is not yet connected to the live Phase-2/Phase-3 state machine. Timing
 integration and a fresh hardware qualification remain required.
+
+The INFO1c decoder is now integrated into Phase 2. A missing CRC-valid message
+prevents entry to Phase 3 rather than supplying an assumed interval. The live
+legacy receiver waits for the negotiated MD duration, then reacquires the second
+S pair; zero MD proceeds directly to PP. The second S-bar duration is corrected
+to 16 symbols. Replays of both full caller captures pass the validated 700 ms
+value through Phase 2. A separate native segment replay checks exactly 700 ms
+of waiting and subsequent S/PP/TRN progression, plus zero-MD control flow.
+The zero-MD control uses the same segment to exercise branching, not as evidence
+of a zero-MD physical caller. Acquisition timing, equalizer convergence and PPP
+still require hardware validation of this integrated candidate.

@@ -4247,6 +4247,7 @@ static void V34_demod(V34DSPState *s,
         spl = samples[i];
 
         if (v34_dbg) s->dbg_n++;
+        if (s->state == V34_STARTUP3_WAIT_MD && s->md_wait_samples) s->md_wait_samples--;
         agc_estimate(s, spl);
         spl = (spl * s->agc_gain) >> 14;
 
@@ -4302,11 +4303,21 @@ static void V34_demod(V34DSPState *s,
             case V34_STARTUP3_SINV1:
                 v34_symbol_sync(s, si);
                 if (++s->sym_count >= 16 * EQ_FRAC) {
-                    s->state = V34_STARTUP3_S2;
+                    s->state = s->caller_md_ms ? V34_STARTUP3_WAIT_MD : V34_STARTUP3_PP;
+                    s->md_wait_samples = (unsigned)s->caller_md_ms * 8;
                     s->sym_count = 0;
                 }
                 break;
 
+            case V34_STARTUP3_WAIT_MD:
+                if (!s->md_wait_samples) s->state = V34_STARTUP3_WAIT_S2;
+                break;
+            case V34_STARTUP3_WAIT_S2:
+                if (abs(si) > 13000) {
+                    s->state = V34_STARTUP3_S2;
+                    s->sym_count = 0;
+                }
+                break;
             case V34_STARTUP3_S2:
                 v34_symbol_sync(s, si);
                 if (++s->sym_count >= 128 * EQ_FRAC) {
@@ -4317,7 +4328,7 @@ static void V34_demod(V34DSPState *s,
 
             case V34_STARTUP3_SINV2:
                 v34_symbol_sync(s, si);
-                if (++s->sym_count >= 100 * EQ_FRAC) {
+                if (++s->sym_count >= 16 * EQ_FRAC) {
                     s->state = V34_STARTUP3_PP;
                     s->sym_count = 0;
                 }
@@ -4409,6 +4420,9 @@ void V34_decode_file(const char *path, int calling)
     { extern void dsp_init(void); dsp_init(); }
     V34_static_init();
     V34_demod_init(&rx, &p);
+    { const char *md = getenv("SIPFAX_DECODE_MD_MS");
+      rx.caller_md_ms = md ? atoi(md) : 0;
+      if (rx.caller_md_ms < 0 || rx.caller_md_ms > 4445) return; }
     v34_dbg = 1; rx.dbg_last = -1; rx.dbg_n = 0;
     { extern int eq_notrack, eq_freeze; char *a=getenv("SIPFAX_EQ_NOTRACK"), *b=getenv("SIPFAX_EQ_FREEZE");
       eq_notrack = a?atoi(a):0; eq_freeze = b?atoi(b):0;
@@ -8061,6 +8075,7 @@ void V34_static_init(void)
 extern void *v34_phase2_new(void);
 extern int v34_phase2_run(void *p, s16 *out, s16 *in, int n);
 extern int v34_phase2_symrate(void *p);
+extern int v34_phase2_md_ms(void *p);
 extern void v34_phase2_free(void *p);
 
 void V34_init(struct V34State *s, int calling)
@@ -8102,6 +8117,11 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
         int r = v34_phase2_run(s->phase2, output, input, nb_samples);
         if (r == 1) {
             int sr = v34_phase2_symrate(s->phase2);
+            int md_ms = v34_phase2_md_ms(s->phase2);
+            if (md_ms < 0) {
+                fprintf(stderr, "[v34p2] missing CRC-valid INFO1c; training parameters unavailable\n");
+                return 1;
+            }
             if (sr >= 0) s->S = sr;   /* 0..5 == V34_S2400..V34_S3429 */
             /* hand off to Phase 3, preserving the serial data callbacks */
             get_bit_func gb = s->v34_tx.get_bit; void *go = s->v34_tx.opaque;
@@ -8110,6 +8130,8 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
             s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
             s->calling = 1; V34_demod_init(&s->v34_rx, s); s->calling = 0;
             s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
+            s->v34_rx.caller_md_ms = md_ms;
+            fprintf(stderr, "[v34p3] caller MD interval=%d ms (CRC validated)\n", md_ms);
             v34_phase2_free(s->phase2); s->phase2 = 0; s->phase2_active = 0; s->p3n = 0; s->p3x1 = 0; s->p3go = 0;
             { char *rp = getenv("SIPFAX_P3_REPLAY"); s->p3rep = 0; s->p3rep_len = 0; s->p3rep_ptr = 0;
               if (rp) { FILE *rf = fopen(rp, "rb"); if (rf) { fseek(rf,0,SEEK_END); long sz=ftell(rf); fseek(rf,0,SEEK_SET);

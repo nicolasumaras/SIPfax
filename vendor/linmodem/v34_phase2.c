@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "v34info1c.h"
 #ifndef SR
 #define SR 8000.0
 #endif
@@ -64,6 +65,7 @@ static const char *RN[]={"OPEN","SEQ","PRX","RANGE2","INFO1A","DONE","FAIL"};
 enum { TX_INFO0A, TX_TONEA, TX_L1L2, TX_INFO1A, TX_SILENCE };
 
 typedef struct {
+    V34Info1c caller_info;
     int state; long tstate;
     long p2abs, p2held;   /* SIPFAX: absolute phase-2 clock and time held per state */
     int txmode;
@@ -87,6 +89,7 @@ typedef struct {
 
 void v34_phase2_init(V34Phase2 *p){
     memset(p,0,sizeof(*p));
+    v34_info1c_init(&p->caller_info);
     p->state=R_OPEN; p->txmode=TX_INFO0A; p->symrate=-1; p->last=-1; p->rev_sent=0;
     p->p2abs=0; p->p2held=0;
     /* INFO1a field values COPIED from slmodem's decoded working frame on this line
@@ -206,6 +209,7 @@ static void brev_scan(V34Phase2 *p, short *in, int n){
 
 /* main process: returns 0 running, 1 done, -1 fail */
 int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
+    if (p->state == R_PRX && n > 0) v34_info1c_receive(&p->caller_info, in, (unsigned)n);
     if(p->state!=p->last){
         /* SIPFAX: the old line printed p->tstate, which is RESET on most state changes, so it
            showed per-state elapsed and never the absolute position or a clean held figure -
@@ -452,6 +456,7 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
 void *v34_phase2_new(void){V34Phase2*p=malloc(sizeof(V34Phase2));if(p)v34_phase2_init(p);return p;}
 int v34_phase2_run(void*p,short*out,short*in,int n){return v34_phase2_process((V34Phase2*)p,out,in,n);}
 int v34_phase2_symrate(void*p){return ((V34Phase2*)p)->symrate;}
+int v34_phase2_md_ms(void*p){V34Info1c *i=&((V34Phase2*)p)->caller_info;return i->valid?(int)i->md_ms:-1;}
 void v34_phase2_free(void*p){free(p);}
 
 #ifdef P2_TEST

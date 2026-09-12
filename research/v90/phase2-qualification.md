@@ -2333,3 +2333,27 @@ The next useful check is the server's outgoing E/B1/initial-data waveform and
 negotiated caller receive requirements, with transport timing captured during a
 future hardware comparison. Receiver alignment sweeps cannot recover data after
 the caller has returned to Tone B. Production was not modified.
+
+### Answering-direction reference and caller receive requirements
+
+The B1 reference diagnostic now accepts SIPFAX_B1_CALLING=0 for the answering
+role; omission retains caller-role1. Invalid values fail explicitly. Tests verify
+unchanged default output, distinct deterministic answering output and invalid-role
+rejection alongside the existing parameter tests. Exact4f05cc7 target build
+(native SHA7d6e0d98deb8fcc93e98e37a35078cbb2d951e8dbd04b3d33defaf3c576497e0)
+passes B1 references, serial/DTE sanitizers, MP, readiness and acquisition checks.
+Evidence: work/v34-b1-role-4f05cc7-target-validation.log. This is diagnostic-only;
+production has not changed.
+
+Wire-decoded caller MP from66406 at15.5..16.5s requests ca33600/ac31200,
+32-state trellis, expanded shaping, nonlinear encoding and precoder hQ14
+1469,2069,-309,-1235,1213,804. The server caps its outgoing rate at12000 as
+advertised. Its first-attempt log confirms those coefficients, nonlinear ON,
+L20 expanded constellation and32-state trellis. It estimates shaped mean energy
+9.47, warped mean11.19, amplitude4369 and postgain143/128 before B1. These
+observations rule out merely ignoring these MP requests; they do not validate the
+emitted symbols, normalizer or physical waveform. The forthcoming TX reference
+comparison must use answering role, shape1,trellis32, actual coefficients and
+nonlinear normalization, rather than the caller-direction/unprecoded reference.
+Evidence: work/v34-zero-66406-caller-mp.json and
+work/v34-zero-66406-tx-parameters.json.

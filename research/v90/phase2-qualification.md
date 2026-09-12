@@ -158,3 +158,19 @@ qualification record. This pass establishes one hour on this build, not
 repeatable startup, controlled impairment, V.34 fallback, bulk upload, or
 simultaneous hardware-call qualification. Both CI jobs for `668732c` also passed;
 its pending application changes still need deployment qualification.
+
+### Ten-call campaign after the one-hour pass
+
+On the same application `1f58ee0` / native `cc64526` build, all ten calls in
+`v90-reliability-cc64526-post-endurance.json` connected at 49,296 bit/s and
+passed two complete public HTTP probes each. An independent audit checked all
+20 payload lengths and hashes, PPP source addresses, zero reported link-error
+counters, final Disconnected states, and server cleanup evidence. All passed.
+
+The harness stopped after call 1 because an immediate post-disconnect check
+observed a PPP lease still being released. A follow-up check confirmed cleanup;
+the harness was changed to poll for at most 35 seconds, and the remaining nine
+calls resumed without changing the server. Their measured cleanup checks took
+about three seconds. This interruption is retained in the campaign report.
+These ten successful samples improve the startup evidence but do not erase
+previous failures or qualify other builds, V.34 fallback, or simultaneous calls.

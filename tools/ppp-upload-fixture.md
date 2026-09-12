@@ -47,3 +47,18 @@ Run fixture unit and local HTTP integration tests:
 ```sh
 python3 -B -m unittest discover -s tools/tests -p test_ppp_upload_fixture.py
 ```
+
+Save the raw client probe response and the receiver's JSONL audit, then compare
+both against an independently generated payload:
+
+```sh
+python3 tools/audit-ppp-upload.py --probe client-probe.json \
+  --server-audit ppp-bulk-upload.jsonl --attempt UNIQUE_ID --bytes 1048576
+```
+
+The command rejects GET responses from older clients, incomplete or corrupt
+uploads, missing/nonzero RAS error counters, reset connection duration, and
+missing or duplicate server records for the attempt. Its `payloadVerified`
+result covers client/server payload evidence only. It does not replace the PPP
+packet capture, connection-survival check, or teardown checks above. Keep a
+separate unique attempt ID for every probe and retain unsuccessful records.

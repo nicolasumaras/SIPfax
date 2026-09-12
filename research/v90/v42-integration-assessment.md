@@ -145,8 +145,15 @@ and completed two HTTP 200 probes 15 seconds apart with zero CRC, timeout,
 alignment, framing or overrun errors.
 
 One intervening call established LAPM but stalled during PPP authentication
-after two caller information frames. Its captured downstream PCM contains a
-valid XID response, UA and three CRC-valid information frames, and a synthetic
-two-second downstream interruption recovers exact 16 KiB transfers in both
-directions. This single-call variability remains a reliability measurement to
-track; it does not invalidate the two complete hardware PPP/internet results.
+after two caller information frames. Another selected an ODP-qualified stream
+but received no XID before the caller timed out. Its captured downstream PCM
+contains a valid XID response, UA and three CRC-valid information frames, and a
+synthetic two-second downstream interruption recovers exact 16 KiB transfers
+in both directions. These cold-call failures remain a reliability measurement
+to track; they do not invalidate the complete hardware PPP/internet results.
+
+Retained commit `70614d7` completed production attempt
+`3eaf6728-7bc4-4c67-bed5-b59b6b0f247d` at 49,296 bit/s. PPP assigned
+`10.64.0.2`, and two HTTP 200 probes 15 seconds apart completed with zero modem
+errors through 23.594 seconds of connected time. The service remained healthy
+after automated disconnect.

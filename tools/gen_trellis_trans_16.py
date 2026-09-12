@@ -28,16 +28,16 @@ def trans_of(c, rule):
     Y1 = (a[2] & (~b[2]) & 1) ^ a[1] ^ b[1]
     return (Y3 << 3) | (Y4 << 2) | (Y2 << 1) | Y1
 
-def build(rule):
-    blocks = {k: [] for k in range(32)}
+def build(rule, transitions=16):
+    blocks = {k: [] for k in range(2*transitions)}
     for a in range(4):
         for b in range(4):
             for c in range(4):
                 for d in range(4):
                     row = (a, b, c, d)
                     half = (a ^ b ^ c ^ d) & 1
-                    blocks[trans_of(row, rule) + 16*half].append(row)
-    assert all(len(v) == 8 for v in blocks.values())
+                    blocks[(trans_of(row, rule) & (transitions-1)) + transitions*half].append(row)
+    assert all(len(v) == 128//transitions for v in blocks.values())
     assert len({row for rows in blocks.values() for row in rows}) == 256
     return blocks
 

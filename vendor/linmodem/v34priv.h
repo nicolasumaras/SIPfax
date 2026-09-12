@@ -308,6 +308,8 @@ typedef struct V34DSPState {
 u8 trellis_trans_4[256][4];
 u8 trellis_trans_8[256][4];
 u8 trellis_trans_16[256][4];
+extern u8 trellis_trans_4_fig9[256][4];
+extern u8 trellis_trans_8_fig9[256][4];
 extern u8 trellis_trans_16_fig9[256][4];
 
 /* V34 states */

@@ -2935,11 +2935,11 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     switch(s->conv_nb_states) {
     case 16:
         nbbt = 2;
-        p = &trellis_trans_4[0][0];
+        p = fig9_s1(1,0) ? &trellis_trans_4_fig9[0][0] : &trellis_trans_4[0][0];
         break;
     case 32:
         nbbt = 3;
-        p = &trellis_trans_8[0][0];
+        p = fig9_s1(1,0) ? &trellis_trans_8_fig9[0][0] : &trellis_trans_8[0][0];
         break;
     default:
         nbbt = 4;
@@ -8062,6 +8062,8 @@ void V34_dataloop_test(void)
     memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    { const char *trellis = getenv("SIPFAX_DL_TRELLIS");
+      if (trellis) { int t=atoi(trellis); if (t!=16 && t!=32 && t!=64) exit(2); pt.conv_nb_states=t; } }
     { const char *role = getenv("SIPFAX_DL_CALLING"); if (role) pt.calling = atoi(role) != 0; }
     { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
     { char *nl=getenv("SIPFAX_DL_NONLIN"); pt.use_non_linear = nl?atoi(nl):0; }

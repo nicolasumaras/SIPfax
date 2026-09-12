@@ -1246,3 +1246,52 @@ Production continues to use the qualified native binary and integrated
 application. The next source work is to reconcile transmitter/receiver
 current-interval ordering against Table11/equation9-32 and independent clean
 reference vectors before another hardware candidate is justified.
+
+
+## Table 11 prototype clean decoding and shifted-frame recovery (2026-09-12)
+
+The earlier prototype failures were localized further without hardware changes.
+With corrected TX ordering and current-interval V0, the zero-cost branch matched
+the transmitter's used U0 on all16000 generated 4D intervals, and the selected
+source-state parity matched the transmitter on all16000. The remaining high bit
+error count came from automatic frame realignment: it locked at phase0, then
+applied the old `(19-phase) mod20` rule and discarded19 correctly aligned
+symbols. Disabling that realignment in the controlled clean test yielded
+0 errors over156486 bits; the deliberately shifted synchronization control
+still failed. This ablation identified the fault, but was not adopted as the
+solution because automatic alignment is required.
+
+The isolated prototype now uses current-interval V0 in the diagnostic oracle
+and aligns to phase0 using the actual mapping-bit-count cycle
+`4*P/gcd(r,P)`, instead of a fixed20 with target19. With automatic alignment
+still enabled, the clean oracle test passes0/156486; an incorrect sync phase
+fails. Figure9 exact traceback and settled-decoding regressions pass at
+7200/16800/33600, retaining their separately reported startup errors/erasures.
+
+A diagnostic-only prefix-drop control exercised24 combinations: rates
+12000/16800/21600/33600 and drops of0/2/6/10/18/38 input2D symbols. All cases
+recovered a stable bit alignment and had zero errors across3035776 checked
+settled bits in total. Every nonzero requested drop produced a positive matched
+bit lag, so an ignored test parameter would not satisfy the audit. This test
+uses no sync oracle, but deliberately preserves4D pairing. It does not test
+odd-symbol pairing recovery, channel noise, precoding, audio or PPP. The fixed
+settled region starts at output bit40000; lag is selected with a2048-bit window
+and verified over all subsequent saved bits.
+
+The reproducible, unadopted patch is
+`research/v34-rx/table11-prototype.patch` against native source at`05033eb`.
+It includes the diagnostic prefix-drop control. Applying it directly to the
+qualified deployment is not the tested procedure. Current prototype source
+SHA256: `51da05a0538836257da7fa26e9bb6731110ab4b8c0d14e2d5e851af6e50cb6d4`;
+local native SHA256: `c0f2e2e0bb388e0b92dc19b90d5123667ced1de86eb537cd1e6e18e95bfc2061`.
+Local evidence: `work/v34-table11-branch-evidence/audit.json`,
+`work/v34-table11-alignment-{startup,fig9}.log`,
+`work/v34-table11-frame-shift-audit.json`,
+`work/v34-table11-alignment-prototype-manifest.json`,
+and `work/v34_table11_frame_shift_check.py`.
+
+The source default remains unchanged. Precoded receive processing still uses
+previous-interval C0 in several places and needs corresponding standards-based
+validation before this prototype becomes a hardware candidate. The previous
+on-server captured B1 mismatch also remains unresolved; clean unprecoded
+symbol recovery is not a replacement for that hardware requirement.

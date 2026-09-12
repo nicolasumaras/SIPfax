@@ -250,3 +250,19 @@ of waiting and subsequent S/PP/TRN progression, plus zero-MD control flow.
 The zero-MD control uses the same segment to exercise branching, not as evidence
 of a zero-MD physical caller. Acquisition timing, equalizer convergence and PPP
 still require hardware validation of this integrated candidate.
+
+### S-to-S-bar timestamp prototype
+
+The transition-only hardware trace reached TRN on each retry but failed before
+PPP. Offline waveform fitting located the first S-bar boundary at 11.093165 s;
+the native amplitude gate entered its S state at about 11.095 s. Counting a full
+128-symbol S burst from that boundary placed PP approximately 39 ms late.
+
+The standalone `v34sdetect.c` prototype matches a pulse-shaped 128-S/eight-S-bar
+window with unknown carrier phase, using normalized energy and a bounded sample
+ring. It reports the transition timestamp rather than treating its decision time
+as the start of S. Three captured transitions at 3429 symbols/s matched the
+independent symbol-domain fits within 1 ms. Silence, three unrelated tones and
+one deterministic noise stream were rejected. Other rates, channel conditions,
+noise distributions and live integration remain unqualified. The prototype is
+not linked to the production receiver yet.

@@ -37,6 +37,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
       - name: Build native modem
         run: make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+      - name: Sanitize V34 S transition detector
+        run: |
+          gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-s-detect.c vendor/linmodem/v34sdetect.c -lm -o /tmp/v34-s-detect
+          /tmp/v34-s-detect
       - name: Sanitize V34 INFO1c decoding
         run: |
           gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-info1c.c vendor/linmodem/v34info1c.c -lm -o /tmp/v34-info1c

@@ -1563,3 +1563,36 @@ Evidence: `work/v34-mapper-clockwise-{before,prototype}.json`,
 `work/v34-clockwise-target-build.json`, and
 `work/v34-clockwise-integrated-*`. The prototype lives under
 `/tmp/v34-clockwise-5bc4919` locally and on CT105. Production was not changed.
+
+
+## Clockwise candidate target build, hardware failure, and restoration (2026-09-12)
+
+Exact source `f1e4592` was built on CT105 under
+`/tmp/v34-clockwise-f1e4592`. Source archive SHA256:
+`3e82b92845f4dcced4fc429865e54e6d1acc6de1e8f9e78a96ab09465ca392c0`.
+Native SHA256:
+`b47e16ffadb877a81221b2cb5c9d98746784640f62e2b08ed267efe4e70fa6bd`.
+Loader preflight, clockwise mapper audit, peer-role, generated-audio,
+precoded-link/alignment, nonlinear, and low-rate checks passed on CT105.
+Evidence: `work/v34-clockwise-f1e4592-target-validation.log`.
+
+One bounded hardware attempt used the same V.34-only12000-bit/s caps,
+minimum shaping, CMA receiver and RX-debug settings as the previous trial.
+Attempt `eda444e9-de1b-4c03-95d2-adbb9d914ad5` failed with XP error678.
+The native log includes repeated B1 entries and receive lattice RMS0.547
+and0.567; these are not usable acquisition or PPP. The result is retained
+in `work/v34-clockwise-cma-hardware-1789248463.{json,call.log,native.log}`.
+
+The qualified native and original settings were restored. Verification call
+`7d9e2491-e5d5-4e15-b733-b33059269539` connected at49296 bit/s and passed
+the559-byte HTTP checksum with PPP source10.64.0.2, all six RAS counters
+zero, ipcp-open lifecycle and complete cleanup. The independent audit verified
+all25 managed release files, the persistent guard, removal of trial settings,
+and idle notebook/server state. Evidence:
+`work/v34-clockwise-hardware-final-audit.json` and
+`work/v90-ppp-lifecycle-7d9e2491-e5d5-4e15-b733-b33059269539.json`.
+Production remains application `9e0f242` and native `9c493c3`.
+
+Full CI run34719420312 at the preceding role-fix commit `5bc4919` has now
+completed successfully. The newer clockwise mapper still requires its own
+complete CI result; the failed hardware fallback gate remains open.

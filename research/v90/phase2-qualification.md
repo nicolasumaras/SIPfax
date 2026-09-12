@@ -304,3 +304,29 @@ was restored, the override removed, and health verified with zero sessions,
 leases and media lines. Next inspect training/Phase-4 handling: the legacy TRN
 path currently calls the data baseband decoder directly, while caller-J
 recognition is implemented in the separate streaming receive path.
+
+### Streaming receiver comparison: J/Phase-4 proceeds, data remains unlocked
+
+Source inspection confirms legacy `V34_demod` sends TRN equalizer outputs into
+`baseband_decode_impl` directly, while caller-J recognition is in the separate
+streaming/CMA path. Replaying PID 47440 caller audio cropped to 10.8–13.8 s
+through `SIPFAX_STREAM_FILE` recognizes J with a J4=192/J16=180 vote.
+`tools/tests/v34-caller-j-replay.py` makes that capture check repeatable and
+rejects equal-duration silence. It does not test PPP or certify all channels.
+
+A temporary configuration-only trial on qualified native `cc64526` enabled
+`SIPFAX_RX_CMA=1` and `SIPFAX_RX_DBG=1`, with V.90 capped out. Attempt
+`d967876e-afd6-488e-8024-bd20f013c739` still failed with Windows 678. All four
+rounds detected caller J and voted J4. Two block-decoder MP reads reported
+ack=1, ca=16800/ac=26400, trellis=2. The final round received E and entered
+data acquisition, but measured lattice RMS 0.564 (the decoder's no-lock
+reference is 0.577), followed by approximately random descrambled bits. These
+are negotiated parameter fields, not an achieved modem connection rate.
+This moves the immediate investigation to reliable data acquisition/equalization;
+a DATA state transition is not evidence of PPP success.
+
+Evidence: `work/v34-fallback-1789228687.*`, PID 47623 RX/TX audio and manifest,
+cleaned native log, negotiation timeline, and audit under
+`work/v34-cma-candidate-evidence/`. Verified native checksum unchanged,
+experiment override removed, and zero sessions, leases, and media lines after
+restoration. No permanent configuration change was made.

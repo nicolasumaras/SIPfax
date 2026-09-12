@@ -330,3 +330,27 @@ cleaned native log, negotiation timeline, and audit under
 `work/v34-cma-candidate-evidence/`. Verified native checksum unchanged,
 experiment override removed, and zero sessions, leases, and media lines after
 restoration. No permanent configuration change was made.
+
+### MP integrity and E-length corrections
+
+PID 47623 saved-audio replay reproduced the unlocked data constellation. At a
+44 s capture offset, default/400-symbol acquisition/block-FFE seeding produced
+lattice RMS 0.565/0.549/0.566: none is a data lock. These are diagnostic
+comparisons, not qualified operating settings. The standalone streaming harness
+also starts with minimum shaping while live initialization defaults to expanded
+shaping, so exact data-mode replay parity remains to be fixed.
+
+Two source defects were corrected independently of the unsuccessful acquisition:
+MP header consensus no longer authorizes parameters after a failed complete-frame
+CRC, and E requires all 20 descrambled ones specified by V.34 10.1.3.11 (previously
+19). E additionally requires CRC-validated MP parameters. The saturating run
+counter resets on zero and does not overflow during prolonged ones.
+
+Local native build, strict `tools/tests/v34-e.c` controls, caller-J/silence replay,
+and `tools/tests/v34-mp-crc-replay.py` pass. The supplied recording has four
+failed MP folds before a CRC-valid fold; failed folds no longer authorize MP/E,
+and the valid frame still permits E. Data remains unlocked after that valid
+transition. Added E ASan/UBSan coverage to CI; no CI pass is claimed yet.
+Artifacts: `work/v34-cma-candidate-evidence/data-replay-comparison.json`,
+`strict-crc-replay.json`, and associated replay logs. These changes are not
+deployed; qualified V.90 production was not modified in this work.

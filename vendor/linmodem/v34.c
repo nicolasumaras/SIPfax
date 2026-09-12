@@ -17,6 +17,7 @@
 #include "lm.h"
 #include "v34priv.h"
 #include "v34rxlevel.h"
+#include "v34e.h"
 
 #define DEBUG
 
@@ -6247,9 +6248,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 s->p4_ybits = ((s->p4_ybits << 1) | (unsigned int)yb) & 0x7fffff;
                 s->p4_ring[s->p4_rn & P4_RING_MASK] = (u8)xb; s->p4_rn++;
                 if (p4bitf) fputc('0'+xb, p4bitf);
-                if (xb) { if (++s->p4_ones_run >= 19 && s->p4_mp_rx && !s->p4_e_rx) {
-                            s->p4_e_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn); } } }
-                else s->p4_ones_run = 0;
+                if (v34_e_bit(&s->p4_ones_run, xb, s->p4_mp_rx && s->p4_mp_crcok) && !s->p4_e_rx) {
+                    s->p4_e_rx = 1;
+                    if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn);
+                }
                 if (!s->p4_mpp_rx && s->p4_rn > 700 && (++s->p4_try >= 128)) {
                     int Ls[2] = { 88, 188 }, li;
                     s->p4_try = 0;
@@ -6294,7 +6296,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             }
                             for (i3 = 0; i3 < 16; i3++) rx_crc |= ((int)f[crc_off+i3]) << (15-i3);
                             ok = (calc_crc(cb, cn) == rx_crc);
-                            {   /* accept on CRC, or on consensus of the reliable head fields */
+                            {   /* Repeated header agreement is diagnostic only: parameters must
+                                   be protected by a valid complete-frame CRC. */
                                 int key = (type<<28) ^ (rate_ca<<12) ^ (rate_ac<<4) ^ (f[29]<<2) ^ (f[30]<<1) ^ ackb;
                                 int trel = (f[29]<<1) | f[30];
                                 int consensus = (key == s->p4_key);
@@ -6336,7 +6339,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                                 s->peer_h[2]/16384.0, s->peer_h[3]/16384.0,
                                                 s->peer_h[4]/16384.0, s->peer_h[5]/16384.0); }
                                 }
-                                if (ok || s->p4_keyn >= 2) {
+                                if (ok) {
                                     s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = msk;
                                     s->p4_trellis = trel; s->p4_mp_crcok = ok;
                                     if (!s->p4_mp_rx) { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP READ (%s): ca=%d ac=%d trellis=%dstate ack=%d\n", ok?"CRC":"consensus", rate_ca*2400, rate_ac*2400, (1<<(4+trel)), ackb); }

@@ -221,3 +221,21 @@ and V.90 paths are untouched. Exhaustive signed 16-bit conversion checks pass;
 replay reaches TRN on the training segment and remains in WAIT_S1 for silence
 and captured quiet audio. This does not establish rejection of arbitrary noise
 or complete training: hardware qualification and V.34 PPP remain pending.
+
+### Negotiated caller MD interval
+
+The receive-level candidate built and passed sanitizer checks in CT105, but
+hardware attempt `f0b30b6f-0df2-4769-9d16-d14b8196d74a` still failed before PPP.
+The qualified `cc64526` binary and normal configuration were restored.
+Subsequent capture analysis decoded a CRC-valid INFO1c with MD length 20 units
+(700 ms) from both this call and the preceding fallback retry. The legacy
+receiver advances directly from the first S/S-bar pair to the second, without
+waiting for that negotiated interval; the PP training position is consequently
+not aligned to this caller's requested sequence.
+
+`v34info1c.c` now provides a standalone streaming 1200 Hz/600 bit/s DPSK decoder
+and a framing/CRC validator. Both saved captures decode to 700 ms with input
+chunks of 1, 13, and 160 samples. Tests cover all single-bit mutations of the
+captured frame, every truncation, silence, and all 128 legal MD values. This
+module is not yet connected to the live Phase-2/Phase-3 state machine. Timing
+integration and a fresh hardware qualification remain required.

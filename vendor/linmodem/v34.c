@@ -4849,6 +4849,7 @@ void V34_cma_decode_file(const char *path)
 
 
 FILE *cma_dumpf = 0;
+static FILE *cma_statef = 0; /* opt-in offline receiver transition trace */
 FILE *cma_t2df = 0;
 FILE *p4bitf = 0;
 int cma_t1 = 18, cma_t2 = 23;   /* caller GPC default; GPA=5,23 */
@@ -5106,6 +5107,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         pi_ = oi*ct - oq*st_; pq_ = oi*st_ + oq*ct;
         ei = 0; eq = 0; mu = 0;                             /* taps frozen */
         if (cma_dumpf) fprintf(cma_dumpf, "%.4f %.4f 1 %.4f %.4f %.4f\n", pi_, pq_, oi, oq, s->srx_th);
+        if (cma_statef)
+            fprintf(cma_statef, "%ld,%ld,%d,%d,%d,%ld,%.9g,%.9g,%.9g\n",
+                    s->rx3_n, s->cma_qn, s->p4_e_rx, s->data_on,
+                    s->data_acq_n, s->data_n, oi, oq, s->srx_th);
         /* sign-based slicer: boundaries on the AXES (max margin for the diagonal
            lattice). The old floor((ang+45)/90) slicer had boundaries ON the
            diagonals - i.e. through the constellation points themselves. */
@@ -7724,6 +7729,12 @@ void V34_stream_decode_file(const char *path)
        failed every subsequent build and test in a way that looked like a code fault.
        Opt in with SIPFAX_SOFTDUMP=<path>. */
     { char*e=getenv("SIPFAX_SOFTDUMP"); if(e) cma_dumpf = fopen(e,"w"); }
+    { const char *e = getenv("SIPFAX_STREAM_STATE");
+      if (e) {
+          cma_statef = fopen(e, "w");
+          if (!cma_statef) { perror(e); fclose(f); return; }
+          fprintf(cma_statef, "sample24k,symbol,e_received,data_on,acq_symbols,data_symbols,i,q,carrier\n");
+      } }
     { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     { long fed = 0;
@@ -7736,6 +7747,7 @@ void V34_stream_decode_file(const char *path)
           V34_demod_cma(&rx, buf, n); fed += n;
       } }
     fclose(f);
+    if (cma_statef) { fclose(cma_statef); cma_statef = 0; }
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
     fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",

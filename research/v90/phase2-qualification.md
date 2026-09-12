@@ -342,7 +342,7 @@ shaping, so exact data-mode replay parity remains to be fixed.
 
 Two source defects were corrected independently of the unsuccessful acquisition:
 MP header consensus no longer authorizes parameters after a failed complete-frame
-CRC, and E requires all 20 descrambled ones specified by V.34 10.1.3.11 (previously
+CRC, and E requires all 20 descrambled ones specified by V.34 10.1.3.2 (previously
 19). E additionally requires CRC-validated MP parameters. The saturating run
 counter resets on zero and does not overflow during prolonged ones.
 
@@ -381,3 +381,27 @@ caller-J/silence and MP-CRC replays. An initial edit applied the variable block
 size to the wrong harness and failed compilation; it was corrected before these
 checks. Artifacts are under `work/v34-cma-candidate-evidence/`, including
 `postecho-audit.json`, reconstructed PCM and replay logs. No production changes.
+
+### E-to-data trace: acquisition skips B1
+
+Added opt-in offline `SIPFAX_STREAM_STATE=<csv>` diagnostics and
+`tools/v34-state-summary.py`. The CSV records the 24 kHz frontend counter,
+receiver symbol count, E/data state, acquisition/decode counters, equalizer
+outputs, and tracked carrier phase. It does not enable additional live logging.
+
+On post-echo PID 47623 replay starting at 44 s, E is observed at trace time
+51.755083 s. Equalizer-output power kurtosis changes from 1.003 in the preceding
+200 ms to 1.763 in the next 50 ms and stays near 1.8 for about a second. This
+supports a waveform change at E; it does not prove the subsequent symbols decode
+correctly. A long constant-amplitude training tail is not supported in this case.
+
+The first data-decoder symbols occur 583.667 ms after E, following collection of
+2000 symbols. V.34 10.1.3.1 defines B1 as one data frame of scrambled ones with
+reset encoder state. At the negotiated P=15 and eight symbols per mapping frame,
+that is 120 symbols, approximately 35 ms. The acquisition path therefore skips
+B1 entirely. B1 handling and data/superframe alignment need examination before
+another blind gain/phase tuning exercise. No live test or production change.
+
+Local native build, live-frame-parameter replay and MP CRC replay pass. Evidence:
+`work/v34-cma-candidate-evidence/state-trace.csv`, `state-replay.log`, and
+`state-window-audit.json`. Corrected the previous E clause reference to 10.1.3.2.

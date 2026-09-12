@@ -459,6 +459,9 @@ static int rings_to_index(V34DSPState *s, int ring[4][2])
   int a,b,c,d,e,f,g,h,r0,r1,r2,r3,r4,r5,m,i;
 
   m = s->M;
+  if (m < 1 || m > M_MAX) return -1;
+  for (i = 0; i < 8; i++)
+      if (ring[i/2][i%2] < 0 || ring[i/2][i%2] >= m) return -1;
 
   /* find back the parameters */
   c = ring[0][0] + ring[0][1];
@@ -3560,6 +3563,16 @@ static void put_bit(V34DSPState *s, int b)
     else
         poly = V34_GPA;
     b = unscramble_bit(s, b, poly);
+    unsigned long long position = s->rx_bit_position++;
+    if (s->rx_erasure_bits) { --s->rx_erasure_bits; return; }
+    {   /* Offline evidence preserves the bit positions across erased frames. */
+        static FILE *positions; static int opened;
+        if (!opened) {
+            const char *path = getenv("SIPFAX_RX_BIT_POSITIONS"); opened = 1;
+            if (path) positions = fopen(path, "w");
+        }
+        if (positions) fprintf(positions, "%llu\n", position);
+    }
     {   /* SIPFAX: live decode health meter. A compliant caller opens data mode with one
            data frame of scrambled ONES (B1, 10.1.3.1) and idles structured data after;
            the ones-fraction of the first descrambled bits is ground truth the receive
@@ -3762,6 +3775,14 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
     for(i=0;i<s->b;i++) *ptr++ = ((u8 *)I)[i];
   } else {
     r0 = rings_to_index(s, m);
+    if (r0 < 0) {
+        /* Invalid decisions erase this mapping frame. Keep frame counters and
+         * the self-synchronizing descrambler clock, but emit no guessed bits.
+         * A further 23 received bits replace the unknown scrambler history. */
+        memset(data, 0, sizeof(data));
+        s->rx_erasure_bits = (unsigned)mp_size + 23;
+        goto mapping_frame_ready;
+    }
 
     n = s->K;
     if (mp_size < s->b) n--;
@@ -3781,6 +3802,7 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
     }
   }
 
+mapping_frame_ready:
   /* send an auxilary channel bit if needed */
   s->acnt += s->W;
   if (s->acnt < s->P) {

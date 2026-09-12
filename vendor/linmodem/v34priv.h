@@ -88,6 +88,8 @@ typedef struct V34DSPState {
   s16 x[3][2]; /* 3 most recent samples for precoding (7 bit fractional part) */
   int U0;
   int conv_reg; /* memory of the convolutional coder */
+  unsigned long long rx_bit_position;
+  unsigned rx_erasure_bits; /* suppress invalid bits and descrambler recovery */
   int scrambler_reg; /* state of the self synchronizing scrambler */
   float carrier_freq; 
   float symbol_rate; 

@@ -60,8 +60,10 @@ if (action === 'down' && !sameLease) {
 }
 
 if (action === 'up') {
-  setForwarding(descriptor, true);
+  // Install the lease policy before making packets eligible for forwarding.
+  // A rejected atomic nft transaction must not enable an unfiltered path.
   applyRules(descriptor, 'up');
+  setForwarding(descriptor, true);
   writeFileSync(activePath(safeCallId), JSON.stringify({
     callId,
     interfaceName,

@@ -46,3 +46,43 @@ test('parallel PPP hooks serialize rules and preserve forwarding for the survivi
     assert.equal(readdirSync(active).filter(name => name.endsWith('.json')).length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('rejected nft policy does not enable forwarding or publish an active lease', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sipfax-egress-rejected-'));
+  const mockBin = join(root, 'bin');
+  const leases = join(root, 'leases');
+  const active = join(root, 'active');
+  const log = join(root, 'commands');
+  const fail = join(root, 'reject');
+  mkdirSync(mockBin); mkdirSync(leases);
+  writeFileSync(join(mockBin, 'nft'), '#!/bin/sh\ncat > /dev/null\necho POLICY >> "$SIPFAX_TEST_LOG"\nif test -f "$SIPFAX_TEST_REJECT"; then exit 1; fi\n', { mode: 0o755 });
+  writeFileSync(join(mockBin, 'sysctl'), '#!/bin/sh\necho "$*" >> "$SIPFAX_TEST_LOG"\n', { mode: 0o755 });
+  for (const [index, callId] of ['survivor', 'rejected'].entries()) {
+    const policy = new EgressPolicy({ operatorUrl: '' });
+    writeFileSync(join(leases, callKey(callId) + '.json'), JSON.stringify(policy.leaseDescriptor({
+      callId, lease: { localAddress: '10.64.0.1', clientAddress: `10.64.0.${index + 2}` }
+    })));
+  }
+  const env = { ...process.env, PATH: mockBin + ':' + process.env.PATH,
+    SIPFAX_PPP_LEASE_DIR: leases, SIPFAX_PPP_ACTIVE_DIR: active,
+    SIPFAX_TEST_LOG: log, SIPFAX_TEST_REJECT: fail };
+  delete env.SIPFAX_EGRESS_HELD_LOCK;
+  const run = id => promisify(execFile)(process.execPath, ['bin/sipfax-egress-apply', 'up', id, 'ppp0'], { env });
+  const markers = () => readdirSync(active).filter(name => name.endsWith('.json'));
+  try {
+    writeFileSync(fail, 'reject');
+    await assert.rejects(run('rejected'));
+    assert.deepEqual(markers(), []);
+    assert.equal(readFileSync(log, 'utf8'), 'POLICY\n');
+    rmSync(fail);
+    await run('survivor');
+    const successful = readFileSync(log, 'utf8');
+    assert.ok(successful.indexOf('POLICY') < successful.indexOf('ip_forward=1'));
+    const survivor = readFileSync(join(active, callKey('survivor') + '.json'), 'utf8');
+    writeFileSync(fail, 'reject');
+    await assert.rejects(run('rejected'));
+    assert.equal(readFileSync(log, 'utf8'), successful + 'POLICY\n');
+    assert.deepEqual(markers(), [callKey('survivor') + '.json']);
+    assert.equal(readFileSync(join(active, callKey('survivor') + '.json'), 'utf8'), survivor);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

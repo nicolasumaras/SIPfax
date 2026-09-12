@@ -4,7 +4,7 @@
 This does not qualify automatic E detection or hardware B1/PPP. The data entry
 is explicitly supplied, as in v34-generated-audio.py.
 """
-import argparse,os,subprocess,tempfile
+import argparse,os,re,subprocess,tempfile
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('binary',type=Path);binary=p.parse_args().binary.resolve()
 base={k:v for k,v in os.environ.items() if not k.startswith('SIPFAX_')}
@@ -16,8 +16,11 @@ with tempfile.TemporaryDirectory() as tmp:
  for count in (64,2000):
   first=[]
   for replay in (0,1):
-   env=dict(base,**common,SIPFAX_STREAM_FILE=str(audio),SIPFAX_STREAM_LIVE_INIT='1',SIPFAX_FORCE_DATA='12000',SIPFAX_FORCE_DATA_AT='4.2',SIPFAX_DATABITS=str(bits),SIPFAX_DATA_FEED_SEQUENCE=str(seq),SIPFAX_ACQ_N=str(count),SIPFAX_ACQ_REPLAY=str(replay))
+   env=dict(base,**common,SIPFAX_STREAM_FILE=str(audio),SIPFAX_STREAM_LIVE_INIT='1',SIPFAX_FORCE_DATA='12000',SIPFAX_FORCE_DATA_AT='4.2',SIPFAX_DATABITS=str(bits),SIPFAX_DATA_FEED_SEQUENCE=str(seq),SIPFAX_ACQ_N=str(count),SIPFAX_ACQ_REPLAY=str(replay),SIPFAX_STREAM_TIMING='1')
    r=subprocess.run([str(binary)],env=env,capture_output=True,text=True,check=True,timeout=60)
+   timing=re.search(r'\[stream-timing\] calls=(\d+) mean_ms=([\d.]+) worst_ms=([\d.]+) worst_sample=(\d+) deadline_overruns=(\d+) block_samples=(\d+)',r.stderr)
+   assert timing and int(timing[1])==800 and int(timing[6])==160
+   assert 0<=float(timing[2])<=float(timing[3]) and 0<=int(timing[5])<=800
    indices=[int(x) for x in seq.read_text().splitlines()];assert indices
    assert all(b>a for a,b in zip(indices,indices[1:])), 'duplicate/out-of-order sample'
    first.append(indices[0])

@@ -7904,14 +7904,29 @@ void V34_stream_decode_file(const char *path)
     { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     { long fed = 0;
+      int measure = getenv("SIPFAX_STREAM_TIMING") != NULL;
+      double worst_ms=0, total_ms=0; long calls=0, overruns=0, worst_sample=0;
       while ((n = fread(buf, 2, stream_block_samples, f)) > 0) {
           if (g_force_at > 0 && fed >= g_force_at && !rx.p4_e_rx) {
               rx.p4_e_rx = 1;
               fprintf(stderr, "[stream] switching to data mode at t=%.2fs (cma_phase=%d)\n",
                       fed/8000.0, rx.cma_phase);
           }
-          V34_demod_cma(&rx, buf, n); fed += n;
-      } }
+          struct timespec before, after;
+          if (measure) clock_gettime(CLOCK_MONOTONIC,&before);
+          V34_demod_cma(&rx, buf, n);
+          if (measure) {
+              clock_gettime(CLOCK_MONOTONIC,&after);
+              double ms=(after.tv_sec-before.tv_sec)*1000.0+(after.tv_nsec-before.tv_nsec)/1e6;
+              calls++; total_ms+=ms;
+              if (ms>worst_ms) { worst_ms=ms; worst_sample=fed; }
+              if (ms>n*1000.0/8000) overruns++;
+          }
+          fed += n;
+      }
+      if (measure) fprintf(stderr,"[stream-timing] calls=%ld mean_ms=%.6f worst_ms=%.6f worst_sample=%ld deadline_overruns=%ld block_samples=%u\n",
+                           calls,calls?total_ms/calls:0,worst_ms,worst_sample,overruns,stream_block_samples);
+    }
     fclose(f);
     if (cma_statef) { fclose(cma_statef); cma_statef = 0; }
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);

@@ -982,3 +982,48 @@ test('failed RTP closure retains the port and still terminates PPP', async (t) =
   line.rtpEndpoint.stop = async () => { throw Object.assign(new Error('already closed'), { code: 'ERR_SOCKET_DGRAM_NOT_RUNNING' }); };
   await line.stop();
 });
+
+test('late PTY events from an old Line cannot affect a reused Call-ID', async (t) => {
+  const lines = [];
+  const manager = makeManager({ lineFactory(options) {
+    const line = new FakeLine(options); lines.push(line); return line;
+  } });
+  const opened = t.mock.method(manager, 'openPty', () => true);
+  const closed = t.mock.method(manager, 'closePty', () => true);
+  const invite = parseSipMessage(makeInvite({ callId: 'reused-line', payloads: '8' }));
+  manager.startFromInvite(invite);
+  lines[0].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/old' });
+  assert.equal(opened.mock.callCount(), 1);
+  manager.terminate(invite.callId);
+  await Promise.resolve();
+  manager.startFromInvite(invite);
+  lines[0].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/stale' });
+  lines[0].emit('pty-closed', { callId: invite.callId });
+  assert.equal(opened.mock.callCount(), 1);
+  assert.equal(closed.mock.callCount(), 0);
+  lines[1].emit('pty-opened', { callId: 'another-call', slavePath: '/dev/pts/wrong' });
+  lines[1].emit('pty-closed', { callId: 'another-call' });
+  assert.equal(opened.mock.callCount(), 1);
+  assert.equal(closed.mock.callCount(), 0);
+  lines[1].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/current' });
+  lines[1].emit('pty-closed', { callId: invite.callId });
+  assert.equal(opened.mock.callCount(), 2);
+  assert.equal(closed.mock.callCount(), 1);
+  manager.terminate(invite.callId);
+  await Promise.resolve();
+});
+
+test('repeated ACK preserves the established PPP session', async () => {
+  const manager = makeManager();
+  const callId = 'repeated-ack';
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId, payloads: '8' })));
+  manager.acknowledge(callId);
+  const pppSession = manager.ppp.sessions.get(callId);
+  pppSession.state = 'ipcp-open';
+  pppSession.lease = { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' };
+  manager.acknowledge(callId);
+  assert.equal(manager.ppp.sessions.get(callId), pppSession);
+  assert.equal(manager.ppp.snapshot(callId).state, 'ipcp-open');
+  manager.terminate(callId);
+  await Promise.resolve();
+});

@@ -107,8 +107,13 @@ export class MultiSessionManager {
       rtpPort,
       modem
     });
-    line.on('pty-opened', ({ callId, slavePath }) => this.openPty(callId, { slavePath }));
-    line.on('pty-closed', ({ callId }) => this.closePty(callId));
+    const ownsCall = callId => callId === invite.callId && this.sessions.get(callId)?.line === line;
+    line.on('pty-opened', ({ callId, slavePath }) => {
+      if (ownsCall(callId)) this.openPty(callId, { slavePath });
+    });
+    line.on('pty-closed', ({ callId }) => {
+      if (ownsCall(callId)) this.closePty(callId);
+    });
     line.on('backend-log', ({ callId, line: msg }) => console.log(`modem[${callId}] ${String(msg).trim()}`));
     line.on('backend-error', ({ callId, error }) => console.error(`modem[${callId}] error: ${error?.message ?? error}`));
     // RTP only flows after ACK, so this async bind completes well before media.
@@ -134,6 +139,7 @@ export class MultiSessionManager {
     if (!entry) {
       return false;
     }
+    if (entry.session.state === 'established') return true;
     entry.session.markEstablished(this.ppp.begin(callId));
     return true;
   }

@@ -2249,3 +2249,27 @@ it does not justify removing clock recovery or globally assuming zero drift.
 Evidence: work/v34-dte-66046-live-clock.json,
 work/v34-dte-66046-clock-contrast.json and work/v34-dte-66046-odp-audit.json.
 No service or deployed binary was changed during these analyses.
+
+### Zero-seed hardware comparison: not qualified
+
+Using the same15a266d native binary, trial
+7cc63670-0900-43e5-b90b-1c4bb4c7af82 adds only SIPFAX_DATA_CLK_PPM=0
+to the diagnostic V34 configuration. The live log confirms manual0ppm on each
+acquisition. The call ends error678 without ODP/stream selection or LAPM
+connection. Acquisition RMS values0.123/0.148/0.378 coexist with initial600-bit
+ones fractions61.5%/47.3%/47.3%. A small lattice residual therefore does not
+establish correct mapping/bit alignment. The first active DTE snapshot verifies
+requested=1, initialized=1; the final snapshot has56028TX/4456RX bits and three
+retrains. The strong retained66046 seed contrast remains valid for that recording,
+but this hardware result does not support zero seed as a general default.
+
+Evidence: work/v34-zero-clock-hardware-1789255905.{json,call.log,native-audit.json}
+and work/v34-zero-clock-hardware-diagnostics.json. Capture66406 and full native
+log remain on CT105. Next compare the first B1/data transition and decoded frame
+alignment in this failed recording against66046, preserving actual negotiation
+and avoiding a lattice-RMS-only acquisition criterion. No seed default changed.
+
+Restoration attemptf1a8caac-b1e2-41e3-ab07-3d0dc43d2c18 passes49296bit/s,
+expected559-byte HTTP checksum, six zero RAS error counters and cleanup.
+work/v34-zero-clock-hardware-final-audit.json verifies all25 managed files,
+qualified native hash, guard enabled, trial flags removed and idle endpoints.

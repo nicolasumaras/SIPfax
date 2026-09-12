@@ -718,3 +718,45 @@ isolation is a build from cc64526 with only the four guard files changed,
 plus a qualified-binary hardware control. Preserve both failed candidates:
 work/v90-guard-hardware-1789233409.* and
 work/v90-guard-disabled-control-1789233522.*.
+
+## Isolated guard passes one-packet hardware recovery (2026-09-12)
+
+Qualified-native control a1de2983-361b-4669-8e18-6a741cd6d6be passed49,296bps,
+HTTP checksum, ipcp-open/ppp0 and clean teardown. Built cc64526 plus exactly
+the four guard files from cd1434a in CT105, excluding subsequent V.34 changes.
+Source manifest and loader/build evidence: work/build_isolated_guard.py and
+work/v90-erasure-guard-evidence/isolated-build-audit.json. Candidate SHA256:
+33e3d28c1d7c7d5661a2e4509303a9a52575ae4332f8daec7883f5972d086135.
+
+Attempt da792ecf-c8a1-4b88-89df-5d6c608897c7 passed: baseline49,296bps, exactly
+one incoming RTP packet dropped on the allocated port (nft counter), followed
+by three complete HTTP200 probes on the same PPP connection with the same
+559-byte content SHA256. All six RAS error counters remained zero. Native
+logs show continuous connected state without physical decoder reset during
+recovery. Call teardown verified zero sessions/leases/media lines. Qualified
+native restored and experimental override removed by the trial wrapper.
+
+This is hardware evidence for one controlled20ms incoming loss on one call,
+not jitter tolerance, arbitrary loss, V.34 fallback or multiple simultaneous
+calls. It also narrows full-candidate startup failure to changes outside this
+isolated guard source combination; the full development native still needs
+startup investigation before release.
+
+Evidence: work/v90-controlled-loss-da792ecf-c8a1-4b88-89df-5d6c608897c7.json,
+work/v90-isolated-guard-hardware-1789233774.{json,call.log,native.log}.
+Full CI for application1dc5cb2 and docs8867107 succeeded; runs34707043244 and
+34707118818. Guardcd1434a and latest495416b runs remained in progress at check.
+
+The three-packet burst extension also passed on the same isolated candidate:
+attempt2136108c-5352-407e-8c61-dafe9c1a748c, exactly3 incoming RTP packets
+counted as dropped, three subsequent complete checksummed HTTP probes on the
+same49,296bps PPP connection, all six RAS error counters zero. Cleanup report
+shows zero sessions/leases/media lines. Evidence:
+work/v90-controlled-loss-2136108c-5352-407e-8c61-dafe9c1a748c.json and
+work/v90-isolated-guard-three-packet-1789233916.*. The injector now accepts a
+bounded1..3 packet count; prior one-packet evidence is unchanged.
+
+Final remote check confirmed qualified native SHA65bd6c48...3cea15, no guard
+override and only the original inet filter firewall table. The isolated guard
+is not the permanent deployed native. XP API still reports1.1.1.0, so bulk POST
+qualification remains pending its update.

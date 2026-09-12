@@ -1007,3 +1007,20 @@ hash, persistent guard, and zero active resources. Evidence:
 Older local trial scripts that assert the pre-promotion hash must be updated
 before reuse; do not blindly restore that older baseline after new trials.
 This native-only deployment is not the final merged application release.
+
+### Native rollback exercised
+
+`work/v90_native_rollback_exercise.py` exercised the retained deployment assets:
+rollback to the previous hash, hardware call, re-promotion of the qualified hash,
+and another hardware call. Both passed at 49,296 bit/s with expected checksum,
+PPP source, zero RAS errors, and clean teardown. Attempts:
+`5b77d589-6bf5-49c5-9c3e-571cb9dff869` (previous) and
+`99613f29-c07e-4042-97ea-c1ee0cd81859` (qualified).
+
+Final independent SSH inspection confirmed qualified SHA-256 `e62a02b2...55ea`,
+guard enabled in the running service environment, and zero sessions/leases/media
+lines; the notebook had no connection. Evidence:
+`work/v90-native-rollback-exercise-1789242351{,-audit}.json` and
+`work/v90-native-rollback-final-state.json`. This supersedes the earlier note
+that the native rollback procedure was only prepared. It covers the native-only
+release, not a rollback of the final integrated application release.

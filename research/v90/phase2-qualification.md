@@ -1660,3 +1660,25 @@ across 93760 settled bits, with 3035 startup errors still reported.
 This fixes selection only. Stable MP information throughout the exchange,
 peer shaping propagation, and hardware fallback qualification remain open.
 Production is unchanged.
+
+
+### Directional shaping propagation
+
+Both live MP decoder paths now retain the peer's shaping request, and the
+RX-to-TX bridge carries it into transmit data parameters. The data constellation
+is rebuilt even when the negotiated rate equals the initial rate. Power
+normalisation receives the actual transmit shaping configuration explicitly;
+it no longer reads the global SIPFAX_SHAPE setting independently. Our MP's
+shaping bit is stored and bridged to the receiver, where it overrides the
+initial/global shaping choice when an advertisement exists. The global setting
+remains available for generated signals and unnegotiated diagnostic input.
+
+The MP test now checks both directions independently at 12000 and 24000 bit/s,
+including conflicting global settings and unchanged transmit rates. Sixteen
+cases match the separately initialised reference constellations. Estimated
+power varies with transmit shaping and is invariant to receive/global shaping.
+All 84 MP cases and 12 trellis cases still pass; peer-role tests retain zero
+errors over 2146096 bits and generated audio retains zero over 93760 settled
+bits (3035 startup errors retained). These are local generated tests, not a
+hardware call result. Stable MP exchange parameters and V.34 startup remain
+open, and production has not changed.

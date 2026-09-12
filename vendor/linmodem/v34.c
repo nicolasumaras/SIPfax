@@ -43,7 +43,7 @@ static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 static void v34_tx_data_params(V34DSPState *s, int R);   /* SIPFAX: TX rate from negotiated ac */
-static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin, const s16 h[3][2], double nlnorm);  /* SIPFAX */
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int shape, int nonlin, const s16 h[3][2], double nlnorm);  /* SIPFAX */
 int g_japplied = 0;              /* SIPFAX: J-obey latch, reset on watchdog restart */
 int g_mp_type = -1, g_mp_aux = -1, g_mp_asym = -1;   /* SIPFAX: extra MP fields for the p4blk reporter */
 long g_b1c = 0, g_b1o = 0;       /* SIPFAX: RX descrambled-ones health meter */
@@ -1710,7 +1710,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
             { char *mt = getenv("SIPFAX_MP_TREL"); if (mt) trel = atoi(mt) & 3; }   /* slmodem advertises 0 (16-state) */
         }
         mp_params_done:
-        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac; s->p4_adv_trel = trel;
+        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac; s->p4_adv_trel = trel; s->p4_adv_shape = shape;
         put_bits(&p, 17, 0x1ffff); /* frame sync */
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
@@ -2113,7 +2113,7 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                        caller one rate and transmitted another. */
                     if (s->p4_adv_ac > 0 && s->p4_adv_ac < their_ac) their_ac = s->p4_adv_ac;
                     Rt = ((cap > 0 && cap < their_ac) ? cap : their_ac) * 2400;
-                    if (Rt > 0 && Rt != s->R) {
+                    if (Rt > 0) {
                         extern int v34_dbg;
                         if (v34_dbg) fprintf(stderr, "[p4] TX: adopting negotiated ac=%d "
                                              "(was R=%d)\n", Rt, s->R);
@@ -2208,12 +2208,12 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                 static int tw = -1;
                 if (tw < 0) { char *e = getenv("SIPFAX_TX_POW"); tw = e ? atoi(e) : 1; }
                 if (tw && s->b > 12) {
-                    double shp0 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 0, s->h, 0.0);
+                    double shp0 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, s->expanded_shape, 0, s->h, 0.0);
                     double shp2 = shp0;
                     if (shp0 > 0) {
                         s->nl_meanc2 = shp0;
                         if (s->use_non_linear)
-                            shp2 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 1, s->h, shp0);
+                            shp2 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, s->expanded_shape, 1, s->h, shp0);
                         if (shp2 > 0) {
                             int amp_full = CALC_AMP(shp2), amp = amp_full, pg = 128;
                             double mx = shp_maxsi;   /* peak |component| from the warped run */
@@ -4642,7 +4642,7 @@ static double v34_shaped_meanc2(int R, int nb_states)
    shaping, the peer's precoder taps and the 9.7 warp - so tx_amp can be set from the
    power actually leaving the modulator. nlnorm is the 9.7 normaliser (average energy
    of x(n)); pass 0 with nonlin off. */
-static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin,
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int shape, int nonlin,
                                     const s16 h[3][2], double nlnorm)
 {
     V34State p;
@@ -4651,7 +4651,7 @@ static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin,
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = R; p.conv_nb_states = nb_states;
     p.use_high_carrier = 1; p.calling = 0;
-    { char *e = getenv("SIPFAX_SHAPE"); p.expanded_shape = e ? atoi(e) : 1; }
+    p.expanded_shape = shape;
     p.use_non_linear = nonlin;
     if (h) memcpy(p.h, h, sizeof(p.h));
     memset(&tx2, 0, sizeof(tx2));
@@ -6416,7 +6416,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                    inversion. Note linmodem's own encoder stubs this out -
                                    dzeta is hardcoded to 0.3125 with the real formula
                                    commented out - so we neither apply it nor invert it. */
-                                if (ok) s->peer_nonlin = f[31];
+                                if (ok) { s->peer_nonlin = f[31]; s->peer_shape = f[32]; }
                                 if (ok && type == 1) {
                                     /* SIPFAX: the fold decoder never read the peer's
                                        precoder coefficients, so peer_h stayed zero even
@@ -7386,6 +7386,8 @@ static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *
 static void v34_tx_data_params(V34DSPState *s, int R)
 {
     int S = s->S, d, e;
+    /* The peer's MP controls this transmitter, including when R is unchanged. */
+    if (s->p4_mp_rx) s->expanded_shape = s->peer_shape;
     s->R = R;
     if (!s->use_high_carrier) { d = S_tab[S][2]; e = S_tab[S][3]; }
     else                      { d = S_tab[S][4]; e = S_tab[S][5]; }
@@ -7426,7 +7428,8 @@ static void v34_rx_data_params(V34DSPState *s, int R)
     s->q = 0;
     if (s->b <= 12) s->K = 0;
     else { s->K = s->b - 12; while (s->K >= 32) { s->K -= 8; s->q++; } }
-    { char *e2 = getenv("SIPFAX_SHAPE"); if (e2) s->expanded_shape = atoi(e2); }
+    if (s->p4_adv_ca > 0) s->expanded_shape = s->p4_adv_shape;
+    else { char *e2 = getenv("SIPFAX_SHAPE"); if (e2) s->expanded_shape = atoi(e2); }
     if (!s->expanded_shape) s->M = (int) ceil(pow(2.0, s->K / 8.0));
     else                    s->M = (int) rint(1.25 * pow(2.0, s->K / 8.0));
     s->L = 4 * s->M * (1 << s->q);
@@ -7566,7 +7569,8 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                        and the 9.7 encoder never did, off the same CRC gate and the same
                        rx->tx copy. Captures decode nonlin=1 offline while the live journal
                        shows zero "non-linear encoder ON" events for the same calls. */
-                    if (nlreq) s->peer_nonlin = 1;
+                    s->peer_nonlin = nlreq;
+                    s->peer_shape = sh;
                     s->p4_mp_crcok = 1; s->p4_mp_rx = 1;
                     if (ak && !s->p4_mpp_rx) {
                         s->p4_mpp_rx = 1;
@@ -8105,6 +8109,33 @@ void V34_dataloop_test(void)
 
 void V34_mptest(void)
 {
+    if (getenv("SIPFAX_MPTEST_SHAPING")) {
+        static V34DSPState tx, rx, reference;
+        V34State p;
+        extern void dsp_init(void);
+        dsp_init(); V34_static_init();
+        for (int R=12000; R<=24000; R+=12000) {
+            for (int peer=0; peer<2; peer++) for (int own=0; own<2; own++) {
+                memset(&p, 0, sizeof(p));
+                p.S=V34_S3429; p.R=R; p.conv_nb_states=32;
+                p.use_high_carrier=1; p.expanded_shape=1-peer;
+                memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx));
+                memset(&reference,0,sizeof(reference));
+                V34_init_low(&tx,&p,0); V34_init_low(&rx,&p,0);
+                tx.p4_mp_rx=1; tx.peer_shape=peer;
+                rx.p4_adv_ca=R/2400; rx.p4_adv_shape=own;
+                v34_tx_data_params(&tx,R); v34_rx_data_params(&rx,R);
+                p.expanded_shape=peer; V34_init_low(&reference,&p,0);
+                int txok=tx.L==reference.L && tx.M==reference.M;
+                p.expanded_shape=own; V34_init_low(&reference,&p,0);
+                int rxok=rx.L==reference.L && rx.M==reference.M;
+                double power=v34_shaped_meanc2_cfg(R,32,tx.expanded_shape,0,NULL,0);
+                printf("%d %d %d %d %d %d %d %.12g\n",R,peer,own,
+                       tx.expanded_shape,rx.expanded_shape,txok,rxok,power);
+            }
+        }
+        return;
+    }
     if (getenv("SIPFAX_MPTEST_RX_TRELLIS")) {
         V34DSPState s;
         memset(&s, 0, sizeof(s));
@@ -8493,6 +8524,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_tx.p4_trellis = s->v34_rx.p4_trellis;   /* SIPFAX: MP 29:30 - trellis REQUIRED of our TX */
     s->v34_rx.p4_adv_trel = s->v34_tx.p4_adv_trel;
     s->v34_rx.p4_adv_ca = s->v34_tx.p4_adv_ca;
+    s->v34_rx.p4_adv_shape = s->v34_tx.p4_adv_shape;
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed
@@ -8500,6 +8532,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
            them, and the non-linear-encoder request, to the tx instance. */
         int hq; for (hq = 0; hq < 6; hq++) s->v34_tx.peer_h[hq] = s->v34_rx.peer_h[hq];
         s->v34_tx.peer_nonlin = s->v34_rx.peer_nonlin;
+        s->v34_tx.peer_shape = s->v34_rx.peer_shape;
     }
     V34_mod(&s->v34_tx, output, nb_samples);
     {   /* Phase-3 output stage: /5 level-match then optional pre-emphasis, both TUNABLE

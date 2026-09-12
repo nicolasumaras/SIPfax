@@ -15,6 +15,21 @@ selections=[tuple(map(int,line.split())) for line in r.stdout.splitlines()]
 assert len(selections)==12, 'missing receiver trellis selection cases'
 for advertised,peer,states in selections:
  assert states==(16,32,64)[peer if advertised<0 else advertised], (advertised,peer,states)
+powers={}
+for global_shape in (0,1):
+ e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST_SHAPING='1',SIPFAX_SHAPE=str(global_shape))
+ r=subprocess.run([str(binary)],env=e,capture_output=True,text=True,check=True,timeout=30)
+ rows=[line.split() for line in r.stdout.splitlines()]
+ assert len(rows)==8, 'missing directional shaping cases'
+ for row in rows:
+  rate,peer,own,tx,rx,txok,rxok=map(int,row[:7]);power=float(row[7])
+  assert (tx,rx,txok,rxok)==(peer,own,1,1),row
+  assert power>0,row
+  key=(rate,peer)
+  if key in powers:assert power==powers[key], 'power depends on opposite direction/global shape'
+  powers[key]=power
+for rate in (12000,24000):
+ assert powers[rate,0]!=powers[rate,1], 'power estimator ignored shaping'
 with tempfile.TemporaryDirectory() as tmp:
  d=Path(tmp);frames=d/'frames';symbols=d/'symbols'
  if not a.receive_only:
@@ -55,4 +70,4 @@ with tempfile.TemporaryDirectory() as tmp:
     assert got['frames']>=2 and (got['ca'],got['ac'],got['trellis'],got['ack'])==(ca,ac,trel,1),(kind,ca,ac,trel,got)
     count+=1
   assert decode(frame(5,13,2,kind,True))['frames']==0,'corrupt frame accepted'
- print(f'PASS: {count} independent MP cases and corrupt-frame controls; emitted fields checked={not a.receive_only}')
+ print(f'PASS: {count} independent MP cases and corrupt-frame controls; 12 trellis selections; 16 directional shaping/power cases; emitted fields checked={not a.receive_only}')

@@ -229,7 +229,7 @@ typedef struct V34DSPState {
     int fx2[3][2]; int rx_precode2;                  /* SIPFAX: pre-trellis THP DFE history (Q7) */
     int pre_c0sum, pre_c0, pre_c0_use;                /* SIPFAX: C0 from the pre-trellis DFE, for the ACS half */
     int tx_postgain;                                 /* SIPFAX: Q7 carrier-stage gain; 0 means 1.0 (128) */
-    int p4_adv_ca, p4_adv_ac, p4_adv_trel;          /* SIPFAX: what OUR MP actually advertised */
+    int p4_adv_ca, p4_adv_ac, p4_adv_trel, p4_adv_shape;          /* SIPFAX: what OUR MP actually advertised */
     int data_nra; double nra_pw; long nra_n;          /* SIPFAX: carry-equaliser gain bootstrap */
     int mpp_sent;                                    /* SIPFAX: MP-prime frames sent (slmodem sends 4 before E) */
     short peer_h[6];   /* SIPFAX: precoder coefficients the PEER asked OUR tx to use */
@@ -249,6 +249,7 @@ typedef struct V34DSPState {
 #define P4_RING_SZ 32768
 #define P4_RING_MASK (P4_RING_SZ - 1)
     u8 p4_ring[P4_RING_SZ]; int p4_rn; int p4_try;
+    int peer_shape;    /* MP bit 32: shaping requested of our transmitter */
     int peer_nonlin;   /* SIPFAX: MP bit 31 - peer requests the 9.7 non-linear encoder */
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;

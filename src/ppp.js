@@ -199,6 +199,11 @@ export class EgressPolicy {
           `iptables ${iptablesAction} FORWARD -s ${this.clientCidr} -d ${formatCidr(destination)} -o ${this.outboundInterface} -j ACCEPT`
         );
       }
+      // Legacy clients use low ephemeral ports that some internet paths filter.
+      // Translate TCP/UDP into the high dynamic range; retain NAT for ICMP etc.
+      for (const protocol of ['tcp', 'udp']) {
+        rules.push(`iptables -t nat ${iptablesAction} POSTROUTING -s ${this.clientCidr} -o ${this.outboundInterface} -p ${protocol} -j MASQUERADE --to-ports 49152-65535`);
+      }
       rules.push(`iptables -t nat ${iptablesAction} POSTROUTING -s ${this.clientCidr} -o ${this.outboundInterface} -j MASQUERADE`);
     }
 
@@ -248,6 +253,9 @@ export class EgressPolicy {
       }
       rules.push(`add table ip ${natTable}`);
       rules.push(`add chain ip ${natTable} postrouting { type nat hook postrouting priority 100; policy accept; }`);
+      for (const protocol of ['tcp', 'udp']) {
+        rules.push(`add rule ip ${natTable} postrouting ip saddr ${this.clientCidr} oifname "${this.outboundInterface}" meta l4proto ${protocol} masquerade to :49152-65535`);
+      }
       rules.push(`add rule ip ${natTable} postrouting ip saddr ${this.clientCidr} oifname "${this.outboundInterface}" masquerade`);
     }
 

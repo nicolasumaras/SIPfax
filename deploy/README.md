@@ -354,6 +354,14 @@ removes that call’s rules and restores the saved values after the last caller.
 Previously enabled routing therefore remains enabled. The helper requires
 procps `sysctl` with `--pattern` support.
 
+TCP and UDP masquerading maps each caller's source ports into 49152–65535.
+This avoids preserving low ephemeral ports used by legacy clients: in the XP
+qualification, outbound HTTP from ports 1080 and 4444 received no reply beyond
+the gateway, while translating those same requests to high ports restored them.
+Destination restrictions remain in the forwarding rules. Other protocols retain
+ordinary masquerading. The kernel allocates translated ports across concurrent
+flows; the original port remains visible to the client.
+
 Keep the snapshot and active markers if restoration fails. Repeating the same
 `ip-down` invocation retries restoration without deleting successfully removed
 rules again. Finish all old calls before installing this helper; an old call

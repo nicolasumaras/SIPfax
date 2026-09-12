@@ -1027,3 +1027,21 @@ test('repeated ACK preserves the established PPP session', async () => {
   manager.terminate(callId);
   await Promise.resolve();
 });
+
+test('per-call NAT translates TCP and UDP low source ports with symmetric cleanup', () => {
+  const policy = new EgressPolicy({ outboundInterface: 'eth0' });
+  const descriptor = policy.leaseDescriptor({ callId: 'nat-port-test', lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' } });
+  const nft = descriptor.nft.up.filter(rule => rule.includes('masquerade'));
+  assert.equal(nft.length, 3);
+  for (const [index, protocol] of ['tcp', 'udp'].entries()) {
+    assert.ok(nft[index].includes('ip saddr 10.64.0.2/32'));
+    assert.ok(nft[index].endsWith(`meta l4proto ${protocol} masquerade to :49152-65535`));
+    const up = descriptor.iptables.up.find(rule => rule.includes(`-p ${protocol} -j MASQUERADE`));
+    assert.ok(up.endsWith('--to-ports 49152-65535'));
+    assert.ok(descriptor.iptables.down.includes(up.replace(' -A ', ' -D ')));
+  }
+  assert.ok(nft[2].endsWith(' masquerade'), 'other protocols retain NAT after port-specific rules');
+  const disabled = new EgressPolicy({ allowInternet: false });
+  assert.ok(!disabled.firewallRulesNft().some(rule => rule.includes('masquerade')));
+  assert.ok(!disabled.firewallRules().some(rule => rule.includes('MASQUERADE')));
+});

@@ -25,13 +25,20 @@ test('parallel PPP hooks serialize rules and preserve forwarding for the survivi
   }
   const env = { ...process.env, PATH: mockBin + ':' + process.env.PATH, SIPFAX_PPP_LEASE_DIR: leases, SIPFAX_PPP_ACTIVE_DIR: active, SIPFAX_TEST_LOG: log };
   delete env.SIPFAX_EGRESS_HELD_LOCK;
-  const run = (action, id) => promisify(execFile)(process.execPath, ['bin/sipfax-egress-apply', action, id], { env });
+  const run = (action, id, iface = 'ppp0') => promisify(execFile)(process.execPath, ['bin/sipfax-egress-apply', action, id, iface], { env });
   try {
     await Promise.all(ids.map(id => run('up', id)));
     assert.equal(readdirSync(active).filter(name => name.endsWith('.json')).length, 2);
     const markers = readFileSync(log, 'utf8').split('\n').filter(line => line === 'BEGIN' || line === 'END');
     assert.deepEqual(markers, ['BEGIN', 'END', 'BEGIN', 'END']);
+    const beforeDuplicates = readFileSync(log, 'utf8');
+    await run('up', ids[0]);
+    await run('down', ids[0], 'old-ppp-interface');
+    assert.equal(readFileSync(log, 'utf8'), beforeDuplicates);
     await run('down', ids[0]);
+    const afterDown = readFileSync(log, 'utf8');
+    await run('down', ids[0]);
+    assert.equal(readFileSync(log, 'utf8'), afterDown);
     assert.ok(!readFileSync(log, 'utf8').includes('ip_forward=0'));
     assert.equal(readdirSync(active).filter(name => name.endsWith('.json')).length, 1);
     await run('down', ids[1]);

@@ -45,6 +45,20 @@ if (descriptor.callId !== callId) {
 }
 mkdirSync(activeDir, { recursive: true, mode: 0o750 });
 
+const marker = activePath(safeCallId);
+const activeLease = existsSync(marker) ? JSON.parse(readFileSync(marker, 'utf8')) : null;
+const sameLease = activeLease && activeLease.callId === callId
+  && activeLease.interfaceName === interfaceName
+  && activeLease.localAddress === localAddress
+  && activeLease.remoteAddress === remoteAddress;
+if (action === 'up' && activeLease) {
+  if (!sameLease) throw new Error('Call-ID already has another active PPP lease');
+  process.exit(0); // Repeated notification for an already installed lease.
+}
+if (action === 'down' && !sameLease) {
+  process.exit(0); // Duplicate teardown or an old interface after reconnect.
+}
+
 if (action === 'up') {
   setForwarding(descriptor, true);
   applyRules(descriptor, 'up');

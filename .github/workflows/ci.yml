@@ -65,6 +65,8 @@ jobs:
         run: python3 tools/tests/v34-peer-role.py vendor/linmodem/lm
       - name: Test V34 generated audio receive path
         run: python3 tools/tests/v34-generated-audio.py vendor/linmodem/lm
+      - name: Test V34 carrier readiness
+        run: python3 tools/tests/v34-readiness.py vendor/linmodem/lm
       - name: Test V34 acquisition buffer handoff
         run: python3 tools/tests/v34-acq-replay.py vendor/linmodem/lm
       - name: Test V34 nonlinear encoder projection

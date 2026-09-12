@@ -475,6 +475,18 @@ enum lm_get_state_val lm_get_state(struct sm_state *s)
         return s->u.v90_state.startup.phase4_active &&
                s->u.v90_state.startup.phase4.stage==4 &&
                s->u.v90_state.startup.phase4.upstream.frames>0 ? LM_STATE_CONNECTED:LM_STATE_CONNECTING;
+    case SM_V34:
+        /* Selecting V.34 is not carrier readiness. Wait until local B1 is
+           queued and the peer's E plus an acquired data frame have arrived.
+           Re-evaluate each time so a retrain cannot retain stale readiness. */
+        return s->u.v34_state.v34_tx.state == V34_DATA &&
+               s->u.v34_state.v34_tx.b1_mf == 0 &&
+               s->u.v34_state.v34_rx.p4_e_rx &&
+               s->u.v34_state.v34_rx.data_on &&
+               s->u.v34_state.v34_rx.data_acq_done &&
+               s->u.v34_state.v34_rx.P > 0 &&
+               s->u.v34_state.v34_rx.data_n >= 8*s->u.v34_state.v34_rx.P ?
+               LM_STATE_CONNECTED : LM_STATE_CONNECTING;
     case SM_V21:
     case SM_V23: 
         return LM_STATE_CONNECTED;
@@ -568,8 +580,34 @@ enum {
 
 extern char *modem_command, *dial_number;
 
+/* Exercise the public readiness API without audio, PTYs, or a real call. */
+static int readiness_test(void)
+{
+    static struct sm_state sm;
+    for (int mask=0; mask<64; mask++) {
+        memset(&sm,0,sizeof(sm)); sm.state=SM_V34;
+        sm.u.v34_state.v34_tx.state = mask&1 ? V34_DATA : V34_STARTUP4_E;
+        sm.u.v34_state.v34_tx.b1_mf = mask&2 ? 0 : 1;
+        sm.u.v34_state.v34_rx.p4_e_rx = !!(mask&4);
+        sm.u.v34_state.v34_rx.data_on = !!(mask&8);
+        sm.u.v34_state.v34_rx.data_acq_done = !!(mask&16);
+        sm.u.v34_state.v34_rx.P=15;
+        sm.u.v34_state.v34_rx.data_n=mask&32 ? 120 : 119;
+        printf("stage %d %d\n",mask,lm_get_state(&sm)==LM_STATE_CONNECTED);
+    }
+    sm.u.v34_state.v34_rx.P=0;
+    printf("unset %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.u.v34_state.v34_rx.P=15;
+    sm.u.v34_state.v34_rx.p4_e_rx=0;
+    printf("retrain %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.state=SM_IDLE;
+    printf("idle %d\n",lm_get_state(&sm)==LM_STATE_IDLE);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (getenv("SIPFAX_READINESS_TEST")) return readiness_test();
     {
     {
         const char *b1 = getenv("SIPFAX_B1_REFERENCE");

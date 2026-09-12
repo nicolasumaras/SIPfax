@@ -137,8 +137,17 @@ export class RtpEndpoint extends EventEmitter {
   }
 
   start() {
-    return new Promise((resolve) => {
-      this.socket.bind(this.port, this.host, resolve);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.socket.off('error', failed);
+        this.socket.off('listening', listening);
+      };
+      const failed = error => { cleanup(); reject(error); };
+      const listening = () => { cleanup(); resolve(); };
+      this.socket.once('error', failed);
+      this.socket.once('listening', listening);
+      try { this.socket.bind(this.port, this.host); }
+      catch (error) { failed(error); }
     });
   }
 

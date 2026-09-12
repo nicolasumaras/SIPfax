@@ -80,7 +80,7 @@ export class MultiSessionManager {
   startFromInvite(invite) {
     const existing = this.sessions.get(invite.callId);
     if (existing) {
-      return { accepted: true, session: existing.session, retransmit: true };
+      return { accepted: true, session: existing.session, ready: existing.ready, retransmit: true };
     }
 
     if (this.sessions.size >= this.maxSessions) {
@@ -116,11 +116,6 @@ export class MultiSessionManager {
     });
     line.on('backend-log', ({ callId, line: msg }) => console.log(`modem[${callId}] ${String(msg).trim()}`));
     line.on('backend-error', ({ callId, error }) => console.error(`modem[${callId}] error: ${error?.message ?? error}`));
-    // RTP only flows after ACK, so this async bind completes well before media.
-    Promise.resolve(line.start()).catch((error) =>
-      console.error(`line ${invite.callId} rtp bind failed: ${error.message}`)
-    );
-
     const session = new CallSession({
       callId: invite.callId,
       fromTag: invite.fromTag,
@@ -130,8 +125,18 @@ export class MultiSessionManager {
       localRtpPort: rtpPort,
       publicHost: this.publicHost
     });
-    this.sessions.set(invite.callId, { session, line });
-    return { accepted: true, session };
+    const entry = { session, line };
+    this.sessions.set(invite.callId, entry);
+    const failed = error => {
+      console.error(`line ${invite.callId} rtp bind failed: ${error.message}`);
+      if (this.sessions.get(invite.callId) === entry) this.terminate(invite.callId);
+      return false;
+    };
+    try {
+      entry.ready = Promise.resolve(line.start()).then(
+        () => this.sessions.get(invite.callId) === entry, failed);
+    } catch (error) { entry.ready = Promise.resolve(failed(error)); }
+    return { accepted: true, session, ready: entry.ready };
   }
 
   acknowledge(callId) {

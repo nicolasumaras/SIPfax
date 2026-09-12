@@ -542,3 +542,9 @@ From the FreePBX side:
 
 SIPfax remains intentionally single-call. A second simultaneous call should
 receive `486 Busy Here`.
+
+An incoming call receives SIP 200 only after its RTP socket is listening. A
+bind failure returns SIP 503 and tears down that call; the port is returned to
+the pool after socket closure. Retransmitted INVITEs share the same pending
+startup result. Check the service log for the bind error when a call receives
+503, including whether another process already owns the configured RTP port.

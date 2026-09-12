@@ -52,7 +52,7 @@ Native logging continued to show V.90 audio activity, but existing logs lack ong
 
 ## LAPM recovery regression and candidate fix
 
-A new established-link regression reproduced the decoder-reset defect: the original implementation immediately cleared `connected`. The candidate fix preserves LAPM sequence numbers, retransmission queues and pending DTE bytes, resets partial receive framing, and reacquires a candidate from two CRC-valid addressed HDLC frames without requiring ODP/XID again. Before initial LAPM establishment, the original negotiation-reset behavior remains.
+A new established-link regression reproduced the decoder-reset defect: the original implementation immediately cleared `connected`. The candidate fix preserves LAPM sequence numbers, retransmission queues and pending DTE bytes, resets partial receive framing, and reacquires a candidate from two CRC-valid addressed HDLC frames without requiring ODP/XID again. In candidate `56cee19`, the original reset behavior still applied before initial LAPM establishment; the later startup fix below changes that case.
 
 Selector tests reject flags alone, a corrupt frame, mixed-candidate evidence and invalid addresses. CT105 AddressSanitizer/UndefinedBehaviorSanitizer tests passed with zero, one and two simulated decoder resets, each transferring exactly 16 KiB in both directions. The reset tests include a one-second physical gap and candidate changes, preserve sequence state at reset, and verify byte order and absence of duplicate delivery. Local sanitizer libraries were unavailable; the sanitized evidence comes from CT105. These tests establish protocol recovery for the simulated conditions; hardware renegotiation and endurance qualification are still required.
 
@@ -65,12 +65,72 @@ CRC-valid resume frames. LAPM counters at runtime 548–550 seconds retain
 connected state and outstanding sequence state, then advance acknowledgements;
 `resumptions` becomes 1 while `restarts` and protocol errors remain 0.
 
-An independent audit of the ongoing run at 856 seconds verifies 104 downloads
+An interim independent audit of that run at 856 seconds verified 104 downloads
 of 32 KiB and 104 upload checks of 1 KiB, plus 21 public HTTP probes. All
 completed fixture hashes match and all reported modem error counters are zero.
 The audit also checks the recorded connection identity and monotonically
 increasing connection duration across probes. This is evidence of recovery
 with continued intact traffic on this call, not a completed one-hour result or
-proof of recovery under all impairments. The final server verification and
-clean disconnect are still pending. Upload checks remain URL-carried payloads,
+proof of recovery under all impairments. The final outcome is recorded below; this interim result did not qualify the run. Upload checks remain URL-carried payloads,
 not a bulk upstream throughput measurement.
+
+
+## Internet-only failure isolated to source-port preservation
+
+The same `9fdada24-49cd-4bf1-8c92-f5f7f4eb4dce` run ultimately failed
+`internet-230` at 1,920.5 seconds. It had completed 230 hash-verified 32 KiB
+downloads and 230 upload checks. It disconnected cleanly, but did not pass the
+one-hour gate or final server verification.
+
+A diagnostic 32 KiB download over the still-connected PPP link passed immediately
+after the failed public request. CT105 capture shows the notebook's TCP SYNs
+from source port 1080 arriving over PPP and leaving eth0 after NAT, without
+replies. Direct CT105 HTTP requests bound to ports 1080 and 4444 reproduced the
+timeouts; adjacent-port requests succeeded. A gateway header capture showed the
+failed SYNs leaving its WAN interface. This locates the missing replies beyond
+that capture point; it does not identify which upstream network or endpoint
+filters them.
+
+Temporary high-port NAT restored HTTP 200 for both failing ports. The generated
+SIPfax policy was then tested with a temporary source address on idle CT105:
+TCP 1080 and 4444 translated to high ports and passed HTTP; UDP 1080 translated
+and received a DNS answer. Test rules and the address were removed. Commit
+`97e0b15` applies 49152–65535 translation to TCP/UDP per call, retains ordinary
+NAT for other protocols, and preserves destination restrictions.
+
+## Startup negotiation recovery and current candidate
+
+The first post-NAT hardware attempt, `46840b0c-7a52-46f0-b75d-e21189ebc7c1`,
+failed with modem error 777 before PPP. ODP and flag-based stream selection were
+followed by a decoder reset that returned the server to detection. Repeated
+physical renegotiations did not restore LAPM. This remains a failed call in the
+reliability record, separate from internet routing.
+
+Commit `cc64526` preserves negotiation after stream selection, including before
+LAPM is connected. Two new regressions exercise a reset after selection and a
+reset after valid XID receipt. The latter exposed repeated two-byte SABM frames
+being rejected as reacquisition evidence; valid two-byte U frames are now
+accepted, still requiring two CRC-valid addressed frames from one candidate.
+The previous established-link cases and both startup cases transfer exactly
+16 KiB in each direction. CT105 AddressSanitizer/UndefinedBehaviorSanitizer,
+clean native build, and 100-record audio framing checks passed.
+
+The deployed combination is application `1f58ee0` and native `cc64526`, binary
+SHA-256 `65bd6c4855c78828e0c0d2fca1fb6177cb4496a016e5c042f389092be32cea15`.
+Application `1f58ee0` also guards against signalling a failed PPP spawn without
+a child PID; its absence interrupted the staged tests on CT105's Node 24.20.0.
+The corrected complete application suite passed 80 tests on CT105.
+
+Hardware attempt `de96b0a5-0457-4875-a3ec-899a40b7fb70` passed at 49,296 bit/s
+with two matching public HTTP responses and zero reported modem errors. Cleanup
+left no PPP process, address lease, retained forwarding snapshot, or per-call
+firewall tables. This is one successful short call, not a reliability campaign.
+A new captured one-hour run, `8b43d200-3179-43d7-b82a-1cb20f331a88`, is in progress;
+no final endurance result is claimed here. The later RTP-readiness application
+change `10b8228` remains undeployed during this run.
+
+During the new hardware run, read-only connection tracking confirmed the actual
+PPP client using the new NAT mapping: source ports 1189 and 1200 were translated
+to 51381 and 58200 for completed public HTTP connections. An interim independent
+audit at 377 seconds verified 47 download/upload pairs with zero reported modem
+errors. This confirms live rule use; it is not the final endurance result.

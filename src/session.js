@@ -176,10 +176,12 @@ export class MultiSessionManager {
       return false;
     }
     entry.session.markTerminated();
-    Promise.resolve(entry.line.stop()).catch(() => {});
-    if (entry.line.rtpPort != null) {
-      this.rtpPortPool?.release?.(entry.line.rtpPort);
-    }
+    const closureFailed = error => console.error(`line ${callId} close failed; RTP port retained: ${error.message}`);
+    try {
+      Promise.resolve(entry.line.stop()).then(() => {
+        if (entry.line.rtpPort != null) this.rtpPortPool?.release?.(entry.line.rtpPort);
+      }, closureFailed);
+    } catch (error) { closureFailed(error); }
     this.ppp.terminate(callId);
     this.sessions.delete(callId);
     return true;

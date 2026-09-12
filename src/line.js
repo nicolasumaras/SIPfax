@@ -71,7 +71,10 @@ export class Line extends EventEmitter {
 
   async stop() {
     try { this.modem?.stop?.(); } catch { /* best-effort teardown */ }
-    try { await this.rtpEndpoint.stop(); } catch { /* socket may already be closed */ }
+    try { await this.rtpEndpoint.stop(); }
+    catch (error) {
+      if (error.code !== 'ERR_SOCKET_DGRAM_NOT_RUNNING') throw error;
+    }
   }
 
   diagnostics() {

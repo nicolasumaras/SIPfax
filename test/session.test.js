@@ -97,7 +97,7 @@ test('multi-session manager rejects non-G.711 offers', () => {
   assert.equal(result.statusCode, 488);
 });
 
-test('ACK establishes and BYE frees a session slot and its RTP port', () => {
+test('ACK establishes and BYE frees a session slot and its RTP port', async () => {
   const pool = new RtpPortPool({ range: [41000, 41010] });
   const manager = makeManager({ rtpPortPool: pool });
   manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-4', payloads: '8' })));
@@ -108,6 +108,7 @@ test('ACK establishes and BYE frees a session slot and its RTP port', () => {
   assert.equal(manager.sessions.get('call-4').session.ppp.state, 'awaiting-auth');
   assert.equal(manager.terminate('call-4'), true);
   assert.equal(manager.sessions.has('call-4'), false);
+  await Promise.resolve();
   assert.equal(pool.available, pool.capacity);
 });
 
@@ -935,3 +936,49 @@ function makeInvite({ callId, payloads }) {
     `m=audio 18000 RTP/AVP ${payloads}`
   ].join('\r\n');
 }
+
+
+test('RTP port remains reserved until asynchronous line closure completes', async () => {
+  const pool = new RtpPortPool({ range: [42000, 42000] });
+  let closed;
+  const manager = makeManager({ rtpPortPool: pool, lineFactory(options) {
+    const line = new FakeLine(options);
+    line.stop = () => new Promise(resolve => { closed = resolve; });
+    return line;
+  } });
+  const invite = id => parseSipMessage(makeInvite({ callId: id, payloads: '8' }));
+  assert.equal(manager.startFromInvite(invite('closing')).accepted, true);
+  manager.terminate('closing');
+  assert.equal(pool.available, 0);
+  assert.equal(manager.startFromInvite(invite('next')).statusCode, 486);
+  closed();
+  await Promise.resolve();
+  assert.equal(pool.available, 1);
+  assert.equal(manager.startFromInvite(invite('next')).accepted, true);
+  manager.terminate('next'); closed();
+  await Promise.resolve();
+  assert.equal(pool.available, 1);
+});
+
+test('failed RTP closure retains the port and still terminates PPP', async (t) => {
+  const errors = t.mock.method(console, 'error', () => {});
+  const pool = new RtpPortPool({ range: [42002, 42002] });
+  let pppStopped = false;
+  const manager = makeManager({ rtpPortPool: pool, lineFactory(options) {
+    const line = new FakeLine(options);
+    line.stop = () => Promise.reject(new Error('close failed'));
+    return line;
+  } });
+  t.mock.method(manager.ppp, 'terminate', () => { pppStopped = true; });
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'failed-close', payloads: '8' })));
+  manager.terminate('failed-close');
+  await Promise.resolve();
+  assert.equal(pppStopped, true);
+  assert.equal(pool.available, 0);
+  assert.match(errors.mock.calls[0].arguments[0], /RTP port retained/);
+  const line = Object.create(Line.prototype);
+  line.rtpEndpoint = { stop: async () => { throw new Error('unknown close failure'); } };
+  await assert.rejects(line.stop(), /unknown close failure/);
+  line.rtpEndpoint.stop = async () => { throw Object.assign(new Error('already closed'), { code: 'ERR_SOCKET_DGRAM_NOT_RUNNING' }); };
+  await line.stop();
+});

@@ -337,10 +337,11 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     break;
                 case V8_MOD_V34:
                     V34_init(&sm->u.v34_state, sm->calling);
-                    serial_init(sm, 8, 'N');
-                    sm->u.v34_state.v34_tx.get_bit = serial_8n1_get_bit;
+                    { const char *lapm = getenv("SIPFAX_V34_V42");
+                      v34_dte_init(sm, !sm->calling && lapm && !strcmp(lapm,"1")); }
+                    sm->u.v34_state.v34_tx.get_bit = v34_dte_get_bit;
                     sm->u.v34_state.v34_tx.opaque = sm;
-                    sm->u.v34_state.v34_rx.put_bit = serial_8n1_put_bit;
+                    sm->u.v34_state.v34_rx.put_bit = v34_dte_put_bit;
                     sm->u.v34_state.v34_rx.opaque = sm;
                     sm->state = SM_V34;
                     break;
@@ -395,7 +396,13 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
     case SM_V34:
         {
             int ret;
+            int was_phase2 = sm->u.v34_state.phase2_active;
+            sm->v34_lapm_samples += nb_samples;
             ret = V34_process(&sm->u.v34_state, output, input, nb_samples);
+            if (!was_phase2 && sm->u.v34_state.phase2_active)
+                v34_dte_retrain(sm);
+            if (sm->v34_lapm_requested)
+                v90_lapm_link_drain(&sm->v34_lapm);
             if (ret || sm->hangup_request)
                 sm->state = SM_GO_ONHOOK;
         }
@@ -480,7 +487,10 @@ enum lm_get_state_val lm_get_state(struct sm_state *s)
         /* Selecting V.34 is not carrier readiness. Wait until local B1 is
            queued and the peer's E plus an acquired data frame have arrived.
            Re-evaluate each time so a retrain cannot retain stale readiness. */
-        return s->u.v34_state.v34_tx.state == V34_DATA &&
+        return (!s->v34_lapm_requested ||
+                (s->v34_lapm.initialized && s->v34_lapm.connected &&
+                 !s->v34_lapm.reacquiring)) &&
+               s->u.v34_state.v34_tx.state == V34_DATA &&
                s->u.v34_state.v34_tx.b1_mf == 0 &&
                s->u.v34_state.v34_rx.p4_e_rx &&
                s->u.v34_state.v34_rx.data_on &&
@@ -596,6 +606,15 @@ static int readiness_test(void)
         sm.u.v34_state.v34_rx.data_n=mask&32 ? 120 : 119;
         printf("stage %d %d\n",mask,lm_get_state(&sm)==LM_STATE_CONNECTED);
     }
+    sm.v34_lapm_requested=1;
+    printf("lapm-uninitialized %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.initialized=1;
+    printf("lapm-negotiating %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.connected=1;
+    printf("lapm-connected %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.reacquiring=1;
+    printf("lapm-reacquiring %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm_requested=0;
     sm.u.v34_state.v34_rx.P=0;
     printf("unset %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
     sm.u.v34_state.v34_rx.P=15;

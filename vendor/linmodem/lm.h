@@ -96,6 +96,12 @@ struct sm_state {
         V22Session v22_state;
     } u;
 
+    /* V.34 error control is outside the modulation union so retraining
+       preserves outstanding LAPM frames. One instance belongs to each call. */
+    V90LapmLink v34_lapm;
+    int v34_lapm_requested;
+    long v34_lapm_samples;
+
     /* serial state */
     int serial_data_bits; /* 5 to 8 */
     int serial_parity, serial_use_parity;
@@ -221,3 +227,8 @@ void lm_at_parser(struct lm_at_state *s);
 /* LSB-first asynchronous octets for the V.34 PPP path. */
 int serial_8n1_get_bit(void *opaque);
 void serial_8n1_put_bit(void *opaque, int bit);
+
+void v34_dte_init(struct sm_state *s, int lapm);
+int v34_dte_get_bit(void *opaque);
+void v34_dte_put_bit(void *opaque, int bit);
+void v34_dte_retrain(struct sm_state *s);

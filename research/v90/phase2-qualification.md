@@ -2101,3 +2101,23 @@ and bounded FIFO handling tested before promotion. This source mismatch is not
 proof of the latest error678's cause; PHY acquisition remains variable. Notebook
 health still reports DialUpLab1.1.1.0, so genuine bulk-upload acceptance is pending.
 At head c5962e0, PR29 application CI passes and native CI remains in progress.
+
+### Opt-in V34 LAPM integration
+
+SIPFAX_V34_V42=1 selects an answerer LAPM DTE bridge. It reuses the existing
+V90 LAPM protocol/selector with one V34 decoded stream, stores per-call protocol
+state outside the retrained modulation union, and uses the negotiated TX rate.
+V34 readiness now additionally requires an initialized, connected LAPM link that
+is not reacquiring. PTY reads pause during retraining while queued LAPM frames
+remain available for retransmission. Raw 8N1 remains available with the option off.
+The qualified deployment has not enabled this experimental path.
+
+The new v34-dte test exercises the actual bridge against an originating bundled
+SpanDSP endpoint:16KiB in each direction, independent expected octets, a blocked
+128-byte DTE FIFO, partial writes, busy recovery, and a one-second retraining gap
+with TX rate changing12000 to9600. Both transfers finish exactly with no protocol
+errors or queue overflow; the retrain preserves and resumes the link. These are
+protocol-level tests using generated bits, not independent modem or waveform
+interoperability evidence. Native build, MP, readiness (including LAPM negotiation
+and reacquisition gates), and acquisition-buffer tests pass locally. Target
+sanitizers and hardware qualification remain required before promotion.

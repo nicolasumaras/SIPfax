@@ -126,6 +126,11 @@ void pipe_modem(void)
         if (pty_reported && dce->state == SM_V90 &&
             (!dce->u.v90_state.startup.phase4_active ||
              dce->u.v90_state.startup.phase4.stage != 4)) room = 0;
+        if (pty_reported && dce->state == SM_V34 &&
+            (dce->u.v34_state.v34_tx.state != V34_DATA ||
+             dce->u.v34_state.v34_tx.b1_mf ||
+             (dce->v34_lapm_requested && (!dce->v34_lapm.connected ||
+                                        dce->v34_lapm.reacquiring)))) room = 0;
         n = room > 0 ? read(pty, data, room) : 0;
         for (i = 0; i < n; i++) sm_put_bit(&dce->tx_fifo, data[i]);
 

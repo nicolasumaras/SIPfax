@@ -8,7 +8,7 @@ V42_OBJS= ../spandsp-v42/src/v42.o ../spandsp-v42/src/hdlc.o \
           ../spandsp-v42/src/crc.o ../spandsp-v42/src/bit_operations.o \
           ../spandsp-v42/src/logging.o ../spandsp-v42/src/alloc.o \
           ../spandsp-v42/src/async.o
-OBJS= lm.o lmsim.o lmreal.o lmsoundcard.o serial.o atparser.o linpipe.o v90lineecho.o v90echodelay.o v34_phase2.o v34info1c.o v34sdetect.o \
+OBJS= lm.o lmsim.o lmreal.o lmsoundcard.o serial.o v34dte.o atparser.o linpipe.o v90lineecho.o v90echodelay.o v34_phase2.o v34info1c.o v34sdetect.o \
       dsp.o fsk.o v8.o v8cj.o v21.o v23.o dtmf.o \
       v34.o v34fig9.o v34table.o v22.o v34eq.o \
       v90.o v90echo.o v90startup.o v90upstream.o v90lapmselect.o v90lapmlink.o v42detect.o v90odp.o v90trellis.o v90qam8.o v90equalizer.o v90shell.o v90mapping.o v90phase4.o v90pcm.o v90cp.o v90dil.o v90training.o v90train_tx.o v90table.o $(V42_OBJS)

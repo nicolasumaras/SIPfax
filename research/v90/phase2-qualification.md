@@ -2142,3 +2142,31 @@ qualified native hash, guard enabled, trial flags removed and idle endpoints.
 Next inspect actual post-B1 receive bits and LAPM detection input in place,
 including retry advertisements, before changing acquisition settings. The
 protocol-level transfer tests do not establish hardware V34 fallback.
+
+### Retained LAPM trial65423: negotiation and detector audit
+
+In-place wire decoding of TX65423 confirms zero precoder coefficients in all
+four attempts, with ca/ac12000,16-state receive trellis, minimum shaping,
+nonlinear off and CRC-valid ACK transitions. This supplies hardware retry evidence
+for the earlier channel-estimate reset fix; the previous reset trial had only one
+attempt. Evidence: work/v34-lapm-65423-replay.json. Audio remains on CT105.
+
+A replay with these recorded MP parameters and the64-symbol acquisition buffer
+finds E at symbol62921, clock seed-46.0ppm and acquisition RMS0.135. The first600
+bits are all ones; the first1200 contain1156 ones, then the next1200 contain555.
+Across2816 live-size callbacks, worst runtime14.649728ms, zero20ms overruns.
+The replay emits91688 bits but does not reinitialize at every live watchdog
+retrain, so its later output must not be presented as an exact live bitstream.
+The live log itself had one RMS0.144/all-ones early window and later retries at
+RMS0.395 and0.363. A final-window-only summary obscures this variation.
+
+The actual v42_detect_bit implementation, compiled and called in place, finds
+no ODP in the first6000 replay bits (no accepted DC1 characters). Across the whole
+replay it sees26 isolated accepted DC1 characters, maximum alternating run1,
+no detection. A synthetic eight-character alternating DC1 control detects at
+bit63;2000 idle ones never detect. This supports investigating the signal reaching
+error-control detection, not weakening detection criteria. It does not prove the
+caller transmitted an ODP, or distinguish transmitter handshake failure from
+receive tracking failure. Evidence: work/v34-lapm-65423-odp-audit.json.
+Production remains the restored qualified V90 release; these analyses make no
+service changes.

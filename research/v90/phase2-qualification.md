@@ -1407,3 +1407,32 @@ Local evidence: `work/v34-table11-cma-hardware-1789246456.{json,call.log,native.
 CI run34718354507 at `39a21df` has passed the previously failing B1 gate,
 low-rate framing, Table11/precoded-link and startup checks; the complete
 native job was still running when this hardware record was written.
+
+
+## Independent nonlinear transmit projection check (2026-09-12)
+
+The latest caller requested nonlinear encoding. An audit against
+[ITU-T V.34 (02/98), clause9.7](https://www.itu.int/rec/dologin_pub.asp?id=T-REC-V.34-199802-I%21%21PDF-E&lang=e&type=items)
+found the current projection formula consistent with equations9-33 through
+9-35. The B1 diagnostic now accepts `SIPFAX_B1_NL_MEAN`: a positive finite
+reference energy in lattice units. It enables the existing encoder branch
+without changing live modem defaults or substituting a new formula.
+
+`tools/tests/v34-nonlinear.py` first obtains linear B1 output, independently
+measures its energy, then compares actual nonlinear output against Decimal
+calculations using two supplied reference energies. All3840 symbols passed:
+rates4800/12000/16800/33600, both shaping modes, zero and nonzero precoder
+taps, and two normalisers. The comparison also checks that nonlinear output
+does not feed back into and change the precoder's history. Ignored-option
+and constant-gain controls differ from the expected result; the latter is
+applicable only to variable-energy constellations. Invalid mean values are
+rejected. The unchanged B1-reference and Table11 trace checks also pass.
+The new test is included in CI.
+
+Evidence: `work/v34-nonlinear-projection.log`,
+`work/v34-nonlinear-b1-regression.log`, and
+`work/v34-nonlinear-table11-regression.json`.
+This validates projection for supplied energy and generated symbols, not the
+live power estimate, nonlinear receive inverse, analog waveform acquisition,
+or hardware interoperability. It does not resolve the latest error678 or
+establish its cause. The retained production release was not changed.

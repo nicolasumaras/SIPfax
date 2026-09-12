@@ -4481,6 +4481,8 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
 
 
 /* Offline encoder reference. Symbol coordinates are Q7, before pulse shaping.
+   SIPFAX_B1_NL_MEAN enables 9.7 with supplied positive mean energy in lattice
+   units. It tests the projection, not the live normalisation estimate.
    This is a model reference, not proof of interoperability with a caller. */
 static FILE *b1_reference_file;
 static void b1_reference_symbol(int i, int q)
@@ -4495,11 +4497,19 @@ int V34_b1_reference(const char *path)
     const char *shape = getenv("SIPFAX_SHAPE");
     const char *trellis = getenv("SIPFAX_B1_TRELLIS");
     const char *h = getenv("SIPFAX_B1_H");
+    const char *norm = getenv("SIPFAX_B1_NL_MEAN");
+    double nonlinear_mean = 0;
+    if (norm) {
+        char *end;
+        nonlinear_mean = strtod(norm, &end);
+        if (end == norm || *end || !isfinite(nonlinear_mean) || nonlinear_mean <= 0) return 2;
+    }
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = rate ? atoi(rate) : 16800;
     p.calling = 1; p.use_high_carrier = 1;
     p.expanded_shape = shape ? atoi(shape) : 1;
     p.conv_nb_states = trellis ? atoi(trellis) : 64;
+    p.use_non_linear = norm != NULL;
     if (p.R < 4800 || p.R > 33600 || p.R % 2400 ||
         (p.conv_nb_states != 16 && p.conv_nb_states != 32 && p.conv_nb_states != 64)) return 2;
     if (h) {
@@ -4516,6 +4526,7 @@ int V34_b1_reference(const char *path)
     V34_static_init();
     memset(&tx, 0, sizeof(tx));
     V34_init_low(&tx, &p, 1);
+    tx.nl_meanc2 = nonlinear_mean;
     v34_begin_b1(&tx);
     g_symtap = b1_reference_symbol;
     for (int frame = 0; frame < tx.P; ++frame) encode_mapping_frame(&tx);

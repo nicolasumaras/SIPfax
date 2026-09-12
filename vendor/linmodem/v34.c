@@ -806,6 +806,7 @@ int V34_init_low(V34DSPState *s, V34State *p, int transmit)
   
   /* copy the params */
   s->calling = p->calling;
+  s->rx_data_poly = 0;
   s->S = p->S;
   s->expanded_shape = p->expanded_shape;
   s->R = p->R;
@@ -3547,10 +3548,8 @@ static void put_bit(V34DSPState *s, int b)
 {
     int poly;
 
-    if (!s->calling)
-        poly = V34_GPC;
-    else
-        poly = V34_GPA;
+    poly = s->rx_data_poly;
+    if (!poly) poly = s->calling ? V34_GPA : V34_GPC;
     b = unscramble_bit(s, b, poly);
     unsigned long long position = s->rx_bit_position++;
     if (s->rx_erasure_bits) { --s->rx_erasure_bits; return; }
@@ -4477,6 +4476,16 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
         s->matched_s_enabled = e && !strcmp(e, "1") &&
             v34_s_detect_init(&s->s_detector, s->symbol_rate, s->carrier_freq);
     }
+}
+
+
+/* Live RX parameters describe the transmitter for carrier/training selection.
+   Data must use that same peer's polynomial, not invert the role a second time.
+   Legacy diagnostic initializers still accept the local role. */
+static void V34_demod_peer_init(V34DSPState *s, V34State *peer)
+{
+    V34_demod_init(s, peer);
+    s->rx_data_poly = peer->calling ? V34_GPC : V34_GPA;
 }
 
 
@@ -7765,7 +7774,7 @@ void V34_stream_decode_file(const char *path)
             p.R = 19200;
             p.calling = role ? atoi(role) : 1;
             p.expanded_shape = shape ? atoi(shape) : 1;
-            V34_demod_init(&rx, &p);
+            V34_demod_peer_init(&rx, &p);
             fprintf(stderr, "[stream] live RX initialization: peer calling=%d shape=%d R=%d S=%.0f\n",
                     rx.calling, rx.expanded_shape, rx.R, rx.symbol_rate);
         }
@@ -8007,6 +8016,7 @@ void V34_dataloop_test(void)
     memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    { const char *role = getenv("SIPFAX_DL_CALLING"); if (role) pt.calling = atoi(role) != 0; }
     { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
     { char *nl=getenv("SIPFAX_DL_NONLIN"); pt.use_non_linear = nl?atoi(nl):0; }
     {   /* SIPFAX: enable the TRANSMIT precoder in the loopback so the receive side can be
@@ -8029,8 +8039,15 @@ void V34_dataloop_test(void)
                     pt.h[0][0],pt.h[0][1],pt.h[1][0],pt.h[1][1],pt.h[2][0],pt.h[2][1]);
         }
     }
-    memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
+    memcpy(&pr,&pt,sizeof(pr)); pr.calling=!pt.calling;
     V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
+    { const char *peer = getenv("SIPFAX_DL_PEER_ROLE");
+      if (peer && !strcmp(peer, "1")) {
+          pr.calling = pt.calling;
+          V34_demod_peer_init(&rx, &pr);
+          fprintf(stderr, "[dataloop] peer RX calling=%d data_poly=%d\n", pr.calling, rx.rx_data_poly);
+      } }
+
     {   /* SIPFAX: the receiver inverts the precoder exactly when the transmitter uses it */
         /* SIPFAX: OFF by default - the inverse below is NOT yet correct. With it off the
            loopback still reaches 97.9% through a precoding transmitter; with it on,
@@ -8272,7 +8289,7 @@ void V34_init(struct V34State *s, int calling)
     s->calling = calling;
     V34_mod_init(&s->v34_tx, s);
     s->calling = !calling;
-    V34_demod_init(&s->v34_rx, s);
+    V34_demod_peer_init(&s->v34_rx, s);
     s->calling = calling;
 
     /* SIPfax answers: run the V.34 Phase-2 negotiation before Phase 3 */
@@ -8297,7 +8314,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
             put_bit_func pb = s->v34_rx.put_bit; void *po = s->v34_rx.opaque;
             s->calling = 0; V34_mod_init(&s->v34_tx, s);
             s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
-            s->calling = 1; V34_demod_init(&s->v34_rx, s); s->calling = 0;
+            s->calling = 1; V34_demod_peer_init(&s->v34_rx, s); s->calling = 0;
             s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
             s->v34_rx.caller_md_ms = md_ms;
             fprintf(stderr, "[v34p3] caller MD interval=%d ms (CRC validated)\n", md_ms);

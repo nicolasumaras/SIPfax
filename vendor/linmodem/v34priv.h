@@ -53,6 +53,7 @@ enum {
 typedef struct V34DSPState {
   /* V34 parameters */
   int calling; /* true if we are the caller */ 
+  int rx_data_poly; /* explicit peer data polynomial; 0 uses legacy local-role selection */
   int S; /* index for symbol rate */
   int expanded_shape; /* true if expanded shape used */
   int R; /* transmit rate (in bits/s, including aux channel) */

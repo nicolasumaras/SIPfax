@@ -1470,3 +1470,43 @@ Metadata and aggregate results only were returned locally:
 `work/v34-table11-59456-reference-audit.json`.
 The replay waveform, receiver trace, and search script remain on CT105 under
 `/tmp/v34-table11-59456-*`. No service, modem or network settings changed.
+
+
+## Live V.34 data descrambler role corrected (2026-09-12)
+
+Generated audio exposed a role contract mismatch. Live receive initialization
+passes the transmitting peer's role to select its carrier and training path,
+but `put_bit` interpreted that field as the local role and selected the other
+polynomial. Clause7 requires GPC for caller transmissions and GPA for answer
+transmissions. The new peer initializer records the data polynomial explicitly;
+both live initialization and the Phase2 handoff use it. Legacy local-role
+symbol diagnostics retain their original selection semantics.
+
+A clean-symbol reproduction using specification-derived synchronization had
+0/111776 errors with the legacy local-role initializer but56194/111776 with
+the previous live peer-role initializer. The same comparison now has zero
+errors in both modes. The regression covers both transmission directions,
+12000/16800, both shaping modes and both initializer contracts:2146096 payload
+bits with zero errors. Transmitted symbol fingerprints must differ by role,
+and the peer initializer reports its selected polynomial to confirm the test
+exercises it. Existing precoded-link/alignment regressions also pass.
+
+A16-second generated12000-bit/s waveform through the actual native modulator
+and CMA receiver previously had46774 wrong bits among93681 bits after the
+fixed40000-bit settling boundary. With only the role correction, the same
+recorded generated waveform has0/93681 settled errors. It still has2988 errors
+within the initial40000 emitted bits. `tools/tests/v34-generated-audio.py`
+reproduces this result and is included in CI alongside the role regression.
+The supplied4.2-second data-entry time deliberately bypasses automatic E
+recognition; the unforced generated-audio replay produced no data bits.
+Thus this is a real audio data-path regression, not automatic startup or
+hardware fallback qualification. It does not establish that the captured
+caller acquisition failure is fixed.
+
+Evidence: `work/v34-peer-role-{before,after}-oracle.json`,
+`work/v34-peer-role-regression.log`,
+`work/v34-peer-role-table11-regression.log`,
+`work/v34-peer-role-audio-regression.log`, and
+`work/v34-generated-audio-6d31989/` (generated content only).
+Production remains unchanged. CI run34718354507 at `39a21df` has now completed
+with both jobs successful; that result predates this new role correction.

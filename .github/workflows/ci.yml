@@ -57,6 +57,10 @@ jobs:
         run: python3 tools/tests/v34-shell-boundary.py
       - name: Test V34 B1 reference initialization
         run: python3 tools/tests/v34-b1-reference.py vendor/linmodem/lm
+      - name: Test V34 live receive role selection
+        run: python3 tools/tests/v34-peer-role.py vendor/linmodem/lm
+      - name: Test V34 generated audio receive path
+        run: python3 tools/tests/v34-generated-audio.py vendor/linmodem/lm
       - name: Test V34 nonlinear encoder projection
         run: python3 tools/tests/v34-nonlinear.py vendor/linmodem/lm
       - name: Test V34 low-rate bit grouping

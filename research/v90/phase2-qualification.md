@@ -288,3 +288,19 @@ Validation: local native build, strict standalone detector compilation and
 negative controls, `tools/tests/v34-matched-replay.py`, and legacy
 `tools/tests/v34-md-replay.py`. Live acquisition, equalizer convergence, other
 symbol rates, broader noise/channel tolerance, and fallback PPP remain open.
+
+Live trial of `44265fc` (candidate SHA-256
+`3ba454d4dc8a428d461a648d26ed1cc04c8ec4956e6e2862aa652dbe04ea4459`):
+CT native build and standalone detector ASan/UBSan controls passed. Notebook
+attempt `264964e8-c2bf-451d-8570-113c65dfeb62` failed with Windows 678 before
+PPP. All four negotiation rounds acquired both matched S-bar transitions,
+waited the CRC-validated 700 ms MD, and reached PP/TRN. First-round PP filtered
+sample was 27229.980 against detector boundary 27229.000. This validates live
+acquisition execution, not successful equalization or protocol completion.
+Logs: `work/v34-fallback-1789228413.*`; RX/TX PID 47440 captures and hashes:
+`work/v34-matched-candidate-evidence/manifest.json` in the development workspace.
+The qualified native SHA-256 `65bd6c4855c78828e0c0d2fca1fb6177cb4496a016e5c042f389092be32cea15`
+was restored, the override removed, and health verified with zero sessions,
+leases and media lines. Next inspect training/Phase-4 handling: the legacy TRN
+path currently calls the data baseband decoder directly, while caller-J
+recognition is implemented in the separate streaming receive path.

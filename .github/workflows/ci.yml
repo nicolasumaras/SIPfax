@@ -37,6 +37,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
       - name: Build native modem
         run: make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+      - name: Test V34 B1 reference initialization
+        run: python3 tools/tests/v34-b1-reference.py vendor/linmodem/lm
       - name: Sanitize V34 E sequence recognition
         run: |
           gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-e.c -o /tmp/v34-e

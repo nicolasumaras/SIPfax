@@ -572,6 +572,8 @@ int main(int argc, char **argv)
 {
     {
     {
+        const char *b1 = getenv("SIPFAX_B1_REFERENCE");
+        if (b1) { extern int V34_b1_reference(const char *); return V34_b1_reference(b1); }
         char *ef = getenv("SIPFAX_ENCODE_FILE");
         if (ef) { extern void V34_encode_test(const char *); V34_encode_test(ef); return 0; }
     }

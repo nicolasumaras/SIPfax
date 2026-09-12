@@ -1611,6 +1611,17 @@ static void V34_mod_MP(V34DSPState *s, u8 *buf, int size, int is_16states)
 
 /* send MP sequence. 'type' select its type (0 or 1). 'do_ack' selects
    if it is an acknowledge sequence */
+static void v34_begin_b1(V34DSPState *s)
+{
+    s->scrambler_reg = 0;
+    s->Z_1 = 0; s->U0 = 0; s->conv_reg = 0;
+    memset(s->x, 0, sizeof(s->x));
+    s->sync_count = 0;
+    s->half_data_frame_count = 2*s->J - 2;
+    s->mapping_frame = 0; s->rcnt = 0; s->acnt = 0;
+    s->b1_mf = s->P;
+}
+
 /* SIPFAX: our RECEIVER's own residual-ISI estimate, defined further down. Tentative
    declarations so the MP builder can advertise it. */
 static s16 p4_hest[3][2];
@@ -2216,13 +2227,7 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                 static int tb = -1;
                 if (tb < 0) { char *e = getenv("SIPFAX_TX_B1"); tb = e ? atoi(e) : 1; }
                 if (tb) {
-                    s->scrambler_reg = 0;
-                    s->Z_1 = 0; s->U0 = 0; s->conv_reg = 0;
-                    memset(s->x, 0, sizeof(s->x));
-                    s->sync_count = 0;
-                    s->half_data_frame_count = 2*s->J - 2;
-                    s->mapping_frame = 0; s->rcnt = 0; s->acnt = 0;
-                    s->b1_mf = s->P;
+                    v34_begin_b1(s);
                 } else {
                     s->b1_mf = 0;
                 }
@@ -4457,6 +4462,54 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
     }
 }
 
+
+/* Offline encoder reference. Symbol coordinates are Q7, before pulse shaping.
+   This is a model reference, not proof of interoperability with a caller. */
+static FILE *b1_reference_file;
+static void b1_reference_symbol(int i, int q)
+{
+    fprintf(b1_reference_file, "%d %d\n", i, q);
+}
+int V34_b1_reference(const char *path)
+{
+    V34State p;
+    static V34DSPState tx;
+    const char *rate = getenv("SIPFAX_B1_RATE");
+    const char *shape = getenv("SIPFAX_SHAPE");
+    const char *trellis = getenv("SIPFAX_B1_TRELLIS");
+    const char *h = getenv("SIPFAX_B1_H");
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = rate ? atoi(rate) : 16800;
+    p.calling = 1; p.use_high_carrier = 1;
+    p.expanded_shape = shape ? atoi(shape) : 1;
+    p.conv_nb_states = trellis ? atoi(trellis) : 64;
+    if (p.R < 4800 || p.R > 33600 || p.R % 2400 ||
+        (p.conv_nb_states != 16 && p.conv_nb_states != 32 && p.conv_nb_states != 64)) return 2;
+    if (h) {
+        int v[6], n = 0;
+        if (sscanf(h, "%d,%d,%d,%d,%d,%d%n", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &n) != 6 || h[n]) return 2;
+        for (int k = 0; k < 6; ++k) {
+            if (v[k] < -32768 || v[k] > 32767) return 2;
+            p.h[k/2][k%2] = v[k];
+        }
+    }
+    b1_reference_file = fopen(path, "w");
+    if (!b1_reference_file) { perror(path); return 1; }
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    memset(&tx, 0, sizeof(tx));
+    V34_init_low(&tx, &p, 1);
+    v34_begin_b1(&tx);
+    g_symtap = b1_reference_symbol;
+    for (int frame = 0; frame < tx.P; ++frame) encode_mapping_frame(&tx);
+    g_symtap = 0;
+    fprintf(stderr, "[b1] reference R=%d shape=%d trellis=%d frames=%d symbols=%d\n",
+            p.R, p.expanded_shape, p.conv_nb_states, tx.P, tx.P*8);
+    int result = ferror(b1_reference_file) ? 1 : 0;
+    if (fclose(b1_reference_file)) result = 1;
+    b1_reference_file = 0;
+    return result;
+}
 
 /* ---- offline Phase-3 decode harness ---- */
 void V34_decode_file(const char *path, int calling)

@@ -405,3 +405,31 @@ another blind gain/phase tuning exercise. No live test or production change.
 Local native build, live-frame-parameter replay and MP CRC replay pass. Evidence:
 `work/v34-cma-candidate-evidence/state-trace.csv`, `state-replay.log`, and
 `state-window-audit.json`. Corrected the previous E clause reference to 10.1.3.2.
+
+### B1 reference and transmitted MP verification
+
+Added `SIPFAX_B1_REFERENCE=<path>` to export one caller B1 frame as Q7 symbol
+coordinates from the existing encoder. `SIPFAX_B1_RATE`, `SIPFAX_B1_TRELLIS`,
+`SIPFAX_SHAPE`, and six Q14 coefficients in `SIPFAX_B1_H` configure the reference.
+Defaults are 16800/3429, 64 states, expanded shaping, zero taps and no nonlinear
+encoding. Production B1 reset and this reference share `v34_begin_b1`; the
+production reset operations are unchanged. This is not an independent standards
+reference or evidence of hardware interoperability.
+
+The local reference test verifies 120 symbols, deterministic reset, shaping/
+trellis controls, nonzero-tap effects and rejection of malformed taps. Native
+build and live-frame replay also pass; reference test added to CI.
+
+Decoding the actual PID 47623 transmitted MP around 50.5 s yields 36 frames:
+ca=16800/ac=26400, trellis=2, shape=1, ack=1, nonlin=0, with nonzero h. This
+supports the parameter assumptions from waveform evidence rather than defaults.
+Rounded Q14 taps from its four-decimal printout are
+4476,1768,-3722,329,2710,-924 (approximately one unit uncertainty).
+
+A constant phase/gain correlation over offsets -20 through +40 symbols around E
+finds maximum coherence 0.038 without precoding, 0.069 with these approximate
+taps, including conjugated hypotheses. Neither establishes B1 alignment.
+Residual channel effects and encoder-reference correctness remain unresolved;
+this does not show the caller sent invalid B1. Artifacts:
+`work/v34-cma-candidate-evidence/{b1-reference-alignment.json,b1-precoded-alignment.json,tx-mp-decode.log}`.
+No live calls or deployment in this work.

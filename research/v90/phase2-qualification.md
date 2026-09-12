@@ -1024,3 +1024,60 @@ lines; the notebook had no connection. Evidence:
 `work/v90-native-rollback-final-state.json`. This supersedes the earlier note
 that the native rollback procedure was only prepared. It covers the native-only
 release, not a rollback of the final integrated application release.
+
+
+## Integrated application installation and rollback passed (2026-09-12)
+
+CT105 now runs application commit `9e0f242d40ed65fe2e4af315d0f9c94b45f852ce`
+with the previously qualified native `9c493c3` binary, SHA-256
+`e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea`.
+The persistent erasure guard and existing lab configuration remain enabled.
+The only changed application runtime file relative to production was
+`src/session.js`, which releases an RTP allocation and stops a partially
+constructed modem when modem/line construction throws.
+
+The committed source bundle was transferred with SHA-256 verification:
+`2260f26db664f86d60a62d5707a8700da710883a8b317a52641bbc378d13ebcc`.
+An isolated CT105 build with GCC 14.2.0 succeeded; installer preflight and all
+87 application tests passed with Node 24.20.0. The fresh native build hash was
+`bb044a73346ed828fff5342e9dd5a9053725ef845b590229a73797e8d3ccfcd5`.
+It was retained as unqualified, not substituted for the hardware-qualified
+binary. Native source is unchanged between `9c493c3` and this application
+commit; this is not a claim of bit-identical native build reproducibility.
+
+The full `deploy/install-systemd.sh --engine=linmodem` procedure installed the
+staged application with the qualified native artifact. A rollback restored all
+25 installer-managed application, helper, hook, service, and native files from
+a hash-verified archive; the same installer then reinstalled the candidate.
+Each leg completed a real hardware call:
+
+- Installed: `4a6119fa-174c-4502-bb38-7fa00cb0d04b`.
+- Rolled back: `ecb3d296-916e-4730-b7fa-d96f98f38afe`.
+- Reinstalled: `566b5d04-b8fc-4bbc-a4f8-c95b25a2ecd4`.
+
+All three independently audited reports had a complete public HTTP response
+with the expected 559-byte checksum, PPP source `10.64.0.2`, zero errors in
+all six RAS counters before and after the probe, `ipcp-open`, and clean teardown.
+Final SSH inspection verified every installed file against the release
+manifest, the recovery guard in the service environment, and zero active
+sessions/leases/media lines. The notebook also had no remaining connection.
+
+Retained assets: `/opt/sipfax/releases/integrated-9e0f242/manifest.json` and
+`previous.tar.gz` (SHA-256
+`1e9b2e9c6b14d4159571b6b77ecfa7f63806b5ac52da2e65a1dc3925120e2dac`).
+The staged source is `/tmp/sipfax-integrated-9e0f242`; local source bundle is
+`/tmp/sipfax-integrated-9e0f242/`. Local procedures and evidence:
+`work/integrated_release_remote.py`, `work/integrated_release_trial.py`,
+`work/audit_integrated_release.py`,
+`work/v90-integrated-release-1789242925{,-audit}.json`, per-leg logs/reports,
+and `work/integrated-9e0f242-{manifest.json,app-tests.log,native-build.log}`.
+The remote controller is staged at `/run/sipfax-integrated-release.py` and
+supports `rollback` and `install`, requiring idle state and matching hashes.
+Temporary staging paths are not durable release distribution.
+
+This verifies full installer deployment and rollback in the current lab. It
+does not establish the final merged release, sustained bulk POST upload,
+working V.34 fallback, broader impairment tolerance, or simultaneous physical
+calls. DialUpLab still reported 1.1.1.0 before this campaign. The exact source
+commit's application CI passed; its native CI was still running at the last
+observation, so a complete CI pass is not yet claimed.

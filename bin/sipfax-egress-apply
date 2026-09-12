@@ -19,6 +19,19 @@ if (!['up', 'down'].includes(action) || !callId) {
   process.exit(64);
 }
 
+// Kernel locks are released on exit, including crashes. Serialize the entire
+// rule/marker/forwarding transaction across independently spawned PPP hooks.
+mkdirSync(activeDir, { recursive: true, mode: 0o750 });
+const lockPath = join(activeDir, '.hook.lock');
+if (process.env.SIPFAX_EGRESS_HELD_LOCK !== lockPath) {
+  const locked = spawnSync('flock', ['-x', lockPath, process.execPath, process.argv[1], ...process.argv.slice(2)], {
+    env: { ...process.env, SIPFAX_EGRESS_HELD_LOCK: lockPath },
+    stdio: 'inherit'
+  });
+  if (locked.error) console.error(locked.error.message);
+  process.exit(locked.status ?? 1);
+}
+
 const safeCallId = callKey(callId);
 const descriptorPath = join(leaseDir, `${safeCallId}.json`);
 if (!existsSync(descriptorPath)) {
@@ -108,6 +121,7 @@ async function postOperatorEvent(descriptor, state) {
 
   try {
     await fetch(new URL('/ppp/events', descriptor.operatorUrl), {
+      signal: AbortSignal.timeout(2000),
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

@@ -205,6 +205,11 @@ SHA-256 key of the complete Call-ID. Existing calls must finish using the old
 helper so their old firewall tables are removed before upgrade. Keep both
 helper files with the matching application version when rolling back.
 
+The helper requires `flock` from util-linux. It serializes rule changes, active
+markers and forwarding updates under `.hook.lock` in the active-call directory.
+The kernel releases the lock when the helper exits. Operator notifications have
+a two-second timeout so an unavailable WebUI cannot hold up subsequent hooks.
+
 Install the unit and start the service:
 
 ```bash

@@ -147,6 +147,8 @@ export class PppdSupervisor extends EventEmitter {
       notifyScript: this.notifyScript,
       callId
     });
+    let resolveExit;
+    session.exited = new Promise(resolve => { resolveExit = resolve; });
 
     // pppd has no command-line option to select a secrets file; it always
     // reads /etc/ppp/{chap,pap}-secrets. Render the per-call credentials there
@@ -178,11 +180,13 @@ export class PppdSupervisor extends EventEmitter {
       }
     });
     child.on('error', (error) => {
+      if (!child.pid) resolveExit(); // Spawn failure has no process to await.
       if (this.sessions.get(callId) !== session) return;
       session.lastError = error.message;
       this.acceptEvent(callId, { state: 'failed', error: error.message });
     });
     child.on('exit', (code, signal) => {
+      resolveExit();
       // A stopped process may exit after a replacement has reused its Call-ID.
       if (this.sessions.get(callId) !== session) {
         this.removeSessionFiles(session);
@@ -207,6 +211,10 @@ export class PppdSupervisor extends EventEmitter {
     onEvent?.(this.snapshot(callId));
     session.onEvent = onEvent;
     return this.snapshot(callId);
+  }
+
+  whenExited(callId) {
+    return this.sessions.get(callId)?.exited ?? null;
   }
 
   stop(callId) {

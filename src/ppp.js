@@ -315,9 +315,11 @@ export class PppSessionController {
     this.egressPolicy = egressPolicy;
     this.pppdSupervisor = pppdSupervisor;
     this.sessions = new Map();
+    this.terminating = new Set();
   }
 
   begin(callId) {
+    if (this.terminating.has(callId)) throw new Error('PPP call is still terminating');
     const session = {
       callId,
       state: 'awaiting-auth',
@@ -360,8 +362,17 @@ export class PppSessionController {
       return false;
     }
 
+    const exited = session.exited ?? this.pppdSupervisor?.whenExited?.(callId);
+    if (exited) this.terminating.add(callId);
     this.stopPppd(callId);
-    this.addressPool.release(callId);
+    if (exited) {
+      exited.then(() => {
+        this.addressPool.release(callId);
+        this.terminating.delete(callId);
+      });
+    } else {
+      this.addressPool.release(callId);
+    }
     this.sessions.delete(callId);
     return true;
   }
@@ -387,6 +398,7 @@ export class PppSessionController {
       }
     });
     session.egressDescriptor = session.pppd?.egressDescriptorPath ?? null;
+    session.exited = this.pppdSupervisor.whenExited?.(callId) ?? null;
     return true;
   }
 

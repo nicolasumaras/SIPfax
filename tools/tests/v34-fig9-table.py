@@ -21,7 +21,7 @@ for v in range(4):
         assert (bits[0]<<2 | bits[1]<<1 | bits[2]) == labels[v][u]
 source = (root/'vendor/linmodem/v34fig9.c').read_text()
 rows = [tuple(map(int, m)) for m in re.findall(r'\{\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\}', source)]
-blocks = gen.build('x0', 1)
+blocks = gen.build('x0')
 assert len(rows) == len(set(rows)) == 256
 assert rows == [row for block in range(32) for row in blocks[block]]
 header = (root/'vendor/linmodem/v34priv.h').read_bytes().decode('latin1')

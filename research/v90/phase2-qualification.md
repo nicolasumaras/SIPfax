@@ -482,3 +482,31 @@ Evidence: `work/v34-cma-candidate-evidence/fig9-before-table.log`,
 `fig9-restored-audit.json`, `fig9-default-regression.log`. A Figure-9 B1 reference
 still gives only 0.103 held-out explained power in the bounded capture/channel
 comparison (`b1-fig9-channel-audit.json`), not a valid alignment.
+
+### Corrected-label branch halves derived from modulation geometry
+
+The restored Figure-9 table still misclassified about half of clean emitted
+branches. The former generator chose branch halves using a rotation heuristic.
+From clause 9.6.1, Z1=Z0+2*I0+U0 mod 4, while base constellation coordinates are
+both 1 mod 4. Thus the correct half is directly
+`U0=(u0 XOR v0 XOR u1 XOR v1)&1` in the table's coordinate-coset representation.
+The revised generator uses that parity with the Figure-9/Table-13 transition.
+It reproduces all 32 original-label table blocks and matches all 16000 recorded
+corrected-label encoder branch tuples. The old rot=1 construction matched 7947.
+
+After regeneration, both original and corrected-label clean traceback states
+match encoder states exactly after the 29-symbol decoder delay (checked after
+initial transient). Corrected-label bit agreement over the whole scored runs
+is 99.6–99.9% across 7200/16800/33600 and shaping on/off. The remaining errors
+are confined to startup; with expanded shaping, no errors remain after two
+280 ms superframes over 63033/147078/181184 subsequent bits respectively.
+This is symbol-level decoder evidence, not successful startup/audio/PPP.
+`tools/tests/v34-fig9-state.py` preserves that distinction and runs in CI.
+An initial fixed 10000-bit settling cutoff failed at 33600; the check now uses
+the protocol-duration cutoff of two superframes and reports all startup errors.
+
+Artifacts: `fig9-state-before-parity-audit.json` (recorded pre-change tool
+results), `fig9-state-after-parity-audit.json`, `fig9-emitted-membership.json`,
+and `fig9-parity-audit.json` under `work/v34-cma-candidate-evidence/`.
+The default labeling remains unchanged; no deployment or live call performed.
+Next: B1 and initial superframe alignment, rather than settled trellis tracking.

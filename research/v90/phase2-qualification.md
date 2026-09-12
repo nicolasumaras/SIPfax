@@ -2078,3 +2078,26 @@ the new CI test requests address/undefined sanitizers. This is a byte-framing fi
 not proof of correct V34 payload reception or V42 interoperability. Hardware
 qualification of this change remains pending; the deployed V90 release is unchanged.
 Wire framing reference: https://onlinedocs.microchip.com/oxy/GUID-173AD72D-41FE-4760-A93C-7078A02BD908-en-US-7.1.1/GUID-7F09657C-791A-43DC-9238-56BDE5EC97F7.html
+
+The exact c5962e0 CT105 build hashes to
+1f416c6f2820d05dd5a4c16353a633e0b5dbf5b50b3af4ddea82c1d95827c2c3.
+Target ASan/UBSan serial vectors, MP/reset, readiness, both acquisition-buffer
+windows and dynamic-loader checks pass (work/v34-serial-c5962e0-target-validation.log).
+Hardware attempt ff104004-8baa-4c0b-83d6-390054bbc94e fails with error678 after
+four B1 entries. The PTY opens and PPP enters starting, without IPCP. Evidence:
+work/v34-serial-hardware-1789254171.{json,call.log,native-audit.json}.
+This call does not isolate bit-framing effects from training variability.
+
+Restoration attempt d117b5be-a8b3-44c7-a4ab-37804c184fd2 passes at49296bit/s,
+expected public HTTP checksum and zero six-category RAS errors. The final audit
+verifies25 managed files, qualified native hash, guard enabled, trial flags removed
+and idle endpoints (work/v34-serial-hardware-final-audit.json).
+
+The next protocol integration gap is explicit in source: v8.c unconditionally
+advertises V8_DATA_LAPM, while live V34 assigns raw serial callbacks. V90 uses
+v90lapmlink.c for error-control negotiation and framed DTE octets. V34 needs a
+matching error-control path, with link readiness, negotiated bit rates, retraining
+and bounded FIFO handling tested before promotion. This source mismatch is not
+proof of the latest error678's cause; PHY acquisition remains variable. Notebook
+health still reports DialUpLab1.1.1.0, so genuine bulk-upload acceptance is pending.
+At head c5962e0, PR29 application CI passes and native CI remains in progress.

@@ -3,6 +3,7 @@
 import argparse
 import ctypes as C
 import itertools
+import json
 import math
 import os
 from pathlib import Path
@@ -17,12 +18,33 @@ parser.add_argument('--low-carrier',action='store_true')
 parser.add_argument('--seed',type=int,default=None)
 parser.add_argument('--odp-prefix',action='store_true',help='Precede PPP with 1.2 s of V.42 detection')
 parser.add_argument('--odp-idle-ms',type=int,default=4500,help='Idle after detection (0..5000 ms)')
+parser.add_argument('--erase-sample', type=int, default=4000)
+parser.add_argument('--erase-samples', type=int, default=0, help='Replace a bounded PCM interval with silence; require later valid frames')
 parser.add_argument('--keep-going',action='store_true',help='Report every frame mismatch in the timing matrix, then fail')
 options,_=parser.parse_known_args()
+if options.erase_samples < 0 or options.erase_sample < 0:parser.error('Erasure offsets and length must be nonnegative')
 if not 0<=options.odp_idle_ms<=5000:parser.error('ODP idle must be 0..5000 ms')
 baud=options.symbol_rate
 failures=[]
 def verify_frames(received, fraction, ppm, mode):
+    if options.erase_samples:
+        # Lost data may erase a frame, but cannot fabricate or reorder a valid one.
+        cursor = 0
+        matched = []
+        for packet in received:
+            while cursor < len(expected) and expected[cursor] != packet:cursor += 1
+            assert cursor < len(expected), 'Unexpected or out-of-order decoded frame'
+            matched.append(cursor)
+            cursor += 1
+        print(json.dumps({'erasureSamples': options.erase_samples, 'erasureStart': options.erase_sample,
+                          'phase': fraction, 'ppm': ppm, 'mode': mode,
+                          'received': len(received), 'expected': len(expected),
+                          'matchedExpectedIndices': matched,
+                          'finalFramesRecovered': received[-3:] == expected[-3:]}), flush=True)
+        assert len(received) >= len(expected)//2, ('insufficient recovered frames',len(received),len(expected))
+        assert received[-3:] == expected[-3:], 'Final frames did not recover'
+        print('PASS erasure:', fraction, ppm, mode, len(received), 'of',len(expected),'frames; final three exact')
+        return
     if received==expected:return
     result={'phase':fraction,'ppm':ppm,'mode':mode,'frames':len(received),
             'expected':len(expected),'first_mismatch':next((i for i,(a,b) in
@@ -220,6 +242,10 @@ unsigned phase4_odp(V90Phase4*s){return s->upstream.odp_seen;}
         pcm=wave.astype(np.int16)
         if '--pcmu' in sys.argv:
             pcm=np.fromiter((ulaw_decode(ulaw_encode(int(x))) for x in pcm),dtype=np.int16)
+        if options.erase_samples:
+            assert options.erase_sample > 1000, 'Keep erasure after initial B1'
+            assert options.erase_sample+options.erase_samples+4000 < len(pcm), 'Need a post-erasure recovery interval'
+            pcm[options.erase_sample:options.erase_sample+options.erase_samples]=0
         received=[]
         cb=cbtype(lambda _,p,n:received.append(bytes(p[:n])))
         s=lib.create(cb)
@@ -246,4 +272,7 @@ if failures:
     import json
     print('FAIL: '+json.dumps(failures),file=sys.stderr)
     sys.exit(1)
-print('PASS: ODP prefix '+str(options.odp_prefix)+'; PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' bit/s at '+str(baud)+' symbols/s PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')
+if options.erase_samples:
+    print('PASS: synthetic erasure recovery with ordered valid frames and exact final frames; not LAPM or hardware qualification')
+else:
+    print('PASS: ODP prefix '+str(options.odp_prefix)+'; PCMU '+str('--pcmu' in sys.argv)+'; clock drift '+str(clock_drift)+'; '+str(rate)+' bit/s at '+str(baud)+' symbols/s PCM to exact PPP frames, B1, fractional timing, carrier offset/noise, CRC rejection and duplicate filtering')

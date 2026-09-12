@@ -641,3 +641,37 @@ were all zero. The independently inspected report accepted=true is
 work/v90-ppp-lifecycle-abb6c464-16fc-4f96-ac23-3ed2aa8beb46.json.
 This qualifies the lifecycle fix on one real call, not impairment recovery,
 V.34 fallback, bulk upload or concurrent hardware operation.
+
+## Erasure recovery isolated to feedback adaptation (2026-09-12)
+
+The failed hardware recording contains exactly one zero run of 160 samples at
+sample 274880 (34.36 s), matching the injected 20 ms loss. RTP continuity
+preserved sample time. A rejected mapping frame invokes qam_bits(NULL), which
+invalidates LAPM candidate selection; this alone does not explain persistent
+failure after the erasure.
+
+Added optional --erase-sample/--erase-samples to the independent upstream PCM
+harness. It retains CRC, ordering and exact final-frame checks, while allowing
+frames spanning a gap to be lost. The default no-loss acceptance remains exact.
+At 28,800 bit/s, PCMU, +/-100 ppm, the no-loss control passes. Injecting 160
+zero samples at sample4000 fails at the first -100ppm case: only expected
+frames0..7 of24 arrive, and the final frames do not recover. An 80-sample gap
+also fails with8/24. This reproduces a physical receiver failure independently
+of LAPM reselection. The failing erasure mode is a diagnostic, not a green CI
+gate or evidence of qualification.
+
+A temporary source control disables provisional equalizer feedback only while
+symbols1450..1899 are processed, bracketing the known injected gap. No-loss
+control passes; the 20ms erasure recovers23/24 frames (only frame8 lost) at both
++/-100ppm through direct and delayed-E paths, with all final frames exact.
+Disabling feedback for the entire signal fails even without loss (14/24), so
+permanent disablement is not a fix. The window uses known fault timing and
+is not an automatic receiver solution. Next implement a signal-derived
+adaptation guard with sufficient history coverage, then test shifted erasures,
+clean controls, captured audio and hardware LAPM recovery.
+
+Evidence: work/v90-controlled-loss-d08c3a08-evidence/zero-runs.json and preserved
+synthetic/control logs; work/v90_erasure_feedback_control.py and
+work/v90_erasure_feedback_window_control.py with separate source copies/logs
+under work/v90-erasure-feedback[-window]-evidence. Production remains
+application1dc5cb2/nativecc64526; no native changes were deployed.

@@ -1002,11 +1002,8 @@ static int trellis_next_state(int conv_nb_states, int conv_reg, int trans)
 static int fig9_s1(int x0, int y0)
 {
     static int fix = -1;
-    /* DEFAULT 0 until trellis_trans_16 is rederived: flipping the labelling alone drops the
-       loopback from 99.9% to 70.3%, because v34table.c's static branch table was generated
-       under the OLD labelling and the relabelling does NOT induce a permutation of `trans`
-       (checked exhaustively over all 64 subset-label pairs), so the table cannot be permuted
-       into place - it has to be regenerated from the corrected labelling. */
+    /* Preserve the qualified default while Figure 9 interoperability is tested.
+       The corrected branch table is explicitly linked from v34fig9.c. */
     if (fix < 0) { char *e = getenv("SIPFAX_FIG9"); fix = e ? atoi(e) : 0; }
     return fix ? x0 : y0;
 }

@@ -41,7 +41,9 @@ if ! id sipfax >/dev/null 2>&1; then
   useradd --system --home-dir /opt/sipfax --shell /usr/sbin/nologin sipfax
 fi
 
-install -d -m 0750 -o root -g sipfax /etc/sipfax
+if [[ ! -d /etc/sipfax ]]; then
+  install -d -m 0750 -o root -g sipfax /etc/sipfax
+fi
 if [[ ! -f /etc/sipfax/sipfax.env ]]; then
   install -m 0640 -o root -g sipfax "${repo_root}/deploy/sipfax.env.example" /etc/sipfax/sipfax.env
   if [[ "$engine" == linmodem ]]; then

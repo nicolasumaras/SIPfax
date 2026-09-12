@@ -2273,3 +2273,35 @@ Restoration attemptf1a8caac-b1e2-41e3-ab07-3d0dc43d2c18 passes49296bit/s,
 expected559-byte HTTP checksum, six zero RAS error counters and cleanup.
 work/v34-zero-clock-hardware-final-audit.json verifies all25 managed files,
 qualified native hash, guard enabled, trial flags removed and idle endpoints.
+
+### Failed zero-seed call: B1 interrupted by an input signal gap
+
+Replay66406 with matching zero seed reproduces poor initial bits despite
+RMS0.152. All decoded TX MP frames advertise zero precoder coefficients.
+On the first24-second crop, automatic alignment and all eight manual2D symbol
+offsets (with automatic realignment disabled) fail to recover ODP or select a
+stream; each loses more than36000 bit positions. This does not support a simple
+mapping-frame entry-offset fix. Evidence:
+work/v34-zero-66406-replay.json and work/v34-zero-66406-alignment-contrast.json.
+
+A complex scalar fit of the120 received symbols at E to the generated12k,
+16-state, minimum-shaping B1 reference explains99.852% of66046's energy but
+only64.336% of66406's. Searching offsets-256..256 symbols finds the best fit
+at offset0 for both;32/64-state references fit worse. The reference self-fit is
+1.0. There is no CFO search in this comparison, so inspect its short segments:
+all six20-symbol windows of66046 explain>99.8%; the first three windows of66406
+explain99.72..99.85%, then the fit and amplitude collapse. Evidence:
+work/v34-b1-66046-66406-boundary-comparison.json and
+work/v34-b1-66046-66406-segments.json.
+
+Direct10ms input-energy windows confirm a real gap in the captured receiver
+input, rather than merely a phase-fit error. Raw RX RMS is1708.5 at17.120s,
+1515.2 at17.130s,54.6 at17.140s,then21.7..24.2 through17.190s; it recovers
+to850.8 at17.200s and1780.5 at17.210s. Post-echo input shows the same gap.
+TX RMS stays above2100 throughout. The first B1 symbols are therefore received
+correctly before an approximately60ms input interruption. These aggregate levels
+do not identify whether the caller deliberately stopped/retrained or the ATA/RTP
+path introduced the gap. Next correlate that boundary with transport evidence
+and caller/server training events before changing the receiver's bit alignment.
+Evidence: work/v34-zero-66406-b1-audio-levels.json. All raw audio and receiver
+traces remain on CT105; these analyses made no production changes.

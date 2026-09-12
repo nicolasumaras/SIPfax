@@ -888,3 +888,32 @@ It includes the newer V.34 changes, so it is a different qualification candidate
 Its hardware trial was started with automatic production restoration; a start
 is not a pass. The earlier failure remains a release blocker until stronger
 recovery and endurance evidence resolves it.
+
+### Captured-audio recovery comparison
+
+The failed candidate's paired audio has no zero-filled run of at least 16 samples
+(2 ms) after 30 seconds, and both directions retain energy around the two
+renegotiations. This does not exclude other network or analogue impairments.
+Offline echo reconstruction reproduces the live delay of 1428 samples and lock
+at sample 96480.
+
+Fresh upstream receivers on cropped post-echo input find B1 scores matching the
+live log: 0.963553 for the first renegotiation and 0.952891 for the second.
+The second crop contains CRC-valid LAPM frames on alternative lanes. With the
+old selector seeded to lane 1, the replay delivers no valid frames and never
+selects a replacement. Immediate global invalidation selects lane 8 and delivers
+19 valid frames. It later loses selection again; this supports the stale-lane
+mechanism but is not sustained recovery or a reconstruction of all live state.
+Fresh crop origins also change lane numbering relative to live operation.
+
+Evidence: `work/v90_failed_retrain_lanes.{c,py}`,
+`work/v90_failed_retrain_selector.{c,py}`, and the audio-gap, postecho,
+lane-replay and selector-replay audits in
+`work/v90-guard-endurance-failure-evidence/`.
+
+CI for recovery commit `9c493c3`, run `34710948313`, completed successfully.
+Hardware endurance is a separate gate and remains pending during the current
+trial. Its first observed renegotiation at phase time 364.350 seconds performed
+immediate invalidation and resumed LAPM on candidate 0. An interim independent
+checksum/counter audit at 1317.964 seconds covers 355 successful probes; this
+partial result does not qualify the requested one-hour session.

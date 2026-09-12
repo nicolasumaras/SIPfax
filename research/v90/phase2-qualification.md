@@ -1130,3 +1130,58 @@ qualified native binary; this source fix has not been deployed or hardware
 qualified. The deployed application source `9e0f242` has now completed CI run
 `34715252317` successfully in both application and native jobs, superseding
 the previous pending-CI observation.
+
+
+## Fixed shell candidate tested on hardware; V.34 still fails (2026-09-12)
+
+Committed native source `fafcc3c` was built in `/tmp/v34-shell-fafcc3c` on
+CT105. The source archive SHA-256 was
+`7397e34e08c67f253bfff90f2793fdecbeaf04ed45ecd04f3f36c37468a2b9d5`;
+the target binary SHA-256 was
+`0833b8aeee1f925b675bd5f4b32d7cc12ea89a90eee2b024b154e54a79fac973`.
+Target loader preflight, shell sanitizer, and expanded B1 generation checks
+passed before either hardware trial.
+
+Both calls disabled V.90 and requested V.34 CA/AC caps of 12000 bit/s with
+minimum shaping. The first used the default legacy receiver; the comparison
+added `SIPFAX_RX_CMA=1` and `SIPFAX_RX_DBG=1`, matching the earlier experimental
+CMA setup. Debug mode is part of this experimental configuration and is not
+claimed to be behavior-neutral.
+
+- Default receiver: attempt `50d79b71-d4e3-4f93-b7ef-f44ed55fea17` failed with
+  Windows error 678. The log shows repeated Phase 2/3 attempts and no MP/E
+  data transition. This call did not exercise the repaired shell endpoint.
+- CMA receiver: attempt `3d5a15b8-a5b9-4fe6-a7b3-4c76b38e73ba` also failed
+  with error 678. It reached MP-prime, transmitted E/B1, and received E.
+  Both TX and RX logged R=12000, K=16, M=4, L=16. The former encoder abort
+  did not occur. Data acquisition reported lattice RMS 0.564 (the diagnostic
+  labels roughly 0.577 as no lock), then the caller retrained. No PPP session
+  was established, and no V.34 interoperability pass is claimed.
+
+Each trial restored the qualified native binary and removed its temporary
+systemd override. Each restoration was followed by a passing V.90 hardware
+call at 49,296 bit/s: `ca89f202-137c-48dc-9c47-7c83140e7955` and
+`399bf136-fe89-47f3-8455-7304092cb202`. An independent audit verified the
+expected HTTP checksum/PPP source, zero RAS errors, clean teardown, all 25
+production file hashes, enabled erasure guard, no trial override, and final
+server/notebook idle state.
+
+Procedures/evidence: `work/v34_shell_hardware_trial.py`,
+`work/v34_shell_cma_hardware_trial.py`,
+`work/v34-shell-hardware-1789243814.*`,
+`work/v34-shell-cma-hardware-1789244020.*`,
+`work/v34-shell-fafcc3c-target.log`, and
+`work/v34-shell-hardware-final-audit.json`.
+
+Raw RX/TX captures remain on CT105 under `/var/log/sipfax/`, with PID suffixes
+58123 (legacy; 880640 bytes each) and 58408 (CMA; 303104 bytes each).
+Automatic approval review rejected exporting these recordings to the local
+workspace because they could contain sensitive communications. No alternate
+export was attempted. Only remote-computed sizes/timestamps/SHA-256 metadata
+was saved locally in `work/v34-shell-remote-audio-manifest.json`; further audio
+analysis can run on CT105. This restriction does not block source development.
+
+The remaining fallback investigation concerns legacy training and CMA data
+acquisition; repairing the shell endpoint alone does not solve either. The
+qualified application/native baseline remains installed, and DialUpLab still
+reported version 1.1.1.0 before the trials.

@@ -609,3 +609,35 @@ The initial run without Node on PATH/socket permissions failed and was rerun
 with those prerequisites. This change is not deployed. It removes false JSON
 errors; the live missing lifecycle notification (state remains starting despite
 PPP connectivity) still requires correction and hardware verification.
+
+## PPP hook lifecycle wiring (2026-09-12)
+
+The existing ip-up/down routing helper already posts events to /ppp/events,
+but the operator endpoint only retained history; it never notified the pppd
+supervisor. Commit 1dc5cb2 connects these events to session state with a random
+per-process token in the root-readable lease descriptor and an HTTP header.
+The supervisor checks the current token, event type, PPP interface and assigned
+addresses. A token from a replaced process cannot update its successor. Tokens
+are omitted from public history and supervisor diagnostics.
+
+All 86 application tests pass, including a real HTTP regression for valid,
+missing, wrong, stale and wrong-address events, plus split pppd log handling.
+The application changes from deployed 31f57b9 are exactly four files: index,
+operator, pppd-supervisor and egress helper. They were applied to CT105, including
+the installed /usr/lib/sipfax helper copy, with startup-failure rollback.
+Backup: /opt/sipfax/releases/pre-1dc5cb2-lifecycle.tar.gz, SHA256
+16924998b42cc3bc1bd8dffc25197ca7f5f6df20669ef992ae23925874d3991c.
+Native SHA remains
+65bd6c4855c78828e0c0d2fca1fb6177cb4496a016e5c042f389092be32cea15.
+The first startup HTTP check saw connection refused; the bounded retry succeeded.
+Deployment script, overlay archive and hash audit are under work/ with the
+sipfax-lifecycle / deploy_ppp_lifecycle names. Hardware verification follows.
+
+Hardware attempt abb6c464-16fc-4f96-ac23-3ed2aa8beb46 passed: 49,296 bps,
+559-byte public HTTP response with the expected ff67a9d7...871a299d checksum,
+zero RAS errors, supervisor and controller ipcp-open, interface ppp0, and no
+false JSON error. After disconnect, active sessions, leases and media lines
+were all zero. The independently inspected report accepted=true is
+work/v90-ppp-lifecycle-abb6c464-16fc-4f96-ac23-3ed2aa8beb46.json.
+This qualifies the lifecycle fix on one real call, not impairment recovery,
+V.34 fallback, bulk upload or concurrent hardware operation.

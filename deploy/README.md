@@ -1,4 +1,35 @@
-# SIPfax Dedicated VM First Deploy
+# SIPfax Deployment
+
+The active V.90 lab uses Proxmox CT105 at `192.168.1.25`, managed through
+`root@192.168.1.20`; FreePBX is at `192.168.1.29`. The VM133 instructions
+below describe an earlier deployment and must not be used to identify the
+current target. Current qualification evidence is in
+[`research/v90/phase2-qualification.md`](../research/v90/phase2-qualification.md).
+
+## Committed source bundles
+
+Create a source bundle from an explicit reviewed commit:
+
+```bash
+python3 tools/package-source.py --revision COMMIT_SHA --output /tmp/sipfax-release
+```
+
+The command archives committed files, excludes untracked files and local edits,
+and writes a JSON manifest with the commit, Git tree, archive size, and SHA-256.
+Gzip headers omit output filenames and wall-clock timestamps. With the same
+Git/Python compression toolchain, separate checkouts produce byte-identical
+archives. Do not use local Git archive attribute overrides for release builds.
+The command refuses to overwrite an artifact with different contents.
+
+Verify the archive SHA-256 against the manifest after transferring it. Extract
+into a separate release directory, build `vendor/linmodem` on the target host,
+and run the installer preflight there. This establishes source identity; it
+does not establish bit-for-bit native binary reproducibility or hardware
+qualification. Record the resulting binary hash and compiler/runtime versions
+in deployment evidence. A source bundle is not authorization to promote a
+candidate before its release gates pass.
+
+## Historical dedicated VM first deploy
 
 This runbook bootstraps SIPfax on a new dedicated Debian VM attached to the
 Proxmox `vmbr0` bridge. It follows the LKMA-179 deployment decision: SIPfax runs

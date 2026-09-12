@@ -22,6 +22,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends nftables iproute2
           sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
+      - name: Test reproducible source packaging
+        run: python3 -m unittest discover -s tools/tests -p test_package_source.py
       - name: Test RTP capture audit
         run: python3 -m unittest discover -s tools/tests -p test_audit_rtp.py
       - name: Test PPP bulk upload receiver
@@ -38,7 +40,7 @@ jobs:
       - name: Install native test dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
       - name: Build native modem
-        run: make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+        run: make -C vendor/linmodem
       - name: Verify V34 Figure 9 labels and branch table
         run: python3 tools/tests/v34-fig9-table.py
       - name: Test V34 corrected-label traceback and settled decoding

@@ -1378,3 +1378,32 @@ Local target evidence: `work/v34-table11-411f88b-target-validation.log`.
 These are offline checks on the target host. Full CI and physical V.34
 acquisition/PPP remain required. Production remains application `9e0f242`
 with the qualified `9c493c3` native binary and persistent erasure guard.
+
+
+## Corrected Table 11 hardware trial and restoration (2026-09-12)
+
+Exact CT105 candidate `411f88b` (native SHA256 `5148293e0faa98fead8328a05307ea5d3ca5472a5b83a400abe48bf844a535ad`)
+was tried with the previous V.34-only 12000-bit/s caps, minimum shaping,
+CMA receiver and RX debug settings. Attempt
+`a13ea357-dcb9-47ea-ae55-fdfb748242d1` failed with XP error678. MP-prime,
+E and B1 were reached. The receive configuration was12000 bit/s,64-state
+with K16/M4/L16. Lattice RMS remained0.564, near the diagnostic no-lock
+reference0.577. This is not successful data acquisition or PPP.
+The caller requested nonlinear encoding in this attempt; the current
+clean-channel regression explicitly excludes that path. This observation
+does not establish that nonlinear encoding caused the failure.
+
+The exact qualified native was restored and the temporary trial settings
+removed. Restoration call `1cec0a46-a1fc-49f7-94ec-59537b59d036` passed at
+49296 bit/s, with a559-byte HTTP response matching the expected SHA256,
+PPP source10.64.0.2, all six RAS error counters zero, ipcp-open lifecycle,
+and complete cleanup. An independent final audit verified all25 managed
+release files, the persistent erasure guard, and idle notebook/server state.
+Production remains application `9e0f242` and native `9c493c3`.
+
+Local evidence: `work/v34-table11-cma-hardware-1789246456.{json,call.log,native.log}`,
+`work/v90-ppp-lifecycle-1cec0a46-a1fc-49f7-94ec-59537b59d036.json`, and
+`work/v34-table11-hardware-final-audit.json`. Raw call audio remains on CT105.
+CI run34718354507 at `39a21df` has passed the previously failing B1 gate,
+low-rate framing, Table11/precoded-link and startup checks; the complete
+native job was still running when this hardware record was written.

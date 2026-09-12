@@ -1706,3 +1706,39 @@ The preceding directional-shaping commit 9f46376 also passed the exact target bu
 and loader check on CT105: native SHA256
 e701fc13c533c38d68529a391b2a31e796a29c80d51b34d669990cd7ecd918d0.
 Evidence: work/v34-shaping-9f46376-target-validation.log.
+
+
+### Corrected negotiation hardware trial 315e304
+
+Exact CT105 build passed the MP, trellis, shaping, snapshot/reset, peer-role and
+generated-audio gates. Native SHA256:
+ac57c9954d1a5c223e0ffe63817ea8fde8949a153aebf845d9910558044bedce.
+Evidence: work/v34-stable-315e304-target-validation.log.
+
+V.34-only attempt 07bb1db8-1646-417c-88db-bb02816f9e88 still failed with Windows
+error678. The caller's CRC-valid MP-prime requested ca33600/ac31200 and trellis
+code1. The server applied the intended negotiated 12000 rate in each direction,
+32-state TX trellis with the peer's expanded shaping (L20), and its own advertised
+16-state/minimum-shaping RX (L16). The first MP froze zero precoder coefficients.
+One TX E-to-B1 event occurred; no watchdog restart was logged. Acquisition lattice
+RMS was0.232 (previous trials approximately0.56), clock seed+4.1ppm. However early
+descrambled bits were only59.2% ones at600 and58.8% at2400, so correct B1/payload
+decoding remains unproven. This is an improved diagnostic metric, not V.34 success.
+The next analysis should inspect acquisition, timing and mapping-frame alignment
+with this corrected negotiation. Raw audio and full receiver traces remain on CT105.
+
+Qualified native e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea
+was restored, with the temporary drop-in removed and erasure guard enabled.
+Restoration call117e57f3-c860-4133-a7ce-c489b300e8f2 passed at49296 bit/s: PPP
+ipcp-open,559-byte HTTP probe SHA256
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d,
+source10.64.0.2, all six RAS error counters zero before/after, and clean disconnect.
+All25 installer-managed files matched the qualified release and the notebook/server
+were idle afterward.
+
+Evidence: work/v34-stable-cma-hardware-1789250239.{json,call.log,native-audit.json},
+work/v34-stable-hardware-diagnostics.json, work/v34-stable-hardware-final-audit.json,
+work/v34-stable-restoration-call.log and
+work/v90-ppp-lifecycle-117e57f3-c860-4133-a7ce-c489b300e8f2.json.
+DialUpLab still reports1.1.1.0; actual bulk upload and multiple physical calls
+remain unqualified. PR29 remains draft.

@@ -917,3 +917,38 @@ trial. Its first observed renegotiation at phase time 364.350 seconds performed
 immediate invalidation and resumed LAPM on candidate 0. An interim independent
 checksum/counter audit at 1317.964 seconds covers 355 successful probes; this
 partial result does not qualify the requested one-hour session.
+
+## Recovery candidate one-hour hardware PASS (2026-09-12)
+
+Full native `9c493c3fb06ffe4c4e722ce8cc5dbd535af8bac5`, guard enabled,
+SHA-256 `e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea`,
+completed 3605.869 seconds on attempt
+`13e84b91-8a75-47e4-b7ae-153d66ae37c2`. Independent verification found:
+
+- 441 checksum-valid 32 KiB downloads: 14,450,688 payload bytes.
+- 441 verified 1 KiB URL-carried uploads: 451,584 bytes, not bulk POST.
+- 89 public internet checks and successful final receiver verification.
+- All six RAS error counters zero, consistent connection identity and duration.
+- One natural rate renegotiation, immediate decoder invalidation, and successful
+  LAPM reselection. Protocol restarts remained zero until final disconnection;
+  the final disconnected state records one restart. Raw HDLC CRC failures were
+  present and recovered; zero RAS errors does not mean every HDLC frame was valid.
+- PPP capture contains 31,552 packets on Linux ARPHRD_PPP interface index 163,
+  spanning 3607.566 seconds and including both fixture and public internet
+  traffic. Complete pcap records and its retained SHA-256 were verified.
+- After teardown, no notebook connections, SIP sessions, PPP leases or media
+  lines remained. Independent SSH verification confirmed the original native
+  SHA-256 `65bd6c4855c78828e0c0d2fca1fb6177cb4496a016e5c042f389092be32cea15`
+  was restored and the temporary guard override removed.
+
+Evidence: `work/v90-reset-guard-endurance-1789237479.{json,native.log,transfer.log}`,
+`work/v90-sustained-13e84b91-8a75-47e4-b7ae-153d66ae37c2-audit.json`,
+`work/v90-reset-guard-endurance-{restoration,route}-audit.json`, and
+`work/v90-reset-guard-endurance-ppp.pcap` (SHA-256
+`d72467f70449ce29305efafec8bb6ba472729715c5e2e5839bc921291206c813`).
+
+This establishes one-hour transfer integrity and observed natural recovery for
+this exact candidate. It does not replace repeated-call qualification of this
+new build, broader controlled impairments, genuine bulk uploads, V.34 hardware
+fallback, full release deployment/rollback or simultaneous hardware calls.
+The failed predecessor run remains retained.

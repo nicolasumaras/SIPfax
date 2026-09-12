@@ -9,6 +9,12 @@ import argparse,json,os,subprocess,tempfile
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__);p.add_argument('binary',type=Path);p.add_argument('--receive-only',action='store_true');a=p.parse_args();binary=a.binary.resolve()
 base={k:v for k,v in os.environ.items() if not k.startswith('SIPFAX_')}
+e=dict(base,SIPFAX_MPTEST_RUN='1',SIPFAX_MPTEST_RX_TRELLIS='1')
+r=subprocess.run([str(binary)],env=e,capture_output=True,text=True,check=True,timeout=10)
+selections=[tuple(map(int,line.split())) for line in r.stdout.splitlines()]
+assert len(selections)==12, 'missing receiver trellis selection cases'
+for advertised,peer,states in selections:
+ assert states==(16,32,64)[peer if advertised<0 else advertised], (advertised,peer,states)
 with tempfile.TemporaryDirectory() as tmp:
  d=Path(tmp);frames=d/'frames';symbols=d/'symbols'
  if not a.receive_only:

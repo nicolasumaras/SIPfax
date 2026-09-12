@@ -1615,6 +1615,14 @@ static void V34_mod_MP(V34DSPState *s, u8 *buf, int size, int is_16states)
 }
 
 
+/* MP trellis code zero is a valid request for 16 states. The positive
+   advertised rate distinguishes a transmitted MP from an unset bridge. */
+static int v34_rx_trellis_states(const V34DSPState *s)
+{
+    int rt = s->p4_adv_ca > 0 ? s->p4_adv_trel : s->p4_trellis;
+    return rt == 0 ? 16 : rt == 1 ? 32 : 64;
+}
+
 /* send MP sequence. 'type' select its type (0 or 1). 'do_ack' selects
    if it is an acknowledge sequence */
 static void v34_begin_b1(V34DSPState *s)
@@ -5413,9 +5421,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        not the caller's own field - which commands OUR transmitter. They
                        coincided while we mirrored; they will not once SIPFAX_MP_TREL
                        diverges. Bridged from the TX instance's advertisement. */
-                    int rt = s->p4_adv_trel;
-                    if (rt <= 0 && s->p4_trellis >= 0) rt = s->p4_trellis;   /* mirror fallback */
-                    s->conv_nb_states = (rt == 0) ? 16 : (rt == 1) ? 32 : 64;
+                    s->conv_nb_states = v34_rx_trellis_states(s);
                 }
                 {   /* SIPFAX: does the caller precode even though our MP advertises
                        h = 0,0,0? Two comments in this file disagree about that, and it is
@@ -8099,6 +8105,19 @@ void V34_dataloop_test(void)
 
 void V34_mptest(void)
 {
+    if (getenv("SIPFAX_MPTEST_RX_TRELLIS")) {
+        V34DSPState s;
+        memset(&s, 0, sizeof(s));
+        for (int advertised=-1; advertised<3; advertised++) {
+            s.p4_adv_ca = advertised < 0 ? 0 : 5;
+            s.p4_adv_trel = advertised < 0 ? 0 : advertised;
+            for (int peer=0; peer<3; peer++) {
+                s.p4_trellis = peer;
+                printf("%d %d %d\n", advertised, peer, v34_rx_trellis_states(&s));
+            }
+        }
+        return;
+    }
     /* Independent generated-symbol input for MP field-order/CRC tests. */
     const char *input = getenv("SIPFAX_MPTEST_SYMBOLS");
     if (input) {

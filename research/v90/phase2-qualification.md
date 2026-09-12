@@ -1635,3 +1635,28 @@ with the corrected parser. Two additional negotiation concerns remain open:
 MP information changes during an exchange, and the receive trellis fallback
 treats the valid code0 as absent. The peer's shaping request also needs tracing
 through to the transmit configuration. Production has not changed.
+
+
+### Corrected retained MP interpretation and zero-code receiver selection
+
+The exact 0b0a159 target build passed the independent MP, peer-role, and
+generated-audio tests on CT105 without deployment. Its corrected block decoder
+read retained TX capture 59456 as 24000/24000, initially trellis code0 and then
+code1 in MP-prime. Thus the previous 12000/64-state interpretation was wrong;
+old reference searches at those parameters cannot exclude valid data at the
+actual advertised parameters. Evidence: work/v34-mp-0b0a159-target-audit.log.
+The recording stays on CT105.
+
+The live receiver now uses the presence of an advertised rate to distinguish
+an unset advertisement from trellis code0 (valid 16-state mode). Once an
+advertisement exists, its trellis selection takes precedence over the peer's
+request for our transmitter. Without an advertisement, the existing peer
+fallback remains. The MP test exercises all nine advertised/peer combinations
+and three cases without an advertisement, including disagreeing directions.
+All 12 selections and 84 independent MP frame cases pass. Peer-role payloads
+retain zero errors across 2146096 bits; generated audio retains zero errors
+across 93760 settled bits, with 3035 startup errors still reported.
+
+This fixes selection only. Stable MP information throughout the exchange,
+peer shaping propagation, and hardware fallback qualification remain open.
+Production is unchanged.

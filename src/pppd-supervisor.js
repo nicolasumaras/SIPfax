@@ -223,7 +223,8 @@ export class PppdSupervisor extends EventEmitter {
       return false;
     }
 
-    if (session.process && !session.process.killed) {
+    // A failed spawn has no child PID. Never signal its empty process handle.
+    if (session.process?.pid > 0 && !session.process.killed) {
       session.process.kill('SIGTERM');
     }
     this.removeSessionFiles(session);

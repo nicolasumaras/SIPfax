@@ -1928,3 +1928,28 @@ Next remove/gate purely diagnostic exhaustive acquisition scans, distinguish sca
 cost from buffered decoder cost, repeat callback measurements, and verify initial
 B1 state plus the separate failed capture62290. Production remains unchanged and
 SIPFAX_ACQ_REPLAY is still off by default.
+
+
+### Gate exhaustive acquisition audit, c39a0e4
+
+The exhaustive two-dimensional gain/phase diagnostic is now opt-in via
+SIPFAX_ACQ_AUDIT=1. It does not choose receive parameters; the actual acquisition
+fit remains enabled. Generated tests compare audit-on/off bits and source sample
+sequences byte-for-byte for64/2000 windows with replay both off/on. All match and
+retain zero settled generated-audio errors. Baseline generated audio also passes.
+
+Exact CT105 native SHA256:
+02398ed7e7eace2d161f7c45e28e3282e6e2165136c92372b03f50f70bf1e450.
+Three retained61604 runs per window preserve every decoded bit versus78e0ecc.
+For64 symbols, peaks13.305/13.107/13.623ms, means approximately0.275ms, and zero
+20ms deadline overruns over948 callbacks each. The worst callback moves to input
+sample118560, earlier than the previous acquisition callback125600. For2000,
+peaks185.967/185.424/184.859ms and one overrun per run remain at130080. The scan
+was a material part of the547ms spike, but long buffered acquisition is still
+unsuitable for a live callback. Use only the short-window candidate in subsequent
+controlled hardware work; these offline timings do not prove live scheduling.
+
+Evidence: work/v34-audit-c39a0e4-target-timing.log. The acquisition replay option
+remains off by default; production has not changed. Next replay the separate
+failed capture62290 with the short-window candidate and resolve/measure initial
+B1 errors, then perform a controlled call with qualified V.90 restoration.

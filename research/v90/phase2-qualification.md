@@ -760,3 +760,34 @@ Final remote check confirmed qualified native SHA65bd6c48...3cea15, no guard
 override and only the original inet filter firewall table. The isolated guard
 is not the permanent deployed native. XP API still reports1.1.1.0, so bulk POST
 qualification remains pending its update.
+
+## Current full native passes startup and burst-loss controls (2026-09-12)
+
+Built complete native source f732aa02631e231db833b3e2aefb4242278f9e87 inside
+CT105, including the V.34 four-bit buffer fix. Dynamic-loader check passed.
+Binary SHA58365ad1823ed7821561adb09b7de2778aa91330edaaff1e832696927e229a77;
+build/source manifest under work/v90-erasure-guard-evidence/full-f732aa02631e*.
+
+Guard-disabled startup control bbd45c7e-b317-43b5-b72a-91e61670c10d passed at
+49,296bps with exact HTTP response, ipcp-open/ppp0 and clean resource teardown.
+Guard-enabled three-packet test1df82400-983f-40c5-94de-3023a3e45fad also passed:
+exactly3 RTP packets dropped, same PPP connection, three subsequent exact HTTP
+responses, all six RAS error counters zero and zero sessions/leases/media lines
+after teardown. Both reports accepted=true were independently inspected.
+
+These two passes show that the current full build can start and recover from
+this burst. They do not establish that the V.34 buffer fix alone caused the
+startup improvement or that the earlier619 failures cannot recur. Repeatability
+and endurance on this full native remain required before permanent deployment.
+Wrappers restored qualified native65bd6c48...3cea15; final remote checksum,
+zero resource counts and absence of the guard override were verified.
+Evidence: work/v90-full-boundsfix-control-1789234260.*,
+work/v90-full-guard-three-1789234343.* and corresponding attempt JSON files.
+
+Deployment hardening: install preflight now checks ELF workers with ldd and
+rejects missing dependencies/version reports before installation. Tests cover
+an invalid ELF, a loadable executable and a compiled worker whose shared
+library is removed. Targeted regression passes. This prevents the observed
+class of executable-but-unloadable deployment failure; run checks on the
+target host. Commitsd577ddc and923f7f6. Production files were not changed by
+this installer edit.

@@ -842,3 +842,49 @@ Evidence: work/v34_ring_erasure_bounds_check.py,
 work/v34-ring-erasure-bounds-evidence/{audit.json,before.log,after.log}, and
 work/v34-training-bounds-runtime-evidence for the preceding failure. New change
 commit9a5b186 remains undeployed.
+
+## Guarded candidate endurance failure and reset fix (2026-09-12)
+
+The ten-call candidate `f732aa02631e`, SHA-256
+`58365ad1823ed7821561adb09b7de2778aa91330edaaff1e832696927e229a77`,
+failed its one-hour hardware qualification after 648.942 seconds. Attempt
+`15ea1ffe-4b5c-45fb-bd40-b58b860b5650` completed 77 transfer rounds before
+`download-77` returned HTTP 200 followed by IOException and loss of the RAS
+connection. The audit verified 2,523,136 download bytes and 78,848 bytes carried
+in request URLs before the failure. The last available RAS counters were zero;
+counters for the failed probe are unavailable. This is not endurance acceptance
+or bulk upstream qualification.
+
+In the same call, the first rate renegotiation at phase time 185.650 seconds
+resumed LAPM after changing timing candidates. The second at 646.5025 seconds
+reached CRC-valid CP/CP-prime and B1 correlation 0.9529, but no physical-reset
+notification reached LAPM; valid-frame count remained 24,213 until termination.
+The upstream structure was reinitialized at E, while selector invalidation
+waited for a first mapping frame from the old selected lane. A lane that never
+reacquires can therefore leave LAPM ignoring the replacement candidates.
+
+Commit `9c493c3` invalidates every candidate immediately before that upstream
+reset. The E-recovery regression fails before the change and passes afterward.
+The LAPM integration test now invalidates all lanes and never returns the old
+selected lane. All five cases transfer 16,384 exact bytes each way, including
+two resets and resets during negotiation. Existing renegotiation training tests
+and the native build pass. Local LAPM tests were uninstrumented; sanitizer CI
+and physical recovery acceptance are separate gates.
+
+The failed trial restored production native SHA-256
+`65bd6c4855c78828e0c0d2fca1fb6177cb4496a016e5c042f389092be32cea15`;
+SSH independently confirmed that hash and zero active sessions/leases.
+Retained local evidence:
+
+- `work/v90-full-guard-endurance-1789235553.{json,native.log,transfer.log}`
+- `work/v90-sustained-15ea1ffe-4b5c-45fb-bd40-b58b860b5650{-audit,}.json`
+- `work/v90-guard-endurance-failure-evidence/manifest.json` and paired audio
+  captures for native PID 51894, plus the PPP packet capture.
+
+A fresh full native `9c493c3` was built on CT105 in a separate directory and
+passed the loader check. Its SHA-256 is
+`e62a02b2f2868b096b61957b666cdabb8f25815b2bf47f56926431f6bfea55ea`.
+It includes the newer V.34 changes, so it is a different qualification candidate.
+Its hardware trial was started with automatic production restoration; a start
+is not a pass. The earlier failure remains a release blocker until stronger
+recovery and endurance evidence resolves it.

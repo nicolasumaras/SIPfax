@@ -53,6 +53,8 @@ void pipe_modem(void)
     V90LineEcho line_echo={0};
     V90EchoDelay echo_delay={0};
     int auto_echo=0;
+    const char *lapm_diag_option = getenv("SIPFAX_V90_LAPM_DIAGNOSTICS");
+    int lapm_diagnostics = lapm_diag_option && !strcmp(lapm_diag_option, "1");
     s16 in_buf[2048], out_buf[2048];
     u8 pay[4096], g711out[2048], data[1024];
     int pty, len, i, n, last_state = -1, last_sm = -1, frames = 0;
@@ -162,6 +164,19 @@ void pipe_modem(void)
         if (++frames % 50 == 0) {
             int rms = rx_cnt ? (int)(rx_acc / rx_cnt) : 0;
             fprintf(stderr, "[linmodem] t=%ds rx_avg=%d state=%s\n", frames/50, rms, st_name(dce->state));
+            if (lapm_diagnostics && dce->state == SM_V90 && dce->u.v90_state.lapm.initialized) {
+                V90LapmLink *link = &dce->u.v90_state.lapm;
+                lapm_state_t *protocol = &link->protocol.lapm;
+                fprintf(stderr, "[v42-state] t=%d state=%d connected=%u frames=%u valid=%u "
+                        "pending=%u tx_fifo=%d rx_fifo=%d vs=%u va=%u vr=%u "
+                        "local_busy=%d far_busy=%d timer=%d errors=%u restarts=%u\n",
+                        frames/50, protocol->state, link->connected,
+                        link->selected_frames, link->selected_valid_frames, link->pending_count,
+                        sm_size(&dce->tx_fifo), sm_size(&dce->rx_fifo),
+                        protocol->vs, protocol->va, protocol->vr,
+                        protocol->local_busy, protocol->far_busy, link->protocol.bit_timer,
+                        link->errors, link->restarts);
+            }
             fflush(stderr);
             rx_acc = 0; rx_cnt = 0;
         }

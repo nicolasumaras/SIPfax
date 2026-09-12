@@ -433,3 +433,25 @@ Residual channel effects and encoder-reference correctness remain unresolved;
 this does not show the caller sent invalid B1. Artifacts:
 `work/v34-cma-candidate-evidence/{b1-reference-alignment.json,b1-precoded-alignment.json,tx-mp-decode.log}`.
 No live calls or deployment in this work.
+
+### Independent B1 framing check and bounded channel comparison
+
+`tools/tests/v34-b1-framing.py` independently computes the caller scrambler
+recurrence from 1 + D^18 + D^23 (clause 7), then checks all 588 bits of the
+16800/3429 B1 reference. It verifies the fifteen 39/40-bit mapping-frame lengths,
+60 four-dimensional intervals, and Table 12's final-half-frame inversion pair
+"10" at half-frame indices 14 and 15. These checks pass and are added to CI.
+They validate framing, not shell mapping, symbol coordinates, precoding, or the
+complete B1 waveform.
+
+A diagnostic comparison fitted 1/3/5/7-tap stationary symbol-spaced linear
+channels on alternating reference symbols and evaluated the others. The known
+three-tap synthetic channel gives explained held-out power 1.0. The best
+capture fit over offsets -200..200 and both conjugation hypotheses gives 0.101,
+using three taps at offset -20. The initial narrower search ended at that
+boundary, so it was widened; the wider search did not improve the result.
+This does not resolve B1 alignment, and does not rule out transmitter-reference
+errors or other channel effects. Evidence:
+`work/v34_b1_channel_check.py` and
+`work/v34-cma-candidate-evidence/b1-channel-audit.json`.
+No native algorithm or production configuration changed in this work.

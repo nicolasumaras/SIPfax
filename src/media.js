@@ -633,27 +633,34 @@ export class ExternalModemProcessBackend extends EventEmitter {
     this.child = child;
 
     child.stdout.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.acceptProcessOutput(chunk);
     });
     child.stderr.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.emit('backend-log', chunk.toString('utf8'));
     });
     child.stdin.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.stdio[3]?.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.acceptControlOutput(chunk);
     });
     child.stdio[3]?.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.on('exit', (code, signal) => {
+      if (this.child !== child) return;
       this.lastExit = { code, signal };
       if (this.child === child) {
         this.child = null;

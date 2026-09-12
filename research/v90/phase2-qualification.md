@@ -55,3 +55,22 @@ Native logging continued to show V.90 audio activity, but existing logs lack ong
 A new established-link regression reproduced the decoder-reset defect: the original implementation immediately cleared `connected`. The candidate fix preserves LAPM sequence numbers, retransmission queues and pending DTE bytes, resets partial receive framing, and reacquires a candidate from two CRC-valid addressed HDLC frames without requiring ODP/XID again. Before initial LAPM establishment, the original negotiation-reset behavior remains.
 
 Selector tests reject flags alone, a corrupt frame, mixed-candidate evidence and invalid addresses. CT105 AddressSanitizer/UndefinedBehaviorSanitizer tests passed with zero, one and two simulated decoder resets, each transferring exactly 16 KiB in both directions. The reset tests include a one-second physical gap and candidate changes, preserve sequence state at reset, and verify byte order and absence of duplicate delivery. Local sanitizer libraries were unavailable; the sanitized evidence comes from CT105. These tests establish protocol recovery for the simulated conditions; hardware renegotiation and endurance qualification are still required.
+
+## First hardware renegotiation recovery observed
+
+On candidate `56cee19`, attempt `9fdada24-49cd-4bf1-8c92-f5f7f4eb4dce`
+remained connected through a real rate renegotiation. The modem log records
+S/Sbar and TRN2d at Phase4 time 530.09 seconds, followed by selection from two
+CRC-valid resume frames. LAPM counters at runtime 548–550 seconds retain
+connected state and outstanding sequence state, then advance acknowledgements;
+`resumptions` becomes 1 while `restarts` and protocol errors remain 0.
+
+An independent audit of the ongoing run at 856 seconds verifies 104 downloads
+of 32 KiB and 104 upload checks of 1 KiB, plus 21 public HTTP probes. All
+completed fixture hashes match and all reported modem error counters are zero.
+The audit also checks the recorded connection identity and monotonically
+increasing connection duration across probes. This is evidence of recovery
+with continued intact traffic on this call, not a completed one-hour result or
+proof of recovery under all impairments. The final server verification and
+clean disconnect are still pending. Upload checks remain URL-carried payloads,
+not a bulk upstream throughput measurement.

@@ -2121,3 +2121,24 @@ protocol-level tests using generated bits, not independent modem or waveform
 interoperability evidence. Native build, MP, readiness (including LAPM negotiation
 and reacquisition gates), and acquisition-buffer tests pass locally. Target
 sanitizers and hardware qualification remain required before promotion.
+
+The exact 9e1c135 CT105 build hashes to
+f707990192b6960ea01ac0ca032427f909a5808bbcfc1ab4eb0e239c45eda287.
+Serial and V34 DTE ASan/UBSan tests, MP, readiness, acquisition-buffer windows and
+loader checks pass (work/v34-lapm-9e1c135-target-validation.log).
+Hardware attempt22628e55-93cd-4a3c-972b-ca2fae86105c with SIPFAX_V34_V42=1
+ends error678 after four B1 entries, without PTY readiness or a logged completed
+ODP/LAPM establishment. The retained native log has zero [v42] messages; this
+alone does not locate failure in the waveform versus detection input. Final
+acquisition reports lattice RMS0.363. Evidence:
+work/v34-lapm-hardware-1789254660.{json,call.log,native-audit.json} and
+work/v34-lapm-hardware-diagnostics.json. Full native log remains on CT105 at
+/tmp/v34-lapm-9e1c135-hardware-native.log.
+
+Restoration attempt30bd3778-6bce-42ff-b860-ebf7487b69c3 passes49296bit/s,
+expected559-byte public HTTP checksum, all six RAS error counters zero, and clean
+teardown. work/v34-lapm-hardware-final-audit.json verifies all25 managed files,
+qualified native hash, guard enabled, trial flags removed and idle endpoints.
+Next inspect actual post-B1 receive bits and LAPM detection input in place,
+including retry advertisements, before changing acquisition settings. The
+protocol-level transfer tests do not establish hardware V34 fallback.

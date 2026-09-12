@@ -361,6 +361,18 @@ has no saved baseline. Removal of an interface during a call skips restoring
 that vanished interface. Do not change forwarding settings concurrently with
 a SIPfax call group; its recorded baseline is restored at teardown.
 
+The routing integration test exercises real nftables and forwarding settings in
+an empty disposable network namespace. It refuses the host namespace and any
+namespace containing an interface other than loopback before setup:
+
+```sh
+sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
+```
+
+It requires Node, util-linux, procps, iproute2 and nftables. This checks kernel
+rule lifecycle and forwarding restoration; it does not replace simultaneous
+hardware-call and packet-transfer qualification.
+
 ## Multiple lines, admin UI, and the FreePBX trunk
 
 SIPfax answers up to `SIPFAX_MAX_SESSIONS` concurrent calls. Each call gets its

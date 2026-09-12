@@ -16,6 +16,7 @@
 
 #include "lm.h"
 #include "v34priv.h"
+#include "v34rxlevel.h"
 
 #define DEBUG
 
@@ -4418,9 +4419,7 @@ void V34_decode_file(const char *path, int calling)
             path, calling ? "CALLER" : "ANSWER");
     while ((n = fread(buf, 2, 512, f)) > 0) {
         for (i = 0; i < n; i++) {
-            int v = buf[i] * 5;
-            if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-            buf[i] = (s16)v;
+            buf[i] = v34_rx_level(buf[i]);
         }
         V34_demod(&rx, buf, n);
     }
@@ -8184,7 +8183,18 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     }
     { static int rxcma = -1; if (rxcma < 0) { char *e = getenv("SIPFAX_RX_CMA"); rxcma = e ? atoi(e) : 0; }
       if (rxcma) { extern void V34_demod_cma(V34DSPState*, const s16*, unsigned int); V34_demod_cma(&s->v34_rx, input, nb_samples); }
-      else V34_demod(&s->v34_rx, input, nb_samples); }
+      else {
+          /* Match the offline decoder's input units, only for legacy V.34 RX. */
+          s16 scaled[160];
+          unsigned int offset = 0;
+          while (offset < (unsigned int)nb_samples) {
+              unsigned int n = (unsigned int)nb_samples - offset, i;
+              if (n > 160) n = 160;
+              for (i = 0; i < n; i++) scaled[i] = v34_rx_level(input[offset + i]);
+              V34_demod(&s->v34_rx, scaled, n);
+              offset += n;
+          }
+      } }
     {   /* SIPFAX: flush the stale J HERE, before this block's V34_mod sees J_received
            and queues S into the same tx buffer. While muted (p3go && !J_received) the
            modulator kept cycling J through the queue, and the leftover ~100 symbols

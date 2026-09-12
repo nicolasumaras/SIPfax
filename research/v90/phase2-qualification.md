@@ -198,3 +198,26 @@ active lines. The server remains on application `31f57b9` / native `cc64526`.
 This qualifies the application update/rollback path; native-binary rollback,
 V.34 fallback, controlled impairment, bulk uploads, and concurrent hardware
 calls remain separate requirements.
+
+### V.34 fallback acquisition investigation
+
+Two calls with V.90 disabled failed before PPP with Windows error 678. The
+second attempt, `219798fb-1fbd-471d-830d-232c7d6c2b08`, reached native `SM_V34`
+and repeatedly restarted Phase 2 after failing Phase 3 acquisition. Native
+logs are redirected by the configured `linmodem-trial` launcher; the service
+journal alone did not contain this evidence. Normal settings were restored.
+
+The captured caller signal contains an S-like alternating phase pattern at
+11.03 seconds. The native WAIT_S1 amplitude gate exceeded 13,000 only once in
+387,827 logged waiting samples, near the call's end. Offline replay identified
+a level mismatch: the existing offline decoder applies fivefold saturating
+input gain, whereas the live legacy V.34 demodulator used unscaled PCM.
+Replaying the same training segment at the live level stayed in WAIT_S1;
+fivefold input advanced through S and PP to TRN.
+
+The candidate change shares a saturating level conversion between that offline
+decoder and the live legacy V.34 receive path. Phase 2, transmit output, CMA,
+and V.90 paths are untouched. Exhaustive signed 16-bit conversion checks pass;
+replay reaches TRN on the training segment and remains in WAIT_S1 for silence
+and captured quiet audio. This does not establish rejection of arbitrary noise
+or complete training: hardware qualification and V.34 PPP remain pending.

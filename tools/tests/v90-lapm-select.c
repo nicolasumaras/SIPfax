@@ -37,6 +37,16 @@ static void feed_xid(V90LapmSelect *s,unsigned candidate,int corrupt)
     for(unsigned i=0;i<130 && s->selected<0;i++)
         v90_lapm_select_bit(s,candidate,hdlc_tx_get_bit(&tx),500+i);
 }
+static void feed_resume_frame(V90LapmSelect *s,unsigned candidate,int corrupt,uint8_t address)
+{
+    hdlc_tx_state_t tx;uint8_t frame[]={address,1,0};
+    hdlc_tx_init(&tx,false,1,false,NULL,NULL);
+    assert(hdlc_tx_flags(&tx,5)==0);
+    assert(hdlc_tx_frame(&tx,frame,sizeof(frame))==0);
+    if(corrupt)assert(hdlc_tx_corrupt_frame(&tx)==0);
+    for(unsigned i=0;i<140 && s->selected<0;i++)
+        v90_lapm_select_bit(s,candidate,hdlc_tx_get_bit(&tx),30000+i);
+}
 static void feed_flags(V90LapmSelect *s,unsigned candidate,unsigned count)
 {
     static const unsigned flag[8]={0,1,1,1,1,1,1,0};
@@ -71,6 +81,14 @@ int main(void)
     feed_odp(&s,10);
     v90_lapm_select_bit(&s,10,1,25001);
     assert(s.expirations==1 && !s.candidate[10].active);
+    v90_lapm_select_reset(&s);s.resume=1;
+    feed_flags(&s,3,100);assert(s.selected<0); /* Idle flags alone are insufficient. */
+    feed_resume_frame(&s,3,0,1);assert(s.selected<0);
+    feed_resume_frame(&s,3,1,1);assert(s.selected<0 && !s.candidate[3].resume_valid_frames);
+    feed_resume_frame(&s,3,0,1);assert(s.selected<0);
+    feed_resume_frame(&s,4,0,1);assert(s.selected<0); /* Cannot combine candidates. */
+    feed_resume_frame(&s,4,0,0x99);assert(s.selected<0 && !s.candidate[4].resume_valid_frames);
+    feed_resume_frame(&s,3,0,1);assert(s.selected==3);
     v42_free(answerer);
     return 0;
 }

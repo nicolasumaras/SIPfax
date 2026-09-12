@@ -31,6 +31,7 @@ typedef struct {
     unsigned pending_head,pending_count;
     unsigned enabled,initialized,detected,connected,disconnected,errors;
     unsigned selected_candidate,selection_count,restarts,overflow,adp_bits;
+    unsigned reacquiring,resumptions;
     unsigned selected_frames,selected_valid_frames,selected_xid_dumped;
 } V90LapmLink;
 

@@ -10,7 +10,7 @@ static void reset_candidate(V90LapmCandidate *c)
     c->odp_pending=c->odp_reported=c->trailing_marks=0;
     c->post_bits=c->post_zeros=c->post_transitions=c->post_flags=0;
     c->post_shift=c->post_previous=c->flag_run=c->last_flag_bit=0;
-    c->hdlc_frames=c->hdlc_valid_frames=0;
+    c->hdlc_frames=c->hdlc_valid_frames=c->resume_valid_frames=0;
     c->compactions=0;c->odp_source_sample=0;
     hdlc_rx_restart(&c->hdlc);
 }
@@ -38,6 +38,14 @@ static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
             fprintf(stderr,"[v42] candidate %u HDLC frame: len=%d crc=%s\n",
                     c->id,len,ok?"valid":"invalid");
     }
+    if(s->resume) {
+        if(len<=0)return; /* Flag/abort notifications carry no candidate frame. */
+        /* A retrained physical channel resumes LAPM, without another ODP/XID.
+           Require two valid addressed frames, never flags alone or random bits. */
+        if(!ok || len<3 || (frame[0]!=0x01 && frame[0]!=0x03))c->resume_valid_frames=0;
+        else if(++c->resume_valid_frames>=2)commit_candidate(c,0);
+        return;
+    }
     /* XID is always CRC-16 during parameter negotiation (V.42 7.6.2). */
     if(!ok || len<3 || (frame[1]&0xec)!=0xac || frame[2]!=0x82 ||
        !c->active || s->selected>=0)return;
@@ -53,7 +61,7 @@ void v90_lapm_select_init(V90LapmSelect *s,void *opaque,
     s->odp=odp;s->output=output;s->selection=selection;
     for(unsigned i=0;i<V90_UP_CANDIDATES;i++){
         V90LapmCandidate *c=&s->candidate[i];c->owner=s;c->id=i;
-        hdlc_rx_init(&c->hdlc,false,false,1,selected_frame,c);
+        hdlc_rx_init(&c->hdlc,false,true,1,selected_frame,c);
     }
 }
 
@@ -77,6 +85,15 @@ void v90_lapm_select_bit(void *opaque,unsigned id,int bit,long source_sample)
     bit&=1;
     if(s->selected>=0){
         if(s->selected==(int)id && s->output)s->output(s->opaque,bit);
+        return;
+    }
+    if(s->resume) {
+        if(c->buffered_count>=V90_LAPM_BUFFER_BITS) {
+            memmove(c->buffered,c->buffered+V90_LAPM_BUFFER_BITS/2,V90_LAPM_BUFFER_BITS/2);
+            c->buffered_count=V90_LAPM_BUFFER_BITS/2;c->compactions++;s->overflows++;
+        }
+        c->buffered[c->buffered_count++]=(uint8_t)bit;
+        hdlc_rx_put_bit(&c->hdlc,bit);
         return;
     }
     c->history[c->history_position]=bit;

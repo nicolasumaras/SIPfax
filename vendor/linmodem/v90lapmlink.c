@@ -82,6 +82,16 @@ static void selected_output(void *opaque,int bit)
 {
     V90LapmLink *s=opaque;
     if(bit<0){
+        if(s->connected) {
+            s->reacquiring=1;s->selector.resume=1;
+            /* Lose only the partial receive frame. Sequence numbers, pending
+               DTE bytes, retransmissions and the peer's LAPM session survive. */
+            hdlc_rx_restart(&s->protocol.lapm.hdlc_rx);
+            hdlc_rx_restart(&s->selected_hdlc);
+            fprintf(stderr,"[v42] physical decoder reset; reacquire established LAPM stream\n");
+            return;
+        }
+        s->reacquiring=s->selector.resume=0;
         int rate=s->protocol.tx_bit_rate;
         v42_restart(&s->protocol);
         s->protocol.tx_bit_rate=rate;
@@ -100,13 +110,19 @@ static void selected(void *opaque,unsigned candidate)
     /* ODP plus a valid XID or continuous flags establishes one ordered
        protocol stream. Leave detection before replaying its bounded tail. */
     int rate=s->protocol.tx_bit_rate;
-    bool detect=s->protocol.detect;s->protocol.detect=false;
-    v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
+    unsigned resuming=s->reacquiring;
+    if(resuming) {
+        s->reacquiring=s->selector.resume=0;s->resumptions++;
+        hdlc_rx_restart(&s->protocol.lapm.hdlc_rx);
+    } else {
+        bool detect=s->protocol.detect;s->protocol.detect=false;
+        v42_restart(&s->protocol);s->protocol.detect=detect;s->protocol.tx_bit_rate=rate;
+    }
     hdlc_rx_restart(&s->selected_hdlc);
     s->selected_candidate=candidate;s->selection_count++;
     s->selected_xid_dumped=0;
     fprintf(stderr,"[v42] selected LAPM candidate %u after %s\n",candidate,
-            s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
+            resuming?"two CRC-valid resume frames":s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
 }
 
 static int supported_adp_bit(unsigned n)
@@ -127,7 +143,7 @@ void v90_lapm_link_init(V90LapmLink *s,int tx_bit_rate,void *opaque,
     s->protocol.tx_bit_rate=tx_bit_rate;
     v42_set_status_callback(&s->protocol,status,s);
     v42_restart(&s->protocol);
-    hdlc_rx_init(&s->selected_hdlc,false,false,1,selected_frame_status,s);
+    hdlc_rx_init(&s->selected_hdlc,false,true,1,selected_frame_status,s);
     v90_lapm_select_init(&s->selector,s,odp,selected_output,selected);
     s->enabled=s->initialized=1;
 }

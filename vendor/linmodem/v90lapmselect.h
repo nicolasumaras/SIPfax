@@ -25,13 +25,14 @@ typedef struct {
     unsigned odp_pending,odp_reported,trailing_marks;
     unsigned post_bits,post_zeros,post_transitions,post_flags,post_shift,post_previous;
     unsigned flag_run,last_flag_bit;
-    unsigned hdlc_frames,hdlc_valid_frames;
+    unsigned hdlc_frames,hdlc_valid_frames,resume_valid_frames;
     unsigned compactions;
     long odp_source_sample;
 } V90LapmCandidate;
 struct V90LapmSelect {
     V90LapmCandidate candidate[V90_UP_CANDIDATES];
     int selected;
+    unsigned resume;
     unsigned detections,selections,flag_selections,selection_by_flags,invalidations,overflows,expirations;
     void *opaque;
     void (*odp)(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count);

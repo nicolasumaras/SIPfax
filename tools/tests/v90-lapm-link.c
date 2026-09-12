@@ -73,19 +73,29 @@ static void verify_v44_user_data_xid(void)
     lapm_receive(&answerer,xid,sizeof(xid)-1,1);
     assert(answerer.lapm.ctrl_put==1);
 }
-int main(void)
+static void transfer(unsigned reset_decoder)
 {
-    verify_ten_adps();
-    verify_v44_user_data_xid();
+    max_pending=saw_busy=0;
     struct endpoint answer={.side=0},caller_ep={.side=1};
     V90LapmLink link;v90_lapm_link_init(&link,49333,&answer,source,answer_sink);
     v42_state_t caller;assert(v42_init(&caller,true,true,source,caller_sink,&caller_ep));
     caller.config.comp=0;caller.tx_bit_rate=28800;
     v42_set_status_callback(&caller,caller_status,&caller_ep);v42_restart(&caller);
-    unsigned up_acc=0,down_acc=0,up_bits=0;
+    unsigned up_acc=0,down_acc=0,reset_at=0,resets=0,candidate=7;
     for(test_sample=0;test_sample<8000*30;test_sample++){
+        if(resets<reset_decoder && test_sample>(4+2*resets)*8000 &&
+           answer.received>1024 && caller_ep.received>1024) {
+            assert(link.connected);
+            unsigned vs=link.protocol.lapm.vs,va=link.protocol.lapm.va,vr=link.protocol.lapm.vr;
+            v90_lapm_link_candidate_bit(&link,candidate,-1,test_sample);
+            assert(link.connected); /* A decoder reset is not a new LAPM connection. */
+            assert(link.protocol.lapm.vs==vs && link.protocol.lapm.va==va && link.protocol.lapm.vr==vr);
+            hdlc_rx_restart(&caller.lapm.hdlc_rx);
+            candidate+=2;reset_at=test_sample;resets++;
+        }
+        if(reset_at && test_sample-reset_at<8000)continue; /* Physical retraining gap. */
         up_acc+=28800;
-        while(up_acc>=8000){up_acc-=8000;v90_lapm_link_candidate_bit(&link,7,v42_tx_bit(&caller),up_bits++);}
+        while(up_acc>=8000){up_acc-=8000;v90_lapm_link_candidate_bit(&link,candidate,v42_tx_bit(&caller),test_sample);}
         down_acc+=49333;
         while(down_acc>=8000){down_acc-=8000;v42_rx_bit(&caller,v90_lapm_link_tx_bit(&link));}
         v90_lapm_link_drain(&link);
@@ -93,10 +103,21 @@ int main(void)
         if(link.protocol.lapm.local_busy)saw_busy=1;
         if(answer.received==TOTAL && caller_ep.received==TOTAL)break;
     }
-    assert(link.detected && link.selection_count==1 && link.selected_candidate==7);
+    assert(link.detected && link.selection_count==1+reset_decoder && link.selected_candidate==candidate);
+    assert(resets==reset_decoder);
+    assert(link.resumptions==reset_decoder && !link.reacquiring && !link.restarts);
     assert(link.connected && !link.disconnected && !link.errors && !link.overflow);
     assert(saw_busy && max_pending<=V90_LAPM_PENDING_BYTES);
     assert(answer.received==TOTAL && caller_ep.received==TOTAL && !link.pending_count);
-    printf("LAPM candidate 7 transferred %u bytes each way\n",TOTAL);
+    printf("LAPM transferred %u bytes each way; decoder reset=%u\n",TOTAL,reset_decoder);
+}
+
+int main(void)
+{
+    verify_ten_adps();
+    verify_v44_user_data_xid();
+    transfer(0);
+    transfer(1);
+    transfer(2);
     return 0;
 }

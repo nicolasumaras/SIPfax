@@ -169,13 +169,13 @@ void pipe_modem(void)
                 lapm_state_t *protocol = &link->protocol.lapm;
                 fprintf(stderr, "[v42-state] t=%d state=%d connected=%u frames=%u valid=%u "
                         "pending=%u tx_fifo=%d rx_fifo=%d vs=%u va=%u vr=%u "
-                        "local_busy=%d far_busy=%d timer=%d errors=%u restarts=%u\n",
+                        "local_busy=%d far_busy=%d timer=%d errors=%u restarts=%u reacquiring=%u resumptions=%u\n",
                         frames/50, protocol->state, link->connected,
                         link->selected_frames, link->selected_valid_frames, link->pending_count,
                         sm_size(&dce->tx_fifo), sm_size(&dce->rx_fifo),
                         protocol->vs, protocol->va, protocol->vr,
                         protocol->local_busy, protocol->far_busy, link->protocol.bit_timer,
-                        link->errors, link->restarts);
+                        link->errors, link->restarts, link->reacquiring, link->resumptions);
             }
             fflush(stderr);
             rx_acc = 0; rx_cnt = 0;

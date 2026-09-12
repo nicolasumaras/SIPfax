@@ -1546,6 +1546,13 @@ void put_bits(u8 **pp, int n, int bits)
     *pp = p;
 }
 
+/* MP numeric fields are ordered LSB first (Tables 20 and 21).
+   Keep put_bits unchanged: calc_crc already returns bit-reversed CRC. */
+static void mp_put_lsb(u8 **p, int n, unsigned int value)
+{
+    for (int i=0; i<n; ++i) *(*p)++ = (value >> i) & 1;
+}
+
 /* from § 10.1.2.3.2 */
 int calc_crc(u8 *buf, int size)
 {
@@ -1700,10 +1707,10 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
         put_bits(&p, 1, 0); /* reserved */
-        put_bits(&p, 4, r_ca); /* call to answer max rate (negotiated) */
-        put_bits(&p, 4, r_ac); /* answer to call max rate (negotiated) */
+        mp_put_lsb(&p, 4, r_ca); /* call to answer max rate (negotiated) */
+        mp_put_lsb(&p, 4, r_ac); /* answer to call max rate (negotiated) */
         put_bits(&p, 1, 0); /* no aux channel */
-        put_bits(&p, 2, trel); /* trellis: match the caller's selection */
+        mp_put_lsb(&p, 2, trel); /* trellis: match the caller's selection */
         {   /* SIPFAX: bit 31 - the 9.7 warp we ask the CALLER to apply toward us.
                slmodem advertises 1 and this caller has likely never met an answerer
                that says 0; our RX has no dewarp yet, so this is default 0, but
@@ -6374,8 +6381,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             type = f[18];
                             if ((type ? 188 : 88) != L) continue;
                             crc_off = type ? 171 : 69;
-                            rate_ca = (f[20]<<3)|(f[21]<<2)|(f[22]<<1)|f[23];
-                            rate_ac = (f[24]<<3)|(f[25]<<2)|(f[26]<<1)|f[27];
+                            rate_ca = f[20]|(f[21]<<1)|(f[22]<<2)|(f[23]<<3);
+                            rate_ac = f[24]|(f[25]<<1)|(f[26]<<2)|(f[27]<<3);
                             ackb = f[33];
                             for (mi = 0; mi < 15; mi++) msk |= ((unsigned int)f[35+mi]) << mi;
                             for (i3 = 17; i3 < crc_off; i3++) {   /* spec CRC: exclude start bits */
@@ -6387,7 +6394,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             {   /* Repeated header agreement is diagnostic only: parameters must
                                    be protected by a valid complete-frame CRC. */
                                 int key = (type<<28) ^ (rate_ca<<12) ^ (rate_ac<<4) ^ (f[29]<<2) ^ (f[30]<<1) ^ ackb;
-                                int trel = (f[29]<<1) | f[30];
+                                int trel = f[29] | (f[30]<<1);
                                 int consensus = (key == s->p4_key);
                                 s->p4_keyn = consensus ? s->p4_keyn+1 : 1; s->p4_key = key;
                                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d type=%d ca=%d ac=%d trel=%d ack=%d nonlin=%d shape=%d crc=%s cons=%d\n", L, type, rate_ca*2400, rate_ac*2400, trel, ackb, f[31], f[32], ok?"OK":"fail", s->p4_keyn); }
@@ -6998,9 +7005,9 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
                (slmodem's own MP does the same, 24 ack=0 frames then 4 ack=1), so the
                window's head stays ack=0 for up to 2.5 s after the caller has actually
                acknowledged - longer than it waits for our E before retraining. */
-            if (out_ca)  *out_ca  = (db[i+20]<<3)|(db[i+21]<<2)|(db[i+22]<<1)|db[i+23];
-            if (out_ac)  *out_ac  = (db[i+24]<<3)|(db[i+25]<<2)|(db[i+26]<<1)|db[i+27];
-            if (out_trel) *out_trel = (db[i+29]<<1)|db[i+30];
+            if (out_ca)  *out_ca  = db[i+20]|(db[i+21]<<1)|(db[i+22]<<2)|(db[i+23]<<3);
+            if (out_ac)  *out_ac  = db[i+24]|(db[i+25]<<1)|(db[i+26]<<2)|(db[i+27]<<3);
+            if (out_trel) *out_trel = db[i+29]|(db[i+30]<<1);
             if (out_shape) *out_shape = db[i+32];
             /* SIPFAX: bit 31 is the peer's non-linear-encoder request. This decoder pulled
                out shape (bit 32) and the precoder coefficients but never nonlin, and it is
@@ -8092,6 +8099,21 @@ void V34_dataloop_test(void)
 
 void V34_mptest(void)
 {
+    /* Independent generated-symbol input for MP field-order/CRC tests. */
+    const char *input = getenv("SIPFAX_MPTEST_SYMBOLS");
+    if (input) {
+        static double i[P4_MAXSY], q[P4_MAXSY];
+        int n=0, ca=0, ac=0, trel=0, ack=0, shape=0, nonlin=0;
+        unsigned int mask=0; short h[6]={0};
+        FILE *f=fopen(input, "r");
+        if (!f) { perror(input); exit(2); }
+        while (n<P4_MAXSY && fscanf(f, "%lf %lf", &i[n], &q[n])==2) n++;
+        fclose(f);
+        int frames=p4_mp_decode(i,q,n,0,V34_GPC,&ca,&ac,&trel,&ack,&shape,&mask,h,&nonlin);
+        printf("{\"frames\":%d,\"ca\":%d,\"ac\":%d,\"trellis\":%d,\"ack\":%d}\n",
+               frames,ca,ac,trel,ack);
+        return;
+    }
     static V34DSPState s; V34State p;
     memset(&s, 0, sizeof(s)); memset(&p, 0, sizeof(p));
     { extern void dsp_init(void); dsp_init(); }

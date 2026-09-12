@@ -1,5 +1,10 @@
 # Phase-two hardware qualification
 
+> Correction: earlier V.34 MP rate/trellis numbers below were decoded with
+> reversed field bit order. See “MP numeric field bit-order correction” before
+> using those numbers as evidence of negotiated settings.
+
+
 The unchanged CT105 native build `70614d7`, SHA-256 `62b8190eed86cb4267447229d9ac1e8af0af0e4cdac93c67dda77204ae922623`, was exercised through the Windows XP notebook and Cisco ATA187.
 
 ## Repeated calls
@@ -1596,3 +1601,37 @@ Production remains application `9e0f242` and native `9c493c3`.
 Full CI run34719420312 at the preceding role-fix commit `5bc4919` has now
 completed successfully. The newer clockwise mapper still requires its own
 complete CI result; the failed hardware fallback gate remains open.
+
+
+## MP numeric field bit-order correction (2026-09-12)
+
+Earlier V.34 MP rate and trellis reports in this log used the same incorrect
+MSB-first decoder as the transmitter. They must not be treated as independent
+proof of the on-wire numeric settings. Tables20/21 label these fields LSB:MSB.
+The transmitter wrote them MSB-first, and both receive parsers read them that
+way. For example, the test sender's requested rate code5 appeared on wire as10,
+and trellis code2 appeared as1. This can make software and peer use different
+rates and trellis codes while a self-loopback reports agreement.
+
+The MP writer now emits rate and trellis fields LSB-first, and both the block
+and fold parsers decode that order. The general bit writer and CRC serialization
+are not reversed: `calc_crc` already reverses the register bits for that writer.
+The independently checked mask and coefficient field handling is retained.
+
+`tools/tests/v34-mp-fields.py` reads emitted frame bits independently, then
+constructs its own Type0 and Type1 frames, CRC16 bits, GPC scrambling, and
+clockwise differential QPSK symbols. The native block decoder must recover all
+rate codes1..14 and trellis codes0..2, with asymmetric rates and both frame
+formats. All84 cases pass after correction; corrupted frames are rejected.
+Before correction, one generated frame requesting codes1/14 decoded as8/7,
+and the independent emitted-bit audit also failed. Existing generated-audio
+(0/93760 settled bits) and peer-role tests (0/2146096 bits) still pass.
+
+Evidence: `work/v34-mp-field-order-before.json`,
+`work/v34-mp-field-rx-before.log`, `work/v34-mp-field-fixed.log`,
+`work/v34-mp-fields-audio.log`, and `work/v34-mp-fields-roles.log`.
+This is not hardware qualification. The retained recordings need re-decoding
+with the corrected parser. Two additional negotiation concerns remain open:
+MP information changes during an exchange, and the receive trellis fallback
+treats the valid code0 as absent. The peer's shaping request also needs tracing
+through to the transmit configuration. Production has not changed.

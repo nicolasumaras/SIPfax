@@ -43,6 +43,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
       - name: Build native modem
         run: make -C vendor/linmodem
+      - name: Test V34 MP field bit order
+        run: python3 tools/tests/v34-mp-fields.py vendor/linmodem/lm
       - name: Verify V34 Figure 9 labels and branch table
         run: python3 tools/tests/v34-fig9-table.py
       - name: Test V34 corrected-label traceback and settled decoding

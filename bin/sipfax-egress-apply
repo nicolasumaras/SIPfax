@@ -95,10 +95,33 @@ function applyRules(descriptor, ruleAction) {
   }
 
   const iptables = commandExists('iptables-nft') ? 'iptables-nft' : 'iptables';
-  for (const rule of descriptor.iptables?.[ruleAction] ?? []) {
+  const operations = (descriptor.iptables?.[ruleAction] ?? []).map(rule => {
     const args = rule.split(/\s+/);
     const command = args.shift();
-    run(command === 'iptables' ? iptables : command, args);
+    const operation = args.indexOf(ruleAction === 'up' ? '-A' : '-D');
+    if (command !== 'iptables' || operation < 0) {
+      throw new Error('Unsupported iptables lease operation');
+    }
+    return { args, operation };
+  });
+  const installed = [];
+  try {
+    for (const entry of operations) {
+      run(iptables, entry.args);
+      installed.push(entry);
+    }
+  } catch (error) {
+    if (ruleAction !== 'up') throw error;
+    const errors = [error];
+    // Only undo commands that succeeded in this invocation. Reversing the
+    // entire descriptor would touch rules that were never installed.
+    for (const entry of installed.reverse()) {
+      const undo = [...entry.args];
+      undo[entry.operation] = '-D';
+      try { run(iptables, undo); }
+      catch (cleanupError) { errors.push(cleanupError); }
+    }
+    throw new AggregateError(errors, 'iptables policy installation failed; attempted cleanup');
   }
 }
 

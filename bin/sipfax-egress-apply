@@ -273,7 +273,10 @@ async function postOperatorEvent(descriptor, state) {
     await fetch(new URL('/ppp/events', descriptor.operatorUrl), {
       signal: AbortSignal.timeout(2000),
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(descriptor.notifyToken ? { 'x-sipfax-notify-token': descriptor.notifyToken } : {})
+      },
       body: JSON.stringify({
         state,
         callId,

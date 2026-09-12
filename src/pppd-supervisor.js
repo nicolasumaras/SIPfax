@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -118,10 +119,12 @@ export class PppdSupervisor extends EventEmitter {
     this.stop(callId);
 
     const sessionDir = mkdtempSync(join(this.tempDir, `sipfax-pppd-${sanitizePathPart(callId)}-`));
+    const notifyToken = randomBytes(32).toString('hex');
     const egressDescriptorPath = egressDescriptor
-      ? this.writeEgressDescriptor(callId, egressDescriptor)
+      ? this.writeEgressDescriptor(callId, { ...egressDescriptor, notifyToken })
       : null;
     const session = {
+      notifyToken,
       callId,
       slavePath,
       lease: { ...lease },
@@ -229,6 +232,21 @@ export class PppdSupervisor extends EventEmitter {
     }
     this.removeSessionFiles(session);
     this.sessions.delete(callId);
+    return true;
+  }
+
+  acceptHookEvent(event, token) {
+    const session = this.sessions.get(event?.callId);
+    if (!session || typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token) ||
+        !timingSafeEqual(Buffer.from(token), Buffer.from(session.notifyToken))) return false;
+    if (!['ip-up', 'ip-down'].includes(event.state) ||
+        !/^ppp[0-9]+$/.test(event.interfaceName ?? '') ||
+        event.localAddress !== session.lease.localAddress ||
+        event.remoteAddress !== session.lease.clientAddress) return false;
+    this.acceptEvent(event.callId, {
+      state: event.state, interfaceName: event.interfaceName,
+      localAddress: event.localAddress, clientAddress: event.remoteAddress
+    });
     return true;
   }
 

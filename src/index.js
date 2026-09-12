@@ -87,6 +87,7 @@ const operator = new OperatorHttpServer({
   port: operatorPort,
   config,
   diagnostics: () => server.diagnostics(),
+  onPppEvent: (event, token) => ppp.pppdSupervisor?.acceptHookEvent(event, token) ?? false,
   freepbx: {
     serverHost: config.sip.publicHost,
     sipPort: config.sip.sipPort,

@@ -1898,3 +1898,33 @@ latency; repeat on capture62290 before hardware use.
 
 Evidence: work/v34-acq-0572a93-target-replay.log. Audio and complete receiver traces
 remain on CT105. Production is unchanged; the option is not enabled there.
+
+
+### Startup positions and callback deadlines
+
+The retained61604 replay now feeds source symbols0..119 contiguously and emits
+all bit positions0..419 without suppression for both64/2000 acquisition windows.
+Each candidate B1 interval contains9 zero bits, all within positions0..55; the
+remaining364 bits are ones. Both runs lock V0 phase420 after931 symbols and request
+zero4D-symbol alignment drops. This narrows the initial-state/quadrant question,
+but exact association of emitted frame zero with B1 still requires verification;
+do not label these counts a fully established hardware BER measurement.
+Evidence: work/v34-b1-61604-position-audit.json.
+
+Commit78e0ecc adds opt-in SIPFAX_STREAM_TIMING instrumentation around each actual
+V34_demod_cma call. The generated-audio sequence test verifies all800 callbacks at
+160 samples, coherent timing fields, and unchanged settled correctness. Exact
+CT105 build SHA256:
+c781eb9294dff218c244a967960049756d691c7fccbf7bcbfc1c0a754ca3407b.
+On retained call61604 with buffered handoff and receiver diagnostics enabled:
+64-symbol acquisition:948 callbacks, mean0.287ms, peak17.861ms, zero20ms overruns;
+2000-symbol acquisition:mean0.846ms, peak547.488ms, one overrun. State CSV export
+was disabled during measurement, but diagnostic logging remained enabled.
+Evidence: work/v34-callback-78e0ecc-target-replay.log.
+
+The2000-symbol path is not suitable for live deployment as measured. The64-symbol
+single-run result has limited headroom and is not a real-time qualification.
+Next remove/gate purely diagnostic exhaustive acquisition scans, distinguish scan
+cost from buffered decoder cost, repeat callback measurements, and verify initial
+B1 state plus the separate failed capture62290. Production remains unchanged and
+SIPFAX_ACQ_REPLAY is still off by default.

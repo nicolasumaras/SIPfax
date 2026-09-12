@@ -1136,8 +1136,14 @@ static void encode_mapping_frame(V34DSPState *s)
   if (s->b <= 12) {
     /* (§ 9.3.2) simple case: no shell mapping */
     memset(m, 0, sizeof(m));
-    for(i=0;i<s->b;i++) ((u8 *)I)[i] = data[i];
-    for(i=s->b;i<12;i++) ((u8 *)I)[i] = 0;
+    /* Clause 9.3.2: each group has I1/I2; the first mp_size-8
+       groups also carry I3. Short frames must not read a high-frame bit. */
+    ptr = data;
+    for(j=0;j<4;j++) {
+      I[0][j] = *ptr++;
+      I[1][j] = *ptr++;
+      I[2][j] = j < mp_size-8 ? *ptr++ : 0;
+    }
     memset(Q, 0, sizeof(Q));
   } else {
     /* (§ 9.3.1) */
@@ -3757,7 +3763,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
   /* now everything is "decoded", we can write the data */
   ptr = data;
   if (s->b <= 12) {
-    for(i=0;i<s->b;i++) *ptr++ = ((u8 *)I)[i];
+    for(j=0;j<4;j++) {
+      *ptr++ = I[0][j];
+      *ptr++ = I[1][j];
+      if (j < mp_size-8) *ptr++ = I[2][j];
+    }
   } else {
     r0 = rings_to_index(s, m);
     if (r0 < 0) {

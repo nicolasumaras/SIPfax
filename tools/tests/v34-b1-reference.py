@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 for taps in ('0,0,0,0,0,0', '4476,1768,-3722,329,2710,-924'):
                     opts = dict(SIPFAX_B1_RATE=str(rate), SIPFAX_B1_TRELLIS=trellis,
                                 SIPFAX_SHAPE=shape, SIPFAX_B1_H=taps)
-                    assert generate(**opts) == generate(**opts)
+                    assert generate(**opts) == generate(**opts), opts
     for invalid in ('1,2,3', '32768,0,0,0,0,0', '1,2,3,4,5,6extra'):
         env = {k: v for k, v in os.environ.items() if not k.startswith('SIPFAX_')}
         env.update(SIPFAX_B1_REFERENCE=str(out), SIPFAX_B1_H=invalid)

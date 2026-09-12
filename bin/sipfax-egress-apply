@@ -53,7 +53,7 @@ const sameLease = activeLease && activeLease.callId === callId
   && activeLease.localAddress === localAddress
   && activeLease.remoteAddress === remoteAddress;
 if (action === 'up' && activeLease) {
-  if (!sameLease || activeLease.rulesRemoved) throw new Error('Call-ID already has another active or unfinished PPP lease');
+  if (!sameLease || activeLease.teardownStarted || activeLease.rulesRemoved) throw new Error('Call-ID already has another active or unfinished PPP lease');
   process.exit(0); // Repeated notification for an already installed lease.
 }
 if (action === 'down' && !sameLease) {
@@ -86,7 +86,12 @@ if (action === 'up') {
   await postOperatorEvent(descriptor, 'ip-up');
 } else {
   if (!activeLease.rulesRemoved) {
-    applyRules(descriptor, 'down');
+    activeLease.teardownStarted = true;
+    saveState(marker, activeLease);
+    applyRules(descriptor, 'down', completed => {
+      activeLease.removedOperations = completed;
+      saveState(marker, activeLease);
+    }, activeLease.removedOperations ?? 0);
     saveState(marker, { ...activeLease, rulesRemoved: true });
   }
   if (!hasActiveLeases(safeCallId)) restoreRetainedForwarding();
@@ -94,7 +99,7 @@ if (action === 'up') {
   await postOperatorEvent(descriptor, 'ip-down');
 }
 
-function applyRules(descriptor, ruleAction) {
+function applyRules(descriptor, ruleAction, recordRemoval = null, removedOperations = 0) {
   if (commandExists('nft') && descriptor.nft?.[ruleAction]?.length) {
     run('nft', ['-f', '-'], descriptor.nft[ruleAction].join('\n') + '\n');
     return;
@@ -110,11 +115,16 @@ function applyRules(descriptor, ruleAction) {
     }
     return { args, operation };
   });
+  if (!Number.isInteger(removedOperations) || removedOperations < 0 || removedOperations > operations.length) {
+    throw new Error('Invalid saved iptables teardown progress');
+  }
   const installed = [];
   try {
-    for (const entry of operations) {
+    for (const [index, entry] of operations.entries()) {
+      if (index < removedOperations) continue;
       run(iptables, entry.args);
       installed.push(entry);
+      if (recordRemoval) recordRemoval(index + 1);
     }
   } catch (error) {
     if (ruleAction !== 'up') throw error;

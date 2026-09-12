@@ -361,6 +361,13 @@ has no saved baseline. Removal of an interface during a call skips restoring
 that vanished interface. Do not change forwarding settings concurrently with
 a SIPfax call group; its recorded baseline is restored at teardown.
 
+The iptables fallback checkpoints each successful teardown command. If a later
+command fails, the same `ip-down` invocation resumes at that command; an `ip-up`
+for the partly removed lease is rejected. Keep the descriptor and firewall tools
+unchanged until teardown completes. This handles reported command failures,
+but does not make the kernel update and checkpoint atomic across a process or
+host crash. Inspect retained rules and markers after such a crash before retrying.
+
 The routing integration test exercises real nftables and forwarding settings in
 an empty disposable network namespace. It refuses the host namespace and any
 namespace containing an interface other than loopback before setup:

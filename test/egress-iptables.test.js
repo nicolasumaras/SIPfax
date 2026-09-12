@@ -31,6 +31,8 @@ if (op === '-A') {
   if (state.additions === 4) { fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); }
   state.rules.push(rule);
 } else {
+  state.deletions = (state.deletions ?? 0) + 1;
+  if (state.failDeletion === state.deletions) { fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); }
   const index = state.rules.indexOf(rule);
   if (index < 0) process.exit(2);
   state.rules.splice(index, 1);
@@ -61,7 +63,18 @@ fs.writeFileSync(path, JSON.stringify(state));
     // Retry after the one injected failure, then exercise complete teardown.
     await run('up');
     assert.equal(readdirSync(active).filter(name => name.endsWith('.json')).length, 1);
+    const installed = JSON.parse(readFileSync(stateFile, 'utf8'));
+    installed.failDeletion = installed.deletions + 3;
+    writeFileSync(stateFile, JSON.stringify(installed));
+    await assert.rejects(run('down'));
+    const marker = JSON.parse(readFileSync(join(active, callKey(callId) + '.json'), 'utf8'));
+    assert.equal(marker.removedOperations, 2);
+    assert.equal(marker.teardownStarted, true);
+    await assert.rejects(run('up')); // Partly removed rules cannot be called active.
+    const partial = JSON.parse(readFileSync(stateFile, 'utf8'));
     await run('down');
+    const finished = JSON.parse(readFileSync(stateFile, 'utf8'));
+    assert.equal(finished.trace[partial.trace.length][1], partial.trace.at(-1)[1], 'retry starts at the failed deletion');
     assert.deepEqual(JSON.parse(readFileSync(stateFile, 'utf8')).rules, ['unrelated existing rule']);
     assert.deepEqual(readdirSync(active).filter(name => name.endsWith('.json')), []);
   } finally { rmSync(root, { recursive: true, force: true }); }

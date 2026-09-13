@@ -132,6 +132,15 @@ bit/s and one V34-only call at 12,000 bit/s, with checksums and cleanup.
 Production is restored. These checks do not replace final-artifact endurance,
 repeatability or automatic fallback qualification.
 
+The reproducible candidate passes a three-packet inbound RTP-loss test in
+V90 mode (`988bdc1e-a8ff-4635-9a5a-e29881cf14a4`): four verified HTTP
+checks, continuous PPP, zero RAS errors and clean restoration. The corresponding
+V34 test (`259257c5-6042-4d03-a25d-bcca6c7ce726`) fails its first post-loss
+HTTP request after a valid baseline. Receive bit delivery drops and remains
+below the negotiated rate; no retrain response is recorded. V34 erasure
+recovery is therefore a demonstrated remaining failure. Production is restored
+and all 25 managed files and idle endpoints are verified.
+
 ## Immediate dependencies
 
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP

@@ -2912,3 +2912,37 @@ Evidence: work/release-aa571ec-target-manifest.json,
 work/release-aa571ec-target-validation.log,
 work/release-aa571ec-v90-audit.json, work/release-aa571ec-v34-audit.json,
 and work/release-aa571ec-final-state-audit.json.
+
+
+## Reproducible candidate: controlled three-packet loss
+
+Exact native `f0b8aadb0f99893a5501cc1d8f94a07a037ec69f4b5b4b25a71b7f99ec42e00d`
+passes one V90 established-PPP loss trial, attempt
+`988bdc1e-a8ff-4635-9a5a-e29881cf14a4`, at 49,296 bit/s. A scoped CT105 nft
+rule counted exactly three drops on the active inbound RTP port. Baseline and
+three recovery HTTP probes each match the 559-byte checksum; RAS counters
+remain zero, connection duration does not reset, and cleanup succeeds. The
+independent audit verifies the rule is removed, all 25 qualified release files
+are restored and endpoints are idle. This covers one bounded inbound-loss case.
+
+The same experiment in V34-only mode fails, attempt
+`259257c5-6042-4d03-a25d-bcca6c7ce726`. It connects at 12,000 bit/s, opens
+IPCP and passes the baseline checksum. After exactly three packet drops, the
+first recovery HTTP probe reports ConnectFailure after 10,934 ms and has no
+final RAS statistics. The test stops and cleans up; no later recovery is claimed.
+Retained on-target DTE diagnostics show full receive delivery through t25,
+9,268 bits at t26, just 73 at t27, then approximately 7–8 kbit/s instead of 12k,
+while transmit delivery continues at 12k. No retrain response is recorded.
+This points to receive tracking damage after the erasure, but does not yet
+identify which adaptation loop is responsible. Existing V90 erasure protection
+is implemented in v90upstream.c; it does not protect the separate V34 receiver.
+The scoped rule was removed and the qualified deployment restored and audited.
+Next isolate V34 adaptation during missing-input samples and verify recovery
+without weakening baseline decoding or treating this failed trial as a pass.
+
+Evidence: work/v90-controlled-loss-988bdc1e-a8ff-4635-9a5a-e29881cf14a4-audit.json;
+work/v90-controlled-loss-259257c5-6042-4d03-a25d-bcca6c7ce726.json;
+work/release-aa571ec-v34-loss-diagnostics.json;
+work/release-aa571ec-after-loss-state-audit.json. Raw traces remain on CT105.
+Full CI run 34730504340 for e8804da completed successfully in both jobs;
+subsequent heads still require their own final check.

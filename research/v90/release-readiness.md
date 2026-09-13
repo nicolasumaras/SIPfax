@@ -165,6 +165,15 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+The opposite-direction bounded-loss case also passes on candidate397:
+attempt `b965d53d-65fa-4e2e-9ba0-8f0815d1de9e` drops exactly three RTP
+packets leaving the active server port toward PBX192.168.1.29. The audit
+checks the output hook, destination address, UDP source port, measured counter,
+four public HTTP hashes, continuous PPP duration and zero RAS errors at49,296bit/s.
+Teardown, injection removal, rollback and all25 restored files pass.
+This is one outbound three-packet case; controlled jitter and failed-link
+recovery remain unverified.
+
 Candidate397 also passes repeated established-link loss in attempt
 `d1e4b62c-8984-4d09-a48c-d08fcc139fb5`: three separate events each drop
 exactly three inbound RTP packets on the active call port. The baseline and

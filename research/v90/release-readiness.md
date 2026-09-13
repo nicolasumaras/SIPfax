@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passed four consecutive short 12,000-bit/s PPP calls, including two with startup retraining; a subsequent endurance dial failed with error 678 before connecting. A subsequent 1,802.783-second V.34 session passes transfer integrity and cleanup. Test established-link impairment recovery and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passed four consecutive short 12,000-bit/s PPP calls, including two with startup retraining; a subsequent endurance dial failed with error 678 before connecting. A subsequent 1,802.783-second V.34 session passes transfer integrity and cleanup. The timeline fix also passes the bounded three-packet established-link loss case. Repeat and broaden impairment coverage, test automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -150,6 +150,12 @@ loss case at12,000bit/s with four HTTP checks, zero RAS errors and cleanup.
 This supersedes the failure for that single bounded recovery case, but leaves
 startup reliability, broader impairments and automatic fallback open. The
 qualified V90 deployment is restored and audited.
+
+Two unchanged-candidate recovery repeats (`20852cde-b882-41e2-a743-05c05b46bd33`
+and `4a825d64-a884-4296-a485-53ec94fa28d2`) also pass. The observed series
+is one startup678 failure followed by three consecutive passing bounded-loss
+calls, all with verified restoration. This is repeat evidence for that one
+loss case, not a general reliability estimate.
 
 ## Immediate dependencies
 

@@ -3017,3 +3017,28 @@ Evidence: work/v34-data-timeline-negative-control.json;
 work/v34-timeline-target-validation.log; work/v34-timeline-target-manifest.json;
 work/v90-controlled-loss-2f0b7379-09d4-4494-b1b2-227990b4a02b.json;
 work/v90-controlled-loss-3b8412e6-7633-4223-8d46-a60e21257604-audit.json.
+
+
+## V34 bounded-loss repeat series
+
+Two further calls with unchanged native `164008c9…624b39f` and V34 settings
+both pass the three-packet inbound loss experiment:
+`20852cde-b882-41e2-a743-05c05b46bd33` and
+`4a825d64-a884-4296-a485-53ec94fa28d2`. Each connects at 12,000 bit/s,
+has exactly three drops counted on its own RTP port, and passes the baseline
+and three recovery HTTP checks (2,236 verified payload bytes per call). All
+before/after RAS counters remain zero and connection duration does not reset.
+Each independent audit checks removal of the temporary rule, restored hashes
+for all 25 managed files and idle endpoints before the next call begins.
+Together with `3b8412e6-7633-4223-8d46-a60e21257604`, this is three
+consecutive passing bounded-loss trials after the retained initial678 failure.
+This small series does not establish a long-term startup success rate, broader
+loss/jitter tolerance or automatic fallback.
+
+The notebook still reports DialUpLab1.1.1.0. A caller-side V34-only setting is
+needed to prove normal negotiation with a V90-enabled server; the current
+V34-only tests cap the server. Code inspection confirms the working CMA and
+LAPM paths require explicit settings. A dual-mode trial profile is prepared
+with those V34 settings and without the V90-disabling cap, but is not yet
+physically tested. Evidence: work/v34-timeline-loss-series.json and the two
+referenced per-call audit files.

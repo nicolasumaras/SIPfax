@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`47e3b108-21f2-444e-8d82-0c76b2bea720`, connected at 49,296 bit/s,
+`4c4c4b5c-c884-4d56-9419-3c416af2b9bf`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -97,9 +97,15 @@ second recording to zero valid frames. The longer windows also preserve55 byte-i
 call replay and recover frames at two less favorable restart offsets. Source
 e47bd0a adds the method as an opt-in bounded history with sanitizer coverage.
 Its first1024-symbol hardware trial fails678 before ODP detection, with poor
-B1 decoding despite modest seeds. The option remains off by default. Next
-inspect the caller E/B1 transition and receiver initialization in that trial;
-clock averaging alone has not qualified fallback.
+B1 decoding despite modest seeds. The option remains off by default. The subsequent B1 audit finds the last caller B1 intact in replay. Inspection
+also finds a function-static traceback warmup counter surviving receiver resets.
+Source832f532 makes warmup per receiver and clears partial mapping state; a
+negative-control build reproduces the old bug and the fixed regression passes.
+Its first physical trial, with averaging still1024, connects12k and passes two
+HTTP probes with zero RAS errors on the first training attempt. No retrain occurs,
+so repeatability and physical recovery remain unqualified. Next repeat this new
+candidate and retain failures; do not combine its outcome with the older build's
+four-call series as if the implementation were unchanged.
 
 ## Immediate dependencies
 

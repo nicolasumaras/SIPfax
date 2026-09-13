@@ -2749,3 +2749,29 @@ work/v34-traceback-target-validation.log and
 work/v34-traceback-negative-control.json. Candidate /tmp/v34-traceback-candidate
 has SHA-25637793e5fd859cf5087d46400dec3b17bb2e593287cd6f6a8c338afde2887d3fc.
 Physical reliability still needs verification; this is not yet a fallback release.
+
+
+### Traceback-reset candidate physical call
+
+Source832f532, native37793e5fd859cf5087d46400dec3b17bb2e593287cd6f6a8c338afde2887d3fc,
+was tested with the same1024-symbol clock average and other12k V34-only settings
+as the preceding failed call. Attempt06034dae-f4fd-4467-8e2a-e63123a3007f
+CONNECTS12000bit/s with one TX B1 entry, ODP/ADP, LAPM and PPP/IPCP. No retrain
+occurs, so this call validates basic candidate operation but does not exercise
+the physical retrain fix or establish causality relative to the previous failure.
+
+Both public HTTP probes return200 and559bytes with the expected checksum
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d,
+PPP source10.64.0.2 and zero six-category RAS counters before and after each
+probe. Disconnect and session/address/media cleanup pass. Evidence:
+work/v34-traceback-hardware-1789260523.json,
+work/v90-final-live-06034dae-f4fd-4467-8e2a-e63123a3007f.json and
+work/v34-traceback-hardware-acceptance-audit.json. Full native trace remains on
+CT105 at /tmp/v34-traceback-hardware-1789260523-native.log. Repeated calls and
+physical retrain recovery are still required; do not merge this sample into the
+older candidate's two-success/two-failure series as if the binaries were equal.
+
+Restored qualifiedV90 passes attempt4c4c4b5c-c884-4d56-9419-3c416af2b9bf at
+49296bit/s with PPP/IPCP, the expected559-byte checksum, six zero RAS counters
+and cleanup. work/v34-traceback-final-audit.json verifies all25 managed files,
+guard, removed trial flags and idle endpoints. No trial build remains deployed.

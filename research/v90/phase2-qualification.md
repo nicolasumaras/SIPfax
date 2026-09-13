@@ -3069,3 +3069,35 @@ Evidence: work/v34-timeline-dual-mode-live-profile.json;
 work/v34-timeline-dual-mode-diagnostics.json;
 work/v34-timeline-v90-control-audit.json;
 work/v34-timeline-dual-mode-repeat-audit.json. Raw traces remain on CT105.
+
+
+## Source package397 and full installation-cycle verification
+
+Committed source397a0909f2cfb132bdb814e23fae0f01f0fbeb00 was packaged twice
+with byte-identical output:24,149,014bytes, archive SHA-256
+`dcccf898c5d67e736998b809bb9050aa2ea2fde5ebf674bda4a0796da88eeddc`.
+CT105 verified the transferred archive, extracted it cleanly, built with
+GCC14.2.0/glibc2.41 and reproduced the exact tested native hash
+`164008c9fd2b2ee767402b7eb5fa9ae223b510358466f0dc748d6269f624b39f`.
+Timeline and traceback regressions and installer preflight pass in that
+extraction. This ties the source package to the physical-test binary.
+
+The full installer then installed the package, rolled it back, and reinstalled
+it, with one physical PPP/IPCP/checksum call at each stage:
+installed `6acadff7-dd46-451f-82c7-d8a6573c7055`,
+rollback `d9d87745-26b6-4819-9fd8-c3830fa85fa8`,
+reinstalled `3e03835b-67bd-4f38-958a-6356490b4b7a`.
+All three559-byte HTTP payloads match the expected hash, all before/after
+RAS counters are zero and call cleanup succeeds. A final rollback leaves
+qualified nativee62a02b2 installed. The independent audit checks all four
+installer operations against their intended native hashes, all three call
+reports, final hashes of all25 managed release files, the guard and idle
+endpoints. The candidate backup/manifest is retained in
+/opt/sipfax/releases/integrated-397a090. No change to saved credentials was
+required. This qualifies packaging and the bounded installation cycle for
+this artifact under the existing V90 configuration, not final-artifact
+endurance, automatic fallback, bulk upload, multi-call operation or PR merge.
+
+Evidence: work/release-397a090-source-manifest.json;
+work/release397-target-package-audit.json;
+work/v90-integrated397-release-1789265738-audit.json.

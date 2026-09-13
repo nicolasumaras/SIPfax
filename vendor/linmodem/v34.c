@@ -8439,6 +8439,7 @@ void V34_static_init(void)
 
 /* V.34 Phase-2 answer state machine (v34_phase2.c) */
 extern void *v34_phase2_new(void);
+extern void v34_phase2_retrain(void *state);
 extern int v34_phase2_run(void *p, s16 *out, s16 *in, int n);
 extern int v34_phase2_symrate(void *p);
 extern int v34_phase2_md_ms(void *p);
@@ -8567,7 +8568,10 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                     s->tb_restarts = rst;
                     s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
                     s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
-                    memset(output, 0, nb_samples * sizeof(s16));
+                    v34_phase2_retrain(s->phase2);
+                    /* This callback starts the 560-sample silence interval;
+                       do not add a separate block of mute ahead of it. */
+                    v34_phase2_run(s->phase2, output, input, nb_samples);
                     return 0;
                 }
             }

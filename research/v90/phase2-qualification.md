@@ -2452,3 +2452,28 @@ the sandbox-only run failed the existing control-socket bind test, not the wire
 test. A fresh deployment audit verifies all25 qualified files, erasure guard,
 idle endpoints and removed trial flags (work/v34-startup-current-deployment-audit.json).
 The audit reuses the recorded restoration call evidence; no new call was made.
+
+
+### Dedicated V34 answer retrain entry
+
+Inspection against V.34 (02/98) 11.5.2.2 finds that the Tone-B watchdog previously
+emitted one silent callback then restarted the initial INFO0a exchange. The
+answer retrain response requires 70 +/-5ms silence followed by Tone A and the
+11.2.1.2.3 ranging procedure. A dedicated entry now resets Phase2, emits exactly
+560 silent samples across callback boundaries, then sends pure Tone A without
+INFO0a. Its ranging gate requires Tone B and at least400 emitted Tone-A samples.
+Normal initial startup retains its existing INFO0a path. The outer watchdog's
+roughly600ms recognition window and three-restart cap are unchanged; this change
+does not claim to correct the initial training failure or all retrain behavior.
+
+The waveform regression starts with a dirty initial handshake and checks80-,160-
+and257-sample callbacks, exactly70ms silence, pure Tone A for at least50ms,
+subsequent phase reversal, and no premature ranging with absent Tone B. It also
+checks initial INFO0a remains present. CT105 ASan/UBSan passes, as do the complete
+native build, serial/DTE sanitizer tests, B1 reference, readiness, MP field and
+acquisition replay regressions. The local sanitizer link was unavailable because
+libasan.so.8.0.0 is missing; sanitizer evidence is from the target.
+Candidate /tmp/v34-retrain-entry-candidate has native SHA-256
+356931ce7976f3ead5bf016c0eb513427a9b1307dfc40386df18cb2929145b14.
+Evidence: work/v34-retrain-entry-full-target-validation.log. Physical fallback
+still requires a hardware trial and successful PPP traffic.

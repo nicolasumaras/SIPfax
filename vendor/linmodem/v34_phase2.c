@@ -82,6 +82,7 @@ typedef struct {
     short probe[24000]; int probe_len;
     int symrate;
     int retries;
+    int retrain_entry, retrain_silence; /* 11.5.2.2: sample-counted 70 ms */
     int act_run, sil_run;   /* SIPFAX: post-probe burst tracker (R_PRX) */
     int seg;
     int last;
@@ -209,6 +210,15 @@ static void brev_scan(V34Phase2 *p, short *in, int n){
 
 /* main process: returns 0 running, 1 done, -1 fail */
 int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
+    if (n <= 0) return 0;
+    if (p->retrain_silence > 0) {
+        int quiet = n < p->retrain_silence ? n : p->retrain_silence;
+        memset(out, 0, quiet * sizeof(*out));
+        p->retrain_silence -= quiet;
+        p->p2abs += quiet;
+        out += quiet; in += quiet; n -= quiet;
+        if (!n) return 0;
+    }
     if (p->state == R_PRX && n > 0) v34_info1c_receive(&p->caller_info, in, (unsigned)n);
     if(p->state!=p->last){
         /* SIPFAX: the old line printed p->tstate, which is RESET on most state changes, so it
@@ -261,7 +271,9 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
         if(p->txmode==TX_INFO0A){
             if(p->info_bit>=p->info_n){ if(p->tstate<(long)(0.3*S)){p->info_t=0;p->info_lastsym=-1;p->info_bit=-1;} else set_tx(p,TX_TONEA); }
         }
-        if(p->txmode==TX_TONEA && p->toneb_run>=16){  /* modem's SUSTAINED ranging Tone B (>~0.35s),
+        if(p->txmode==TX_TONEA &&
+           (p->retrain_entry ? (p->toneb_run > 0 && p->tstate >= 400) :
+                               p->toneb_run >= 16)){  /* modem's SUSTAINED ranging Tone B (>~0.35s),
                        NOT the brief early Tone B blips (run~12) it makes while finishing INFO0c.
                        Locking on a blip ran our sequence ~1.7s early and missed the modem's probe. */
             fprintf(stderr,"[v34p2] modem locked Tone B (run=%d) -> ranging sequence\n",p->toneb_run);fflush(stderr);
@@ -454,6 +466,16 @@ int v34_phase2_process(V34Phase2 *p, short *out, short *in, int n){
 
 /* ---------- opaque API ---------- */
 void *v34_phase2_new(void){V34Phase2*p=malloc(sizeof(V34Phase2));if(p)v34_phase2_init(p);return p;}
+/* Called only after the outer receiver has recognized sustained Tone B.
+   Initial startup still sends INFO0a. Retraining responds with silence then
+   Tone A, as 11.5.2.2 / 11.2.1.2.3 require, without replaying INFO0a. */
+void v34_phase2_retrain(void *state){
+    V34Phase2 *p = state;
+    v34_phase2_init(p);
+    p->retrain_entry = 1;
+    p->retrain_silence = 560;
+    p->txmode = TX_TONEA;
+}
 int v34_phase2_run(void*p,short*out,short*in,int n){return v34_phase2_process((V34Phase2*)p,out,in,n);}
 int v34_phase2_symrate(void*p){return ((V34Phase2*)p)->symrate;}
 int v34_phase2_md_ms(void*p){V34Info1c *i=&((V34Phase2*)p)->caller_info;return i->valid?(int)i->md_ms:-1;}

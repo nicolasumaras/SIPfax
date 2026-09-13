@@ -172,10 +172,21 @@ event. Development source now forwards the exit and terminates only the owning
 current call, preserving asynchronous RTP release and ignoring stale events
 after Call-ID reuse. The regression also covers a surviving second call and
 synchronous exit notification during teardown. All89 JavaScript tests pass.
-This application change is not yet deployed or physically qualified; earlier
-candidate397 results remain evidence for candidate397, not this changed runtime.
-Next perform physical worker-failure cleanup/redial and qualify the updated
-integrated artifact before release.
+Source9156097 has now passed a bounded physical worker-failure cleanup/redial
+trial. Its reproducible source archive rebuilds to the existing native hash;
+the installer verifies all25 managed files. After a verified49,296-bit/s call,
+only its service-owned native worker is interrupted with SIGKILL. Attempt
+`d3551379-2b49-4de8-b841-19e7e427a0ac` releases server call/PPP/media
+resources within0.922 seconds of the first post-injection observation window;
+the notebook active-connection list clears within2.841 seconds. A new attempt
+`342ef450-8444-4365-af11-ab3a8f2de14f` connects at49,296bit/s, reuses the
+released RTP port, passes the public checksum with zero RAS errors, and cleans
+up. Rollback and all25 restored files pass live audit. DialUpLab's attempt
+record still reported Connected when its connection list cleared; that API
+status discrepancy is retained. This qualifies worker-crash cleanup and one
+redial, not network-blackout recovery or final-artifact endurance/repeatability.
+Earlier candidate397 results remain evidence for candidate397, not this changed
+application runtime. The qualified baseline is restored.
 
 The opposite-direction bounded-loss case also passes on candidate397:
 attempt `b965d53d-65fa-4e2e-9ba0-8f0815d1de9e` drops exactly three RTP

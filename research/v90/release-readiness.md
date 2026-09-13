@@ -165,6 +165,19 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+Candidate915 passes one60-second outbound RTP jitter trial, attempt
+`5fb21549-e5f5-4f8d-94d2-3b81c2877d95`, using20ms delay with5ms variation
+on the exact discovered CT-to-PBX UDP tuple. Receiver header timing standard
+deviation rises from0.207ms baseline to4.091ms during injection and returns
+to0.263ms afterward. All12 public HTTP payloads, PPP identity/duration and
+six RAS error categories pass. The delay queue processes3,000 packets with
+zero queue drops and drains before removal. Steady-state phases show no
+sequence gaps or reordering; transitions retain one reorder observation and
+two forward sequence-gap observations, which are not a unique packet-loss
+count. The audit does not hide these transitions or claim arbitrary jitter
+tolerance. Queue/filter/timer cleanup, baseline rollback and all25 restored
+files pass live checks. No receiver audio payload is exported.
+
 Updated application candidate9156097 passes its own V90 endurance call,
 `8fbaa1da-32e7-48d9-9d48-943555c9c983`: 1,802.686 seconds, 221 verified
 downloads totaling7,241,728 bytes, 221 small URL transfers and45 public HTTP

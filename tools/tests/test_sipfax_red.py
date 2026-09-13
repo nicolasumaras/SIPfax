@@ -66,6 +66,30 @@ class RedTests(unittest.TestCase):
         self.assertEqual(len(self.encoder.packet(packet(3, 480, 2))), 201)
         self.assertEqual(len(self.encoder.packet(packet(4, 640, 3, ssrc=5678))), 201)
 
+    def test_startup_timestamp_rewind_preserves_clock_and_resets_redundancy(self):
+        # Hardware capture: early media ended at seq 8831 / timestamp 2400;
+        # bridged modem audio began at seq 8832 / timestamp 0, same SSRC.
+        # Exercise both activation at the handoff and an already active bridge.
+        for active_during_early_media in (False, True):
+            with self.subTest(active=active_during_early_media):
+                encoder = red.RedEncoder('192.168.1.29', '192.168.1.235')
+                if active_during_early_media:
+                    encoder.register(('handoff', 35270))
+                encoder.packet(packet(8831, 2400, 17))
+                encoder.register(('handoff', 35270))
+                first = bytearray(packet(8832, 0, 29))
+                first[29] |= 128  # The RTP marker must survive encapsulation.
+                first = bytes(first)
+                encoded = encoder.packet(first)
+                self.assertEqual(encoded[28], first[28])
+                self.assertEqual(encoded[29], 128 | 96)
+                self.assertEqual(encoded[30:40], first[30:40])
+                self.assertEqual(encoded[40:], b'\0' + first[40:])
+                following = encoder.packet(packet(8833, 160, 31))
+                self.assertEqual(following[40:45], b'\x80\x02\x80\xa0\0')
+                self.assertEqual(following[45:205], first[40:])
+                self.assertEqual(following[205:], bytes([31]) * 160)
+
     def test_malformed_and_non_audio_are_unchanged(self):
         raw = packet(1, 160, 1)
         for value in [b'', raw[:20], raw[:39], raw + b'x',

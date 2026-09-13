@@ -2424,3 +2424,31 @@ Restoration attempt5901548f-c295-4402-b44b-de3b94e8b29b passes49296bit/s,
 expected559-byte HTTP checksum, six zero RAS error counters and cleanup.
 work/v34-transport-hardware-final-audit.json verifies25 managed files, qualified
 native hash, guard and idle endpoints. No experimental build remains deployed.
+
+
+### Startup handoff and RED clock preservation
+
+Read-only inspection confirms the active PBX dialplan sends Progress(), waits
+0.3 seconds, registers the ATA RTP destination with the RED service, and then
+calls SIPfax. The deployed encoder matches deploy/sipfax_red.py (SHA-256
+ e2183498aeeceadd219bfcf9c2a0be7de472fa6d105cde15df067714b73a90f0).
+Its wrapper preserves sequence, timestamp, SSRC and marker; PT96 is the configured
+RFC2198 encapsulation, not evidence of a different sample rate.
+
+The retained header capture identifies the exact transition: sequence8831 /
+timestamp2400 / PT0 is followed 131.797ms later by sequence8832 / timestamp0 /
+PT96, with unchanged SSRC1602114569. The latter is primary-only (UDP181);
+sequence8833 / timestamp160 resumes prior-plus-current redundancy (UDP345).
+This is consistent with the early-media to bridged-media handoff. The encoder
+cannot create the rewind through its current timestamp-preserving code, but
+this inspection alone does not locate the upstream timestamp assignment or
+establish that the ATA tolerates it. No timestamp rebasing was deployed.
+
+A regression exercises this captured rewind both when registration starts at
+the handoff and when the bridge was already active. It verifies preserved RTP
+identity/marker, exclusion of stale early-media redundancy, and recovery of the
+next valid redundant block. All9 RED tests pass with local Unix-socket access;
+the sandbox-only run failed the existing control-socket bind test, not the wire
+test. A fresh deployment audit verifies all25 qualified files, erasure guard,
+idle endpoints and removed trial flags (work/v34-startup-current-deployment-audit.json).
+The audit reuses the recorded restoration call evidence; no new call was made.

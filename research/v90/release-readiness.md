@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`30bd3778-6bce-42ff-b860-ebf7487b69c3`, connected at 49,296 bit/s,
+`5901548f-c295-4402-b44b-de3b94e8b29b`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | Complete the intended impairment matrix and obtain physical V.34 PPP plus integrity-checked traffic. Current V.34 trials fail with errors 678/721. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | Complete the intended impairment matrix and obtain physical V.34 PPP plus integrity-checked traffic. Current V.34 trials fail with errors 678/721/777. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -47,14 +47,25 @@ replay acquired at RMS 0.135 with no 20-ms callback overruns, but the actual ODP
 detector found no startup sequence in its first 6,000 decoded bits. Positive
 synthetic detection passed. The replay does not reproduce each live reset, and
 these findings do not establish whether the caller sent ODP or whether tracking
-lost it. Next collect direct live DTE-path counts and determine the caller's
-post-B1 waveform before changing detection thresholds or claiming fallback.
+lost it. Later diagnostics below provide direct live DTE counts and waveform evidence;
+this earlier replay alone does not justify changing detection thresholds.
 
 The later diagnostic trial (`7596e320-5d64-4b75-867d-2f341a1239de`)
 confirmed live ODP detection, ADP transmission and stream selection. The initially
 logged HDLC frames failed CRC and LAPM never connected; Windows ended with error
 777. This narrows the next investigation to post-startup receive integrity.
 The qualified V90 restoration check passed again at 49,296 bit/s.
+
+Later capture 66406 shows the caller signal disappearing partway through B1,
+followed by sustained 1200-Hz Tone B, consistent with caller retraining. A scoped
+transport trial (`f5c1c230-c546-4b36-9a7b-4f83ee1c1286`) found continuous RTP
+sequence numbers on all four observed legs and regular incoming timestamps at
+CT105; this does not prove ATA reception or correct analog playout. The only
+PBX-to-ATA timestamp rewind coincides with the early-media handoff, about 17
+seconds before the first observed retrain. The deployed RED encoder preserves
+that timestamp and carries no stale redundant block across the handoff.
+Next distinguish a caller protocol rejection from ATA playout effects; neither
+fallback nor a causal link to the startup rewind is established.
 
 ## Immediate dependencies
 

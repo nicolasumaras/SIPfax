@@ -2981,3 +2981,39 @@ phase, gain and timing adaptation during erasures may still need protection.
 Evidence: work/v34-squelch-probe.json; work/v34-loss-74466-squelch.json;
 work/v34-loss-74466-frame-recovery.json; work/v34-success-69114-squelch.json;
 work/v34-success-69114-squelch-identity.json.
+
+
+## V34 timeline fix and physical loss recovery
+
+Source `d8c3f33f821c0b1fc41439359925023607faddcc` preserves the CMA
+front-end history and T/2 sample positions through silence in data mode,
+while retaining startup squelch. The permanent regression exercises the real
+front end with 137, 412 and 1,372 silent half-symbol inputs followed by resumed
+signal, checking every position and the resumed history. It separately checks
+startup silence suppression. Restoring the old condition in an isolated
+negative-control build fails at input 299 (only 298 positions advanced).
+Traceback, B1, readiness, MP and acquisition regressions pass; target serial,
+DTE/LAPM, retrain-entry and clock-history sanitizer checks also pass.
+The CT105 native hash is
+`164008c9fd2b2ee767402b7eb5fa9ae223b510358466f0dc748d6269f624b39f`,
+reproduced identically in two build directories.
+
+Its first physical attempt, `2f0b7379-09d4-4494-b1b2-227990b4a02b`,
+fails startup with error 678 before any packet injection. This is retained
+and does not test recovery. The unchanged-candidate repeat,
+`3b8412e6-7633-4223-8d46-a60e21257604`, connects at 12,000 bit/s,
+passes a baseline HTTP checksum, then survives exactly three inbound RTP
+packet drops. All three post-loss HTTP checks match the 559-byte checksum
+(total verified payload 2,236 bytes including baseline). Before/after RAS
+counters remain zero and connection duration does not reset. The independent
+audit verifies the scoped port and counter, cleanup, removal of the nft rule,
+restoration of all 25 managed release files and idle endpoints.
+This is the first passing physical V34 established-link trial for this
+bounded loss case. It does not prove arbitrary loss recovery, startup
+repeatability, automatic V90/V34 selection or full release readiness. The
+application CI job passes; the full native job remains pending at observation.
+
+Evidence: work/v34-data-timeline-negative-control.json;
+work/v34-timeline-target-validation.log; work/v34-timeline-target-manifest.json;
+work/v90-controlled-loss-2f0b7379-09d4-4494-b1b2-227990b4a02b.json;
+work/v90-controlled-loss-3b8412e6-7633-4223-8d46-a60e21257604-audit.json.

@@ -141,6 +141,16 @@ below the negotiated rate; no retrain response is recorded. V34 erasure
 recovery is therefore a demonstrated remaining failure. Production is restored
 and all 25 managed files and idle endpoints are verified.
 
+Source `d8c3f33` fixes data-mode sample loss at the silence gate and passes
+the permanent regression with a failing old-code negative control. Its target
+binary `164008c9…624b39f` builds reproducibly and passes focused native tests.
+An initial dial fails678 before injection; an unchanged repeat
+(`3b8412e6-7633-4223-8d46-a60e21257604`) passes the three-packet inbound
+loss case at12,000bit/s with four HTTP checks, zero RAS errors and cleanup.
+This supersedes the failure for that single bounded recovery case, but leaves
+startup reliability, broader impairments and automatic fallback open. The
+qualified V90 deployment is restored and audited.
+
 ## Immediate dependencies
 
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP

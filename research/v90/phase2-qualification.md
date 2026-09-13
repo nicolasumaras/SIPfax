@@ -2877,3 +2877,38 @@ files, the erasure guard, removal of trial flags and idle endpoints. The
 temporary endurance fixture is inactive. Evidence:
 work/v34-sustained-final-restoration-audit.json and
 work/v90-ppp-lifecycle-ab518fe0-88ca-49f0-bf0f-372b5f13b678.json.
+
+
+## Reproducible target candidate and two-protocol smoke checks
+
+Committed source `aa571ec58df04fcabf27d15b5b6d61980108c471` was archived
+without local build outputs and built separately on CT105. Its native SHA-256
+is `f0b8aadb0f99893a5501cc1d8f94a07a037ec69f4b5b4b25a71b7f99ec42e00d`.
+The native reproducibility regression rebuilt it in another target directory
+and produced the identical hash. Target serial, DTE/LAPM, retrain-entry and
+clock-history sanitizer checks passed, as did traceback-reset, B1-reference,
+readiness, MP-field and acquisition-replay regressions. The source subset
+archive SHA-256 is
+`1e1b33f16224f9109ac82dc4f35f9e8d9c5b7195bc3dae77112cb5eb125f8a91`.
+This proves same-toolchain path independence, not identity across compilers.
+
+A temporary V.90 trial of this exact binary, attempt
+`61e66f75-649f-4d12-a112-248792db988b`, connects at 49,296 bit/s and passes
+the 559-byte HTTP checksum, PPP/IPCP, both before/after zero RAS counters and
+cleanup. A subsequent V.34-only trial of the same binary, attempt
+`0a277299-73ed-46bf-b7fb-d4c77ba4e671`, connects at 12,000 bit/s on the
+first training attempt, passes two HTTP checksums (1,118 bytes), PPP/IPCP,
+zero RAS counters and cleanup. Both use the existing qualified application;
+its application/deployment files have no changes between 9e0f242 and aa571ec.
+The V.34 trial uses the explicit experimental settings from the endurance
+campaign; this is not automatic fallback. Both controllers restore the
+qualified native afterward, and the final audit verifies all 25 managed files,
+guard configuration and idle endpoints. These are short compatibility checks,
+not a replacement for final-artifact repeatability, sustained traffic or
+release deployment/rollback qualification. Broad native CI is still pending
+at this observation.
+
+Evidence: work/release-aa571ec-target-manifest.json,
+work/release-aa571ec-target-validation.log,
+work/release-aa571ec-v90-audit.json, work/release-aa571ec-v34-audit.json,
+and work/release-aa571ec-final-state-audit.json.

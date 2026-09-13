@@ -125,6 +125,13 @@ is one sustained V.34-only success; automatic fallback, impairment recovery
 and startup reliability remain open. The controller restored the qualified
 native binary and removed the temporary trial configuration.
 
+Release candidate `aa571ec` now builds reproducibly across separate CT105
+directories (native `f0b8aadb…ec42e00d`) and passes the focused target
+regressions. This exact binary passes one short physical V90 call at 49,296
+bit/s and one V34-only call at 12,000 bit/s, with checksums and cleanup.
+Production is restored. These checks do not replace final-artifact endurance,
+repeatability or automatic fallback qualification.
+
 ## Immediate dependencies
 
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP

@@ -40,6 +40,15 @@ static void selected_frame(void *opaque,const uint8_t *frame,int len,int ok)
     }
     if(s->resume) {
         if(len<=0)return; /* Flag/abort notifications carry no candidate frame. */
+        /* A physical erasure can interrupt selection before XID negotiation
+           finishes. Repeated XIDs may be separated by damaged frames; the
+           same CRC-valid addressed XID that qualifies startup also qualifies
+           this negotiating stream. Established links still need two frames. */
+        if(s->resume_negotiating && ok && len>=3 &&
+           (frame[0]==0x01 || frame[0]==0x03) &&
+           (frame[1]&0xec)==0xac && frame[2]==0x82){
+            commit_candidate(c,0);return;
+        }
         /* A retrained physical channel resumes LAPM, without another ODP/XID.
            Require two valid addressed frames, never flags alone or random bits. */
         /* SABM/UA have only address and control bytes; they can be the only

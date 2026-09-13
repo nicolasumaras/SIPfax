@@ -33,6 +33,8 @@ struct V90LapmSelect {
     V90LapmCandidate candidate[V90_UP_CANDIDATES];
     int selected;
     unsigned resume;
+    /* Set by the link only while reacquiring before LAPM connects. */
+    unsigned resume_negotiating;
     unsigned detections,selections,flag_selections,selection_by_flags,invalidations,overflows,expirations;
     void *opaque;
     void (*odp)(void *opaque,unsigned candidate,const uint8_t *bits,unsigned count);

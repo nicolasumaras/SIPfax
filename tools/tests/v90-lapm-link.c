@@ -93,6 +93,7 @@ static void transfer(unsigned reset_decoder,int early)
             for(unsigned id=0;id<V90_UP_CANDIDATES;++id)
                 v90_lapm_link_candidate_bit(&link,id,-1,test_sample);
             assert(link.connected==was_connected && link.detected && link.selection_count); /* Preserve ongoing negotiation too. */
+            assert(link.selector.resume_negotiating==!was_connected);
             assert(link.protocol.lapm.vs==vs && link.protocol.lapm.va==va && link.protocol.lapm.vr==vr);
             hdlc_rx_restart(&caller.lapm.hdlc_rx);
             candidate+=2;reset_at=test_sample;resets++;
@@ -110,6 +111,7 @@ static void transfer(unsigned reset_decoder,int early)
     assert(link.detected && link.selection_count==1+reset_decoder && link.selected_candidate==candidate);
     assert(resets==reset_decoder);
     assert(link.resumptions==reset_decoder && !link.reacquiring && !link.restarts);
+    assert(!link.selector.resume_negotiating);
     assert(link.connected && !link.disconnected && !link.errors && !link.overflow);
     /* Startup reacquisition can finish after the initial DTE busy interval. */
     assert((early || saw_busy) && max_pending<=V90_LAPM_PENDING_BYTES);

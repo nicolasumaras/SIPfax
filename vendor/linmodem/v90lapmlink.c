@@ -84,6 +84,7 @@ static void selected_output(void *opaque,int bit)
     if(bit<0){
         if(s->selection_count && !s->disconnected && !s->errors) {
             s->reacquiring=1;s->selector.resume=1;
+            s->selector.resume_negotiating=!s->connected;
             /* ODP is already complete once a stream has been selected. The
                peer may still be negotiating XID/SABM, or already connected;
                neither phase requires another ODP after a physical reset. */
@@ -94,6 +95,7 @@ static void selected_output(void *opaque,int bit)
             return;
         }
         s->reacquiring=s->selector.resume=0;
+        s->selector.resume_negotiating=0;
         int rate=s->protocol.tx_bit_rate;
         v42_restart(&s->protocol);
         s->protocol.tx_bit_rate=rate;
@@ -113,8 +115,10 @@ static void selected(void *opaque,unsigned candidate)
        protocol stream. Leave detection before replaying its bounded tail. */
     int rate=s->protocol.tx_bit_rate;
     unsigned resuming=s->reacquiring;
+    unsigned negotiating=s->selector.resume_negotiating;
     if(resuming) {
         s->reacquiring=s->selector.resume=0;s->resumptions++;
+        s->selector.resume_negotiating=0;
         hdlc_rx_restart(&s->protocol.lapm.hdlc_rx);
     } else {
         bool detect=s->protocol.detect;s->protocol.detect=false;
@@ -124,7 +128,8 @@ static void selected(void *opaque,unsigned candidate)
     s->selected_candidate=candidate;s->selection_count++;
     s->selected_xid_dumped=0;
     fprintf(stderr,"[v42] selected LAPM candidate %u after %s\n",candidate,
-            resuming?"two CRC-valid resume frames":s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
+            resuming?(negotiating?"negotiating-stream evidence":"two CRC-valid resume frames"):
+            s->selector.selection_by_flags?"continuous flags":"CRC-valid XID");
 }
 
 static int supported_adp_bit(unsigned n)

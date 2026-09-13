@@ -25,9 +25,10 @@ static void feed_odp(V90LapmSelect *s,unsigned candidate)
         v90_lapm_select_bit(s,candidate,v42_tx_bit(caller),i);
     assert(s->candidate[candidate].odp_reported);v42_free(caller);
 }
-static void feed_xid(V90LapmSelect *s,unsigned candidate,int corrupt)
+static void feed_xid_header(V90LapmSelect *s,unsigned candidate,int corrupt,
+                            uint8_t address,uint8_t control,uint8_t format)
 {
-    hdlc_tx_state_t tx;uint8_t xid[]={1,0xaf,0x82};
+    hdlc_tx_state_t tx;uint8_t xid[]={address,control,format};
     hdlc_tx_init(&tx,false,1,false,NULL,NULL);
     assert(hdlc_tx_flags(&tx,5)==0);
     assert(hdlc_tx_frame(&tx,xid,sizeof(xid))==0);
@@ -36,6 +37,10 @@ static void feed_xid(V90LapmSelect *s,unsigned candidate,int corrupt)
        protocol-phase evidence rule. */
     for(unsigned i=0;i<130 && s->selected<0;i++)
         v90_lapm_select_bit(s,candidate,hdlc_tx_get_bit(&tx),500+i);
+}
+static void feed_xid(V90LapmSelect *s,unsigned candidate,int corrupt)
+{
+    feed_xid_header(s,candidate,corrupt,1,0xaf,0x82);
 }
 static void feed_resume_frame(V90LapmSelect *s,unsigned candidate,int corrupt,uint8_t address)
 {
@@ -89,6 +94,24 @@ int main(void)
     feed_resume_frame(&s,4,0,1);assert(s.selected<0); /* Cannot combine candidates. */
     feed_resume_frame(&s,4,0,0x99);assert(s.selected<0 && !s.candidate[4].resume_valid_frames);
     feed_resume_frame(&s,3,0,1);assert(s.selected==3);
+    /* A startup reset can leave repeated XIDs separated by damaged frames.
+       A valid addressed XID is already sufficient negotiation evidence;
+       established links must retain the two-frame recovery requirement. */
+    v90_lapm_select_reset(&s);s.resume=1;s.resume_negotiating=0;
+    feed_xid(&s,6,0);assert(s.selected<0);
+    feed_xid(&s,6,1);assert(s.selected<0);
+    feed_xid(&s,6,0);assert(s.selected<0);
+    v90_lapm_select_reset(&s);s.resume=1;s.resume_negotiating=1;
+    feed_flags(&s,6,100);assert(s.selected<0);
+    feed_xid(&s,6,1);assert(s.selected<0);
+    feed_xid_header(&s,6,0,0x99,0xaf,0x82);assert(s.selected<0);
+    v90_lapm_select_reset(&s);
+    feed_xid_header(&s,6,0,1,0xaf,0x81);assert(s.selected<0);
+    v90_lapm_select_reset(&s);
+    feed_xid_header(&s,6,0,1,0x01,0x82);assert(s.selected<0);
+    v90_lapm_select_reset(&s);
+    feed_xid(&s,6,1);assert(s.selected<0);
+    feed_xid(&s,6,0);assert(s.selected==6);
     v42_free(answerer);
     return 0;
 }

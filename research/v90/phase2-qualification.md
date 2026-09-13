@@ -2775,3 +2775,42 @@ Restored qualifiedV90 passes attempt4c4c4b5c-c884-4d56-9419-3c416af2b9bf at
 49296bit/s with PPP/IPCP, the expected559-byte checksum, six zero RAS counters
 and cleanup. work/v34-traceback-final-audit.json verifies all25 managed files,
 guard, removed trial flags and idle endpoints. No trial build remains deployed.
+
+
+### Three unchanged traceback-candidate repeats pass
+
+Native37793e5fd859cf5087d46400dec3b17bb2e593287cd6f6a8c338afde2887d3fc,
+source832f532, repeats with the same12k V34-only settings and1024-symbol clock
+average. Each controller retains its own native trace on CT105 and restores
+qualifiedV90 before the next trial. All three calls pass:
+
+| Attempt | Rate | Startup retrains | Result |
+| --- | ---: | ---: | --- |
+| 337e4979-36dc-4fd0-9274-81047192d3bc | 12000 | 1 | LAPM, PPP/IPCP, two verified HTTP probes, cleanup |
+| eb171928-9bab-47fc-9522-cb8d2a3a9e87 | 12000 | 1 | LAPM, PPP/IPCP, two verified HTTP probes, cleanup |
+| a56b5600-a70e-4668-8b8c-8a343bf57304 | 12000 | 0 | LAPM, PPP/IPCP, two verified HTTP probes, cleanup |
+
+Each probe returns200/559bytes from PPP source10.64.0.2, matching
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d.
+All six RAS counters are zero both before and after each probe. The second call
+initially decodes B1 poorly (53.5% ones), then retrains and receives100% ones
+before LAPM connects. Thus the repeated hardware tests exercise the receiver
+reset path that the initial candidate call did not. This is startup recovery,
+not proof that an established PPP session survives deliberate impairment.
+
+Including initial call06034dae, the candidate has four consecutive successful
+short calls. This small sample is progress toward reliability, not a population
+success estimate or release qualification. Keep the older implementation's two
+successes/two failures separate. Evidence: work/v34-traceback-repeat-controller.log,
+work/audit_v34_traceback_repeats.py and work/v34-traceback-repeat-audit.json.
+Per-trial prefixes: work/v34-traceback-hardware-1789260747,1789260818,1789260889.
+All raw audio and full receiver logs remain on CT105.
+
+Restoration attempt4e66827f-6081-420d-a325-72d160e2b72e passes49296bit/s,
+PPP/IPCP, expected559-byte checksum, six zero RAS counters and cleanup.
+work/v34-traceback-repeat-final-audit.json verifies25 managed release files,
+guard, removed trial flags and idle endpoints. Preflight also verified these
+conditions before the campaign. Next run sustained V34 traffic, then test
+established-link recovery and automatic mode selection. All five release items
+remain active. PR29 is still draft; bfe2ef0 application CI passed while native CI
+was in progress at the recorded check (work/v34-traceback-repeat-pr-status.json).

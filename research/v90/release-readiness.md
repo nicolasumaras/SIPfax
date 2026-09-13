@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`4c4c4b5c-c884-4d56-9419-3c416af2b9bf`, connected at 49,296 bit/s,
+`4e66827f-6081-420d-a325-72d160e2b72e`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | Two of four V.34-only hardware calls pass at 12,000 bit/s with PPP and verified HTTP probes; the other two fail. Fix repeatability, test longer transfers and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passes four consecutive short 12,000-bit/s PPP calls, including two with startup retraining. Test sustained traffic, established-link impairment recovery and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -102,10 +102,13 @@ also finds a function-static traceback warmup counter surviving receiver resets.
 Source832f532 makes warmup per receiver and clears partial mapping state; a
 negative-control build reproduces the old bug and the fixed regression passes.
 Its first physical trial, with averaging still1024, connects12k and passes two
-HTTP probes with zero RAS errors on the first training attempt. No retrain occurs,
-so repeatability and physical recovery remain unqualified. Next repeat this new
-candidate and retain failures; do not combine its outcome with the older build's
-four-call series as if the implementation were unchanged.
+HTTP probes with zero RAS errors on the first training attempt. That initial call did not retrain. Three unchanged-candidate repeats subsequently
+pass at12k, with one startup retrain in each of the first two repeats. All six
+repeat HTTP probes have the expected checksum and zero RAS counters; teardown
+is clean. This gives four consecutive successful short calls for832f532. It does
+not qualify sustained traffic, an established link through impairment, automatic
+V90-to-V34 selection or the final integrated release. Next run sustained V34
+traffic and broaden recovery testing while preserving the qualified V90 build.
 
 ## Immediate dependencies
 

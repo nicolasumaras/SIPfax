@@ -2681,3 +2681,35 @@ Its18-second successful-call replay also recovers55 valid frames at all three
 settings. Evidence: work/v34-clock-average-target-validation.log and
 work/v34-success-69114-final-clock.json. No averaged candidate has yet passed
 physical PPP; production remains qualifiedV90.
+
+
+### First physical averaged-clock trial
+
+Sourcee47bd0a, nativeb048fd0a367928518a695c6b525c0065100a094f23dcbfcd91d392d11f936bdd,
+was tested once with SIPFAX_CLOCK_AVERAGE=1024 and unchanged V34-only12k settings.
+The live service environment was independently checked for both options.
+Attempt0cf5a16c-d11f-4cab-8d0c-acc73ba93b70 fails678: four TX B1 entries,
+three retrain responses, no ODP detection and no LAPM connection. RX reaches E
+on two attempts: seed-17.7ppm / RMS0.366 / first600bits52.5% ones, then
+seed-24.6ppm / RMS0.146 / first600bits47.8% ones. Thus even a modest averaged
+seed and low lattice RMS do not validate the early decoded stream. This failure
+precedes startup detection, unlike capture68966's clean-B1/later-corruption
+case. Clock averaging remains experimental and off by default; do not report
+its replay benefits as a successful physical qualification.
+
+Evidence: work/v34-clock-average-hardware-1789259855.json,
+work/v90-final-live-0cf5a16c-d11f-4cab-8d0c-acc73ba93b70.json,
+work/v34-clock-average-live-settings.json and
+work/v34-clock-average-hardware-health.json. Full receiver trace remains on
+CT105 at /tmp/v34-clock-average-hardware-1789259855-native.log. Next inspect
+the caller E/B1 boundary and decoder initialization in this failed call before
+further tuning the data clock. Both initial-B1 corruption and later tracking
+loss remain relevant failure classes.
+
+QualifiedV90 was restored. Attempt47e3b108-21f2-444e-8d82-0c76b2bea720 passes
+49296bit/s, PPP/IPCP, expected559-byte public HTTP checksum, six zero RAS
+counters and cleanup. work/v34-clock-average-final-audit.json verifies all25
+managed files, guard, removed trial flags and idle endpoints. Earlier CI34727480442
+for4076a56 is now completedSUCCESS for both application and native jobs;
+work/v34-clock-average-prior-ci.json records that result. It does not qualify
+the newer averaging implementation's CI or physical behavior.

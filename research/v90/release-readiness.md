@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`7ba4b285-6670-473e-a693-a75ecab219f9`, connected at 49,296 bit/s,
+`47e3b108-21f2-444e-8d82-0c76b2bea720`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -93,9 +93,13 @@ commands but still leaves gaps. Successful calls deliver the full receive rate.
 The clock-publication replay confirms this seed came from a CRC-valid MP pass.
 A trailing1,024- or2,048-symbol mean improves that recording and preserves four
 valid frames on a second failed-call recording; a256-symbol mean regresses the
-second recording to zero valid frames. Next cross-check the longer windows on
-successful-call recordings before a hardware comparison. The evidence does not
-justify a universal zero-seed override or deployment of the averaging prototype.
+second recording to zero valid frames. The longer windows also preserve55 byte-identical valid frames on a successful
+call replay and recover frames at two less favorable restart offsets. Source
+e47bd0a adds the method as an opt-in bounded history with sanitizer coverage.
+Its first1024-symbol hardware trial fails678 before ODP detection, with poor
+B1 decoding despite modest seeds. The option remains off by default. Next
+inspect the caller E/B1 transition and receiver initialization in that trial;
+clock averaging alone has not qualified fallback.
 
 ## Immediate dependencies
 

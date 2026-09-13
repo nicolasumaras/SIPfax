@@ -3042,3 +3042,30 @@ LAPM paths require explicit settings. A dual-mode trial profile is prepared
 with those V34 settings and without the V90-disabling cap, but is not yet
 physically tested. Evidence: work/v34-timeline-loss-series.json and the two
 referenced per-call audit files.
+
+
+## Combined V90/V34 profile: mixed V90 call results
+
+The timeline candidate (`d8c3f33`, native164008c9…624b39f) was tested with
+the working V34 CMA/LAPM/clock-average settings but no SIPFAX_LINMODEM_MAX
+cap. A live process-environment check confirms V34 LAPM, CMA, average1024
+and the V90 guard are enabled, with the modulation cap unset.
+First attempt `24d803ef-af7f-4058-b51e-0f03c2b2db55` selects SM_V90,
+restarts training and fails777 before PPP. A normal-profile control with the
+same binary, `d48babfd-308d-4e0a-be9a-65522cf16dd3`, passes at49,296bit/s.
+An unchanged combined-profile repeat,
+`6148032c-76ad-4c84-857a-49f53f7acc23`, then passes at49,296bit/s.
+Both passing calls have the expected559-byte HTTP checksum, zero before/after
+RAS counters, IPCP and clean teardown. Independent audits verify restoration
+of all25 managed release files, guard configuration and idle endpoints.
+The combined profile therefore has one failure and one success; this does
+not isolate the failed-call cause or qualify reliability. It demonstrates a
+working V90 call with the V34 receive options enabled. A caller requesting
+V34 is still required to prove fallback with the server offering V90.
+The user has been asked about temporarily setting the notebook modem to V34;
+no such change is assumed from elapsed time.
+
+Evidence: work/v34-timeline-dual-mode-live-profile.json;
+work/v34-timeline-dual-mode-diagnostics.json;
+work/v34-timeline-v90-control-audit.json;
+work/v34-timeline-dual-mode-repeat-audit.json. Raw traces remain on CT105.

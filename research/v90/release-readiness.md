@@ -157,6 +157,12 @@ is one startup678 failure followed by three consecutive passing bounded-loss
 calls, all with verified restoration. This is repeat evidence for that one
 loss case, not a general reliability estimate.
 
+The combined profile (V90 offered with V34 CMA/LAPM enabled) has one failed
+V90 call777 followed by one successful49,296-bit/s call after a passing
+normal-profile control. The successful combined call passes checksum, counters
+and restoration audits. This establishes basic coexistence, not reliability
+or fallback: a caller requesting V34 is still needed for that test.
+
 ## Immediate dependencies
 
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP

@@ -55,6 +55,8 @@ extern char *sm_states_str[];
 #define SM_FIFO_SIZE 4096
 
 struct sm_state {
+    s16 v8_history[8000];
+    int v8_history_count;
     /* pretty name of the modem (to debug) */
     char name[16];
 
@@ -93,6 +95,14 @@ struct sm_state {
         V90State v90_state;
         V22Session v22_state;
     } u;
+
+    /* V.34 error control is outside the modulation union so retraining
+       preserves outstanding LAPM frames. One instance belongs to each call. */
+    V90LapmLink v34_lapm;
+    int v34_lapm_requested;
+    long v34_lapm_samples;
+    unsigned long long v34_dte_tx_bits, v34_dte_rx_bits, v34_dte_rx_ones;
+    unsigned v34_dte_retrains;
 
     /* serial state */
     int serial_data_bits; /* 5 to 8 */
@@ -215,3 +225,12 @@ void lm_at_parser_init(struct lm_at_state *s, struct sm_state *sm);
 void lm_at_parser(struct lm_at_state *s);
 
 #include "display.h"
+
+/* LSB-first asynchronous octets for the V.34 PPP path. */
+int serial_8n1_get_bit(void *opaque);
+void serial_8n1_put_bit(void *opaque, int bit);
+
+void v34_dte_init(struct sm_state *s, int lapm);
+int v34_dte_get_bit(void *opaque);
+void v34_dte_put_bit(void *opaque, int bit);
+void v34_dte_retrain(struct sm_state *s);

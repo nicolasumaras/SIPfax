@@ -1,6 +1,8 @@
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
+import { RtpPacer } from './rtp-pacer.js';
+import { RtpContinuity } from './rtp-continuity.js';
 
 const DEFAULT_MODEM_FRAME_SAMPLES = 160;
 const DEFAULT_ANSWER_TONE_HZ = 2100;
@@ -68,7 +70,7 @@ export function buildRtpPacket({ payloadType, sequenceNumber, timestamp, ssrc, p
 }
 
 export class RtpEndpoint extends EventEmitter {
-  constructor({ host, port, ssrc = randomUInt32() }) {
+  constructor({ host, port, ssrc = randomUInt32(), playoutDelayMs = 0 }) {
     super();
     this.host = host;
     this.port = port;
@@ -78,6 +80,11 @@ export class RtpEndpoint extends EventEmitter {
     this.ssrc = ssrc;
     this.outboundSequenceNumber = 0;
     this.outboundTimestamp = 0;
+    this.pacer = playoutDelayMs > 0 ? new RtpPacer({
+      delayMs: playoutDelayMs,
+      send: ({ packet, remote }) => this.socket.send(packet, remote.port, remote.address),
+      issue: (reason) => this.emit('timing', { reason })
+    }) : null;
 
     this.socket.on('message', (message, remote) => {
       const packet = parseRtpPacket(message);
@@ -102,6 +109,7 @@ export class RtpEndpoint extends EventEmitter {
   }
 
   setSessionCodec(codec) {
+    this.pacer?.reset();
     this.expectedPayloadType = codec?.payloadType ?? null;
     this.outboundSequenceNumber = 0;
     this.outboundTimestamp = 0;
@@ -123,17 +131,28 @@ export class RtpEndpoint extends EventEmitter {
 
     this.outboundSequenceNumber = (this.outboundSequenceNumber + 1) & 0xffff;
     this.outboundTimestamp = (this.outboundTimestamp + timestampIncrement) >>> 0;
+    if (this.pacer) return this.pacer.push({ packet, remote: { ...this.remote } }, timestampIncrement / 8);
     this.socket.send(packet, this.remote.port, this.remote.address);
     return true;
   }
 
   start() {
-    return new Promise((resolve) => {
-      this.socket.bind(this.port, this.host, resolve);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        this.socket.off('error', failed);
+        this.socket.off('listening', listening);
+      };
+      const failed = error => { cleanup(); reject(error); };
+      const listening = () => { cleanup(); resolve(); };
+      this.socket.once('error', failed);
+      this.socket.once('listening', listening);
+      try { this.socket.bind(this.port, this.host); }
+      catch (error) { failed(error); }
     });
   }
 
   stop() {
+    this.pacer?.reset();
     return new Promise((resolve, reject) => {
       this.socket.close((error) => {
         if (error) {
@@ -191,10 +210,12 @@ export class ModemBridge extends EventEmitter {
     this.audioBytesOut = 0;
     this.framesIn = 0;
     this.framesOut = 0;
+    this.continuity = new RtpContinuity({ report: (event) => this.emit('timing', event) });
     this.attachModem(modem);
   }
 
   setSessionCodec(codec) {
+    this.continuity.reset();
     this.codec = codec ?? null;
     if (this.modem?.setSessionCodec) {
       this.modem.setSessionCodec(this.codec);
@@ -226,6 +247,10 @@ export class ModemBridge extends EventEmitter {
   }
 
   acceptFrame(frame) {
+    for (const audio of this.continuity.accept(frame)) this.acceptContinuousFrame(audio);
+  }
+
+  acceptContinuousFrame(frame) {
     const payload = Buffer.from(frame.payload);
     const audio = {
       codec: this.codec,
@@ -617,27 +642,34 @@ export class ExternalModemProcessBackend extends EventEmitter {
     this.child = child;
 
     child.stdout.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.acceptProcessOutput(chunk);
     });
     child.stderr.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.emit('backend-log', chunk.toString('utf8'));
     });
     child.stdin.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.stdio[3]?.on('data', (chunk) => {
+      if (this.child !== child) return;
       this.acceptControlOutput(chunk);
     });
     child.stdio[3]?.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message;
       this.emit('backend-error', error);
     });
     child.on('exit', (code, signal) => {
+      if (this.child !== child) return;
       this.lastExit = { code, signal };
       if (this.child === child) {
         this.child = null;
@@ -722,7 +754,7 @@ export class ExternalModemProcessBackend extends EventEmitter {
     const child = this.child;
     this.child = null;
     child.stdin.end();
-    child.kill('SIGTERM');
+    if (child.pid > 0) child.kill('SIGTERM');
   }
 
   diagnostics() {

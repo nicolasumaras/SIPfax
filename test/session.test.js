@@ -23,6 +23,7 @@ import { SipFaxServer } from '../src/server.js';
 import { MultiSessionManager } from '../src/session.js';
 import { Line } from '../src/line.js';
 import { SipfaxConfig } from '../src/config.js';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 // A no-socket Line stub so session-manager unit tests don't bind real UDP ports.
 class FakeLine extends EventEmitter {
@@ -96,7 +97,7 @@ test('multi-session manager rejects non-G.711 offers', () => {
   assert.equal(result.statusCode, 488);
 });
 
-test('ACK establishes and BYE frees a session slot and its RTP port', () => {
+test('ACK establishes and BYE frees a session slot and its RTP port', async () => {
   const pool = new RtpPortPool({ range: [41000, 41010] });
   const manager = makeManager({ rtpPortPool: pool });
   manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'call-4', payloads: '8' })));
@@ -107,6 +108,7 @@ test('ACK establishes and BYE frees a session slot and its RTP port', () => {
   assert.equal(manager.sessions.get('call-4').session.ppp.state, 'awaiting-auth');
   assert.equal(manager.terminate('call-4'), true);
   assert.equal(manager.sessions.has('call-4'), false);
+  await Promise.resolve();
   assert.equal(pool.available, pool.capacity);
 });
 
@@ -202,11 +204,11 @@ test('egress policy renders nftables rules and per-call descriptors', () => {
     lease: { localAddress: '10.70.0.1', clientAddress: '10.70.0.2' }
   });
 
-  assert.match(descriptor.nft.up.join('\n'), /add table inet sipfax_call_nft/);
+  assert.ok(descriptor.nft.up.includes(`add table inet sipfax_${callKey('call:nft')}`));
   assert.match(descriptor.nft.up.join('\n'), /oifname "eth0" masquerade/);
   assert.deepEqual(descriptor.nft.down, [
-    'delete table ip sipfax_nat_call_nft',
-    'delete table inet sipfax_call_nft'
+    `delete table ip sipfax_nat_${callKey('call:nft')}`,
+    `delete table inet sipfax_${callKey('call:nft')}`
   ]);
   assert.match(descriptor.iptables.down.join('\n'), /iptables -D FORWARD/);
 });
@@ -644,7 +646,7 @@ test('pppd supervisor writes egress lease descriptor before daemon start', () =>
     }
   });
 
-  assert.equal(started.egressDescriptorPath, join(leaseDir, 'call-descriptor.json'));
+  assert.equal(started.egressDescriptorPath, join(leaseDir, `${callKey('call-descriptor')}.json`));
   assert.equal(JSON.parse(readFileSync(started.egressDescriptorPath, 'utf8')).outboundInterface, 'eth0');
 });
 
@@ -664,6 +666,7 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
   ].join('\n'));
   writeFileSync(join(mockBin, 'sysctl'), [
     '#!/bin/sh',
+    'if test "$1" = -n; then if grep -q "ip_forward=1" "$SIPFAX_TEST_LOG"; then echo 1; else echo 0; fi; exit 0; fi',
     'printf "sysctl %s\\n" "$*" >> "$SIPFAX_TEST_LOG"'
   ].join('\n'));
   chmodSync(join(mockBin, 'nft'), 0o755);
@@ -677,7 +680,7 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
     callId: 'call-cycle',
     lease: { localAddress: '10.88.0.1', clientAddress: '10.88.0.2' }
   });
-  writeFileSync(join(leaseDir, 'call-cycle.json'), `${JSON.stringify(descriptor)}\n`);
+  writeFileSync(join(leaseDir, `${callKey('call-cycle')}.json`), `${JSON.stringify(descriptor)}\n`);
 
   const env = {
     ...process.env,
@@ -694,8 +697,8 @@ test('sipfax-egress-apply applies and rolls back nft rules across a PPP cycle', 
   const log = readFileSync(logPath, 'utf8');
   assert.match(log, /sysctl -w net\.ipv4\.ip_forward=1/);
   assert.match(log, /sysctl -w net\.ipv4\.conf\.eth-test0\.forwarding=1/);
-  assert.match(log, /add table inet sipfax_call_cycle/);
-  assert.match(log, /delete table inet sipfax_call_cycle/);
+  assert.ok(log.includes(`add table inet sipfax_${callKey('call-cycle')}`));
+  assert.ok(log.includes(`delete table inet sipfax_${callKey('call-cycle')}`));
   assert.match(log, /sysctl -w net\.ipv4\.ip_forward=0/);
 });
 
@@ -933,3 +936,155 @@ function makeInvite({ callId, payloads }) {
     `m=audio 18000 RTP/AVP ${payloads}`
   ].join('\r\n');
 }
+
+
+test('RTP port remains reserved until asynchronous line closure completes', async () => {
+  const pool = new RtpPortPool({ range: [42000, 42000] });
+  let closed;
+  const manager = makeManager({ rtpPortPool: pool, lineFactory(options) {
+    const line = new FakeLine(options);
+    line.stop = () => new Promise(resolve => { closed = resolve; });
+    return line;
+  } });
+  const invite = id => parseSipMessage(makeInvite({ callId: id, payloads: '8' }));
+  assert.equal(manager.startFromInvite(invite('closing')).accepted, true);
+  manager.terminate('closing');
+  assert.equal(pool.available, 0);
+  assert.equal(manager.startFromInvite(invite('next')).statusCode, 486);
+  closed();
+  await Promise.resolve();
+  assert.equal(pool.available, 1);
+  assert.equal(manager.startFromInvite(invite('next')).accepted, true);
+  manager.terminate('next'); closed();
+  await Promise.resolve();
+  assert.equal(pool.available, 1);
+});
+
+test('failed RTP closure retains the port and still terminates PPP', async (t) => {
+  const errors = t.mock.method(console, 'error', () => {});
+  const pool = new RtpPortPool({ range: [42002, 42002] });
+  let pppStopped = false;
+  const manager = makeManager({ rtpPortPool: pool, lineFactory(options) {
+    const line = new FakeLine(options);
+    line.stop = () => Promise.reject(new Error('close failed'));
+    return line;
+  } });
+  t.mock.method(manager.ppp, 'terminate', () => { pppStopped = true; });
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId: 'failed-close', payloads: '8' })));
+  manager.terminate('failed-close');
+  await Promise.resolve();
+  assert.equal(pppStopped, true);
+  assert.equal(pool.available, 0);
+  assert.match(errors.mock.calls[0].arguments[0], /RTP port retained/);
+  const line = Object.create(Line.prototype);
+  line.rtpEndpoint = { stop: async () => { throw new Error('unknown close failure'); } };
+  await assert.rejects(line.stop(), /unknown close failure/);
+  line.rtpEndpoint.stop = async () => { throw Object.assign(new Error('already closed'), { code: 'ERR_SOCKET_DGRAM_NOT_RUNNING' }); };
+  await line.stop();
+});
+
+test('late PTY events from an old Line cannot affect a reused Call-ID', async (t) => {
+  const lines = [];
+  const manager = makeManager({ lineFactory(options) {
+    const line = new FakeLine(options); lines.push(line); return line;
+  } });
+  const opened = t.mock.method(manager, 'openPty', () => true);
+  const closed = t.mock.method(manager, 'closePty', () => true);
+  const invite = parseSipMessage(makeInvite({ callId: 'reused-line', payloads: '8' }));
+  manager.startFromInvite(invite);
+  lines[0].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/old' });
+  assert.equal(opened.mock.callCount(), 1);
+  manager.terminate(invite.callId);
+  await Promise.resolve();
+  manager.startFromInvite(invite);
+  lines[0].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/stale' });
+  lines[0].emit('pty-closed', { callId: invite.callId });
+  assert.equal(opened.mock.callCount(), 1);
+  assert.equal(closed.mock.callCount(), 0);
+  lines[1].emit('pty-opened', { callId: 'another-call', slavePath: '/dev/pts/wrong' });
+  lines[1].emit('pty-closed', { callId: 'another-call' });
+  assert.equal(opened.mock.callCount(), 1);
+  assert.equal(closed.mock.callCount(), 0);
+  lines[1].emit('pty-opened', { callId: invite.callId, slavePath: '/dev/pts/current' });
+  lines[1].emit('pty-closed', { callId: invite.callId });
+  assert.equal(opened.mock.callCount(), 2);
+  assert.equal(closed.mock.callCount(), 1);
+  manager.terminate(invite.callId);
+  await Promise.resolve();
+});
+
+test('repeated ACK preserves the established PPP session', async () => {
+  const manager = makeManager();
+  const callId = 'repeated-ack';
+  manager.startFromInvite(parseSipMessage(makeInvite({ callId, payloads: '8' })));
+  manager.acknowledge(callId);
+  const pppSession = manager.ppp.sessions.get(callId);
+  pppSession.state = 'ipcp-open';
+  pppSession.lease = { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' };
+  manager.acknowledge(callId);
+  assert.equal(manager.ppp.sessions.get(callId), pppSession);
+  assert.equal(manager.ppp.snapshot(callId).state, 'ipcp-open');
+  manager.terminate(callId);
+  await Promise.resolve();
+});
+
+test('per-call NAT translates TCP and UDP low source ports with symmetric cleanup', () => {
+  const policy = new EgressPolicy({ outboundInterface: 'eth0' });
+  const descriptor = policy.leaseDescriptor({ callId: 'nat-port-test', lease: { localAddress: '10.64.0.1', clientAddress: '10.64.0.2' } });
+  const nft = descriptor.nft.up.filter(rule => rule.includes('masquerade'));
+  assert.equal(nft.length, 3);
+  for (const [index, protocol] of ['tcp', 'udp'].entries()) {
+    assert.ok(nft[index].includes('ip saddr 10.64.0.2/32'));
+    assert.ok(nft[index].endsWith(`meta l4proto ${protocol} masquerade to :49152-65535`));
+    const up = descriptor.iptables.up.find(rule => rule.includes(`-p ${protocol} -j MASQUERADE`));
+    assert.ok(up.endsWith('--to-ports 49152-65535'));
+    assert.ok(descriptor.iptables.down.includes(up.replace(' -A ', ' -D ')));
+  }
+  assert.ok(nft[2].endsWith(' masquerade'), 'other protocols retain NAT after port-specific rules');
+  const disabled = new EgressPolicy({ allowInternet: false });
+  assert.ok(!disabled.firewallRulesNft().some(rule => rule.includes('masquerade')));
+  assert.ok(!disabled.firewallRules().some(rule => rule.includes('MASQUERADE')));
+});
+
+
+test('failed modem or line construction releases capacity without disturbing another call', async () => {
+  for (const failure of ['modem', 'line']) {
+    const pool = new RtpPortPool({ range: [46000, 46002] });
+    let reject = false;
+    const stopped = [];
+    const manager = makeManager({
+      maxSessions: 2, rtpPortPool: pool,
+      modemFactory(callId) {
+        if (reject && failure === 'modem') throw new Error('modem construction failed');
+        return { stop() { stopped.push(callId); } };
+      },
+      lineFactory(options) {
+        if (reject && failure === 'line') throw new Error('line construction failed');
+        return fakeLineFactory(options);
+      }
+    });
+    const invite = callId => parseSipMessage(makeInvite({ callId, payloads: '0' }));
+    const survivor = manager.startFromInvite(invite('survivor'));
+    await survivor.ready;
+    manager.acknowledge('survivor');
+    const entry = manager.sessions.get('survivor');
+    reject = true;
+    for (let i = 0; i < 3; i++) {
+      const result = manager.startFromInvite(invite('failed-' + i));
+      assert.equal(result.accepted, false);
+      assert.equal(result.statusCode, 500);
+      assert.equal(manager.activeCount, 1);
+      assert.equal(pool.available, 1);
+      assert.equal(manager.sessions.get('survivor'), entry);
+      assert.equal(entry.line.stopped, false);
+      assert.equal(entry.session.state, 'established');
+    }
+    assert.deepEqual(stopped, failure === 'line' ? ['failed-0', 'failed-1', 'failed-2'] : []);
+    reject = false;
+    assert.equal(manager.startFromInvite(invite('replacement')).accepted, true);
+    assert.equal(pool.available, 0);
+    manager.terminate('replacement'); manager.terminate('survivor');
+    await Promise.resolve();
+    assert.equal(pool.available, 2);
+  }
+});

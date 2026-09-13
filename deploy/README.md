@@ -1,4 +1,35 @@
-# SIPfax Dedicated VM First Deploy
+# SIPfax Deployment
+
+The active V.90 lab uses Proxmox CT105 at `192.168.1.25`, managed through
+`root@192.168.1.20`; FreePBX is at `192.168.1.29`. The VM133 instructions
+below describe an earlier deployment and must not be used to identify the
+current target. Current qualification evidence is in
+[`research/v90/phase2-qualification.md`](../research/v90/phase2-qualification.md).
+
+## Committed source bundles
+
+Create a source bundle from an explicit reviewed commit:
+
+```bash
+python3 tools/package-source.py --revision COMMIT_SHA --output /tmp/sipfax-release
+```
+
+The command archives committed files, excludes untracked files and local edits,
+and writes a JSON manifest with the commit, Git tree, archive size, and SHA-256.
+Gzip headers omit output filenames and wall-clock timestamps. With the same
+Git/Python compression toolchain, separate checkouts produce byte-identical
+archives. Do not use local Git archive attribute overrides for release builds.
+The command refuses to overwrite an artifact with different contents.
+
+Verify the archive SHA-256 against the manifest after transferring it. Extract
+into a separate release directory, build `vendor/linmodem` on the target host,
+and run the installer preflight there. This establishes source identity; it
+does not establish bit-for-bit native binary reproducibility or hardware
+qualification. Record the resulting binary hash and compiler/runtime versions
+in deployment evidence. A source bundle is not authorization to promote a
+candidate before its release gates pass.
+
+## Historical dedicated VM first deploy
 
 This runbook bootstraps SIPfax on a new dedicated Debian VM attached to the
 Proxmox `vmbr0` bridge. It follows the LKMA-179 deployment decision: SIPfax runs
@@ -188,15 +219,47 @@ not write firewall state. The root-side pppd hooks installed by
 NAT/MASQUERADE, rolls rules back on `ip-down`, and posts best-effort loopback
 diagnostics to operator HTTP.
 
-For each PPP session, SIPfax renders the configured `SIPFAX_PPP_USERS` into a
-private temporary `chap-secrets` file, or `pap-secrets` when
-`SIPFAX_PPP_AUTH=pap`. The file is created with `0600` permissions, passed to
-`pppd` with the matching `chap-secrets`/`pap-secrets` option, and removed when
-the pppd session exits. Do not create persistent entries in `/etc/ppp/chap-secrets`
-for SIPfax users unless an Operator explicitly chooses to replace this per-call
-secret lifecycle.
+SIPfax renders all configured PPP users into a shared `0600` credential file.
+It is retained when individual sessions exit and replaced atomically on launch.
+pppd reads `/etc/ppp/chap-secrets` or `/etc/ppp/pap-secrets`; root-managed links
+point to the service-owned files in `/var/lib/sipfax/ppp-secrets`.
+Run the migration below before deploying the atomic credential writer.
 
 ## systemd Install
+
+For the native V.90 backend, build and preflight before changing the service:
+ELF workers are checked against the deployment host’s shared libraries. Build
+on that host (or a compatible toolchain); an executable built against a newer
+glibc can be executable but still fail to load. Run preflight on the target host.
+
+
+```bash
+make -C vendor/linmodem
+bash deploy/install-systemd.sh --engine=linmodem --check
+sudo systemctl stop sipfax
+sudo bash deploy/install-systemd.sh --engine=linmodem
+```
+
+The installer copies the application, WebUI and selected native worker when
+run from a separate release directory. It preserves existing configuration;
+an existing configuration must select `linmodem` explicitly. Fresh native
+configuration seeds a one-call cap. Complete the PPP credential migration and
+PPP drop-in setup below before starting the service. `--check` performs no
+installation. The default installer engine remains `spandsp`.
+
+When upgrading from descriptors named by sanitized Call-ID, stop SIPfax and
+wait for all PPP teardown hooks before replacing the application and helper.
+Install `bin/sipfax-call-key.mjs` beside `/usr/lib/sipfax/sipfax-egress-apply`;
+`install-systemd.sh` installs both. The application and helper must use the
+same version: new descriptors, active markers and firewall table names use a
+SHA-256 key of the complete Call-ID. Existing calls must finish using the old
+helper so their old firewall tables are removed before upgrade. Keep both
+helper files with the matching application version when rolling back.
+
+The helper requires `flock` from util-linux. It serializes rule changes, active
+markers and forwarding updates under `.hook.lock` in the active-call directory.
+The kernel releases the lock when the helper exits. Operator notifications have
+a two-second timeout so an unavailable WebUI cannot hold up subsequent hooks.
 
 Install the unit and start the service:
 
@@ -261,15 +324,24 @@ interface. Three things the base VM does not provide by default:
    grep NoNewPrivs /proc/$(systemctl show -p MainPID --value sipfax.service)/status
    ```
 
-3. **Secrets files the service can rewrite.** `pppd` always reads
-   `/etc/ppp/chap-secrets`; the service renders per-call credentials there and
-   clears them on teardown, so pre-create them owned by `sipfax`:
+3. **Secrets files the service can replace atomically.** Stop SIPfax and wait
+   for its PPP sessions to exit, then migrate existing credentials:
 
    ```bash
-   sudo touch /etc/ppp/chap-secrets /etc/ppp/pap-secrets
-   sudo chown sipfax:sipfax /etc/ppp/chap-secrets /etc/ppp/pap-secrets
-   sudo chmod 600 /etc/ppp/chap-secrets /etc/ppp/pap-secrets
+   sudo systemctl stop sipfax
+   sudo python3 deploy/prepare-ppp-secrets.py
+   sudo systemctl daemon-reload
+   sudo systemctl start sipfax
    ```
+
+   Install the updated PPP drop-in before restarting. The helper preserves
+   existing credentials in root-owned `0600` `.pre-sipfax` copies and creates
+   links to files in a `0700` service-owned directory. Reruns preserve the
+   managed files and the original backups. `/etc/ppp` remains root-owned.
+   To roll back, stop SIPfax, restore the previous application/drop-in, and
+   replace each credential link with its `.pre-sipfax` copy (owned by sipfax,
+   mode `0600` for the previous writer). Preserve any credential changes made
+   after migration before restoring an older backup.
 
 ## Modulation Note (V.8 vs forced V.22bis)
 
@@ -309,10 +381,47 @@ Then query `http://127.0.0.1:8080` locally.
 
 PPP egress is applied by nftables when `nft` is available. The helper falls back
 to `iptables-nft` for systems where nftables is not present. On `ip-up`, the
-helper enables `net.ipv4.ip_forward=1` and
-`net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`, then applies the
-per-call ruleset. On `ip-down`, it removes the per-call ruleset and disables
-forwarding after the last active SIPfax PPP lease is gone.
+helper installs the per-call ruleset before enabling `net.ipv4.ip_forward=1`
+and `net.ipv4.conf.<SIPFAX_EGRESS_INTERFACE>.forwarding=1`. The first caller
+saves the original global and interface forwarding values in
+`/run/sipfax/ppp-egress-active/.forwarding-state`. On `ip-down`, the helper
+removes that call’s rules and restores the saved values after the last caller.
+Previously enabled routing therefore remains enabled. The helper requires
+procps `sysctl` with `--pattern` support.
+
+TCP and UDP masquerading maps each caller's source ports into 49152–65535.
+This avoids preserving low ephemeral ports used by legacy clients: in the XP
+qualification, outbound HTTP from ports 1080 and 4444 received no reply beyond
+the gateway, while translating those same requests to high ports restored them.
+Destination restrictions remain in the forwarding rules. Other protocols retain
+ordinary masquerading. The kernel allocates translated ports across concurrent
+flows; the original port remains visible to the client.
+
+Keep the snapshot and active markers if restoration fails. Repeating the same
+`ip-down` invocation retries restoration without deleting successfully removed
+rules again. Finish all old calls before installing this helper; an old call
+has no saved baseline. Removal of an interface during a call skips restoring
+that vanished interface. Do not change forwarding settings concurrently with
+a SIPfax call group; its recorded baseline is restored at teardown.
+
+The iptables fallback checkpoints each successful teardown command. If a later
+command fails, the same `ip-down` invocation resumes at that command; an `ip-up`
+for the partly removed lease is rejected. Keep the descriptor and firewall tools
+unchanged until teardown completes. This handles reported command failures,
+but does not make the kernel update and checkpoint atomic across a process or
+host crash. Inspect retained rules and markers after such a crash before retrying.
+
+The routing integration test exercises real nftables and forwarding settings in
+an empty disposable network namespace. It refuses the host namespace and any
+namespace containing an interface other than loopback before setup:
+
+```sh
+sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
+```
+
+It requires Node, util-linux, procps, iproute2 and nftables. This checks kernel
+rule lifecycle and forwarding restoration; it does not replace simultaneous
+hardware-call and packet-transfer qualification.
 
 ## Multiple lines, admin UI, and the FreePBX trunk
 
@@ -453,7 +562,8 @@ curl -fsS http://127.0.0.1:8080/healthz | jq '.ppp'
 For PPP egress, an authenticated Linux client should be able to reach a public
 HTTP destination with `curl --interface ppp0 <url>`. After disconnect, confirm
 that `sudo nft list ruleset | grep sipfax_` no longer shows the call-specific
-table and forwarding is disabled when no other SIPfax PPP lease is active.
+table and forwarding matches the pre-call baseline when no other SIPfax PPP
+lease is active.
 
 From the FreePBX side:
 
@@ -467,3 +577,22 @@ From the FreePBX side:
 
 SIPfax remains intentionally single-call. A second simultaneous call should
 receive `486 Busy Here`.
+
+An incoming call receives SIP 200 only after its RTP socket is listening. A
+bind failure returns SIP 503 and tears down that call; the port is returned to
+the pool after socket closure. Retransmitted INVITEs share the same pending
+startup result. Check the service log for the bind error when a call receives
+503, including whether another process already owns the configured RTP port.
+
+
+### Incoming RTP erasure guard
+
+The native receiver supports `SIPFAX_V90_ERASURE_GUARD=1` as an opt-in setting
+in the service environment. It pauses provisional equalizer feedback when
+received energy indicates an erasure, while retaining the sample and symbol
+clocks. It does not reconstruct lost audio or guarantee recovery from all
+network impairments. Hardware tests have passed isolated one- and three-packet
+incoming loss; qualification results and exact builds are recorded in
+`research/v90/phase2-qualification.md`. Repeatability and endurance gates apply
+before selecting a candidate as the permanent native binary. Unset the variable
+or set it to `0` to retain the default behavior.

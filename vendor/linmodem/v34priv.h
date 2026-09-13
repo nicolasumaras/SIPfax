@@ -1,5 +1,6 @@
 #ifndef V34PRIV_H
 #define V34PRIV_H
+#include "v34sdetect.h"
 
 #define MAX_MAPPING_FRAME_SIZE 96
 #define M_MAX 18
@@ -52,6 +53,7 @@ enum {
 typedef struct V34DSPState {
   /* V34 parameters */
   int calling; /* true if we are the caller */ 
+  int rx_data_poly; /* explicit peer data polynomial; 0 uses legacy local-role selection */
   int S; /* index for symbol rate */
   int expanded_shape; /* true if expanded shape used */
   int R; /* transmit rate (in bits/s, including aux channel) */
@@ -87,6 +89,8 @@ typedef struct V34DSPState {
   s16 x[3][2]; /* 3 most recent samples for precoding (7 bit fractional part) */
   int U0;
   int conv_reg; /* memory of the convolutional coder */
+  unsigned long long rx_bit_position;
+  unsigned rx_erasure_bits; /* suppress invalid bits and descrambler recovery */
   int scrambler_reg; /* state of the self synchronizing scrambler */
   float carrier_freq; 
   float symbol_rate; 
@@ -152,6 +156,7 @@ typedef struct V34DSPState {
     int state_error[TRELLIS_MAX_STATES];
     int state_error1[TRELLIS_MAX_STATES];
     int trellis_ptr;
+    unsigned rx_traceback_warmup; /* Per receiver and per decoder initialization. */
 
     /* decoder synchronization */
     int phase_4d; /* index of the current 2d symbol in the 4D symbol
@@ -165,6 +170,12 @@ typedef struct V34DSPState {
 
     /* rx state */
     int sym_count;
+    int caller_md_ms;
+    unsigned md_wait_samples;
+    int matched_s_enabled;
+    V34SDetect s_detector;
+    uint64_t rx_sample_count;
+    double sbar_end_sample, md_end_sample;
 
     /* current V34 protocol state */
     int state;
@@ -219,7 +230,10 @@ typedef struct V34DSPState {
     int fx2[3][2]; int rx_precode2;                  /* SIPFAX: pre-trellis THP DFE history (Q7) */
     int pre_c0sum, pre_c0, pre_c0_use;                /* SIPFAX: C0 from the pre-trellis DFE, for the ACS half */
     int tx_postgain;                                 /* SIPFAX: Q7 carrier-stage gain; 0 means 1.0 (128) */
-    int p4_adv_ca, p4_adv_ac, p4_adv_trel;          /* SIPFAX: what OUR MP actually advertised */
+    u8 p4_adv_info[171]; /* stable MP information, through final start bit */
+    int p4_adv_info_len, p4_adv_type;
+    s16 p4_adv_h[3][2];
+    int p4_adv_ca, p4_adv_ac, p4_adv_trel, p4_adv_shape;          /* SIPFAX: what OUR MP actually advertised */
     int data_nra; double nra_pw; long nra_n;          /* SIPFAX: carry-equaliser gain bootstrap */
     int mpp_sent;                                    /* SIPFAX: MP-prime frames sent (slmodem sends 4 before E) */
     short peer_h[6];   /* SIPFAX: precoder coefficients the PEER asked OUR tx to use */
@@ -227,6 +241,9 @@ typedef struct V34DSPState {
 #define DATA_ACQ_N 2000
     int data_acq_done, data_acq_n;                   /* SIPFAX: data-mode acquisition */
     double data_acq_i[DATA_ACQ_N], data_acq_q[DATA_ACQ_N];
+    double data_acq_raw_i[DATA_ACQ_N], data_acq_raw_q[DATA_ACQ_N];
+    double data_acq_srx[DATA_ACQ_N];
+    long data_source_n, data_acq_source[DATA_ACQ_N];
     int rx_j16;      /* SIPFAX: caller's J requested 16-point Phase 4 from US (0x0D91) */
     int jvar_wait, jvar_phase, jvar_c4, jvar_c16;  /* SIPFAX: J-variant vote in progress */
     int p4_key, p4_keyn, p4_mp_crcok, p4_trellis;
@@ -239,6 +256,7 @@ typedef struct V34DSPState {
 #define P4_RING_SZ 32768
 #define P4_RING_MASK (P4_RING_SZ - 1)
     u8 p4_ring[P4_RING_SZ]; int p4_rn; int p4_try;
+    int peer_shape;    /* MP bit 32: shaping requested of our transmitter */
     int peer_nonlin;   /* SIPFAX: MP bit 31 - peer requests the 9.7 non-linear encoder */
     double cma_mfi[64], cma_mfq[64]; int cma_mfp;
     long cma_m; int cma_cphi;
@@ -294,7 +312,9 @@ typedef struct V34DSPState {
 u8 trellis_trans_4[256][4];
 u8 trellis_trans_8[256][4];
 u8 trellis_trans_16[256][4];
-u8 trellis_trans_16_fig9[256][4];
+extern u8 trellis_trans_4_fig9[256][4];
+extern u8 trellis_trans_8_fig9[256][4];
+extern u8 trellis_trans_16_fig9[256][4];
 
 /* V34 states */
 enum {
@@ -319,6 +339,8 @@ enum {
 
     /* receive only */
     V34_STARTUP3_WAIT_S1,
+    V34_STARTUP3_WAIT_MD,
+    V34_STARTUP3_WAIT_S2,
 };
 
 void put_bits(u8 **pp, int n, int bits);

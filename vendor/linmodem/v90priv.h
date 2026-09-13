@@ -1,5 +1,8 @@
 #ifndef V90PRIV_H
 #define V90PRIV_H
+#include "v90startup.h"
+#include "v90echo.h"
+#include "v90lapmlink.h"
 
 #define V90_SAMPLE_RATE 8000
 #define TREILLIS_MAX_DEPTH   4  
@@ -63,12 +66,17 @@ typedef struct V90DecodeState {
 } V90DecodeState;
 
 typedef struct V90State {
+    V90Startup startup;
+    V90Echo echo;
+    V90LapmLink lapm;
+    unsigned lapm_requested;
     int calling;            /* 1 = analog client (decode), 0 = digital server (encode) */
     V90EncodeState enc;
     V90DecodeState dec;
     int n;                  /* data bits per mapping frame (S + K) */
     s16 framebuf[6];        /* 6-sample mapping frame */
     int fpos;
+    unsigned serial_word,serial_remaining;
     void *opaque;
     int  (*get_bit)(void *opaque);
     void (*put_bit)(void *opaque, int bit);

@@ -28,7 +28,8 @@ export class SipFaxServer {
     this.listening = { sip: false, rtp: false };
 
     this.sipSocket.on('message', (message, remote) => {
-      this.handleSipDatagram(message.toString('utf8'), remote);
+      Promise.resolve().then(() => this.handleSipDatagram(message.toString('utf8'), remote))
+        .catch(error => console.error(`SIP request failed: ${error.message}`));
     });
   }
 
@@ -55,8 +56,7 @@ export class SipFaxServer {
     const request = parseSipMessage(raw);
 
     if (request.method === 'INVITE') {
-      this.handleInvite(request, remote);
-      return;
+      return this.handleInvite(request, remote);
     }
 
     if (request.method === 'ACK') {
@@ -73,7 +73,7 @@ export class SipFaxServer {
     this.sendSip(remote, buildResponse(request, 405, 'Method Not Allowed'));
   }
 
-  handleInvite(request, remote) {
+  async handleInvite(request, remote) {
     const result = this.sessions.startFromInvite(request);
 
     if (!result.accepted) {
@@ -82,13 +82,16 @@ export class SipFaxServer {
       return;
     }
 
-    if (!result.retransmit) {
-      this.metrics.invitesAccepted += 1;
-    }
     const { session } = result;
 
     this.sendSip(remote, buildResponse(request, 100, 'Trying'));
     this.sendSip(remote, buildResponse(request, 180, 'Ringing', { toTag: session.toTag }));
+    if (!await result.ready) {
+      if (!result.retransmit) this.metrics.invitesRejected += 1;
+      this.sendSip(remote, buildResponse(request, 503, 'Service Unavailable', { toTag: session.toTag }));
+      return;
+    }
+    if (!result.retransmit) this.metrics.invitesAccepted += 1;
     this.sendSip(
       remote,
       buildResponse(request, 200, 'OK', {

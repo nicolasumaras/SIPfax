@@ -171,6 +171,18 @@ static void dtmf_put_digit(void *opaque, int digit)
 
 void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
 {
+    /* Preserve the V.8 receive tail for the V.90 receiver's 75ms handoff. */
+    if (sm->state == SM_V8 && nb_samples > 0) {
+        int capacity = sizeof(sm->v8_history)/sizeof(sm->v8_history[0]);
+        int add = nb_samples > capacity ? capacity : nb_samples;
+        int keep = sm->v8_history_count;
+        if (keep > capacity-add) keep = capacity-add;
+        memmove(sm->v8_history, sm->v8_history + sm->v8_history_count-keep,
+                keep * sizeof(s16));
+        memcpy(sm->v8_history+keep, input+nb_samples-add, add*sizeof(s16));
+        sm->v8_history_count = keep+add;
+    }
+
     /* XXX: time hack */
     sim_time = sm->time;
 
@@ -325,9 +337,11 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     break;
                 case V8_MOD_V34:
                     V34_init(&sm->u.v34_state, sm->calling);
-                    sm->u.v34_state.v34_tx.get_bit = serial_get_bit;
+                    { const char *lapm = getenv("SIPFAX_V34_V42");
+                      v34_dte_init(sm, !sm->calling && lapm && !strcmp(lapm,"1")); }
+                    sm->u.v34_state.v34_tx.get_bit = v34_dte_get_bit;
                     sm->u.v34_state.v34_tx.opaque = sm;
-                    sm->u.v34_state.v34_rx.put_bit = serial_put_bit;
+                    sm->u.v34_state.v34_rx.put_bit = v34_dte_put_bit;
                     sm->u.v34_state.v34_rx.opaque = sm;
                     sm->state = SM_V34;
                     break;
@@ -345,6 +359,9 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
                     break;
                 case V8_MOD_V90:
                     V90_init(&sm->u.v90_state, sm->calling);
+                    if (!sm->calling)
+                        v90_startup_history(&sm->u.v90_state.startup,
+                                            sm->v8_history, sm->v8_history_count);
                     sm->u.v90_state.opaque = sm;
                     sm->u.v90_state.get_bit = serial_get_bit;
                     sm->u.v90_state.put_bit = serial_put_bit;
@@ -379,7 +396,13 @@ void sm_process(struct sm_state *sm, s16 *output, s16 *input, int nb_samples)
     case SM_V34:
         {
             int ret;
+            int was_phase2 = sm->u.v34_state.phase2_active;
+            sm->v34_lapm_samples += nb_samples;
             ret = V34_process(&sm->u.v34_state, output, input, nb_samples);
+            if (!was_phase2 && sm->u.v34_state.phase2_active)
+                v34_dte_retrain(sm);
+            if (sm->v34_lapm_requested)
+                v90_lapm_link_drain(&sm->v34_lapm);
             if (ret || sm->hangup_request)
                 sm->state = SM_GO_ONHOOK;
         }
@@ -453,6 +476,28 @@ enum lm_get_state_val lm_get_state(struct sm_state *s)
     switch(s->state) {
     case SM_IDLE:
         return LM_STATE_IDLE;
+    case SM_V90:
+        if(s->u.v90_state.lapm_requested)
+            return s->u.v90_state.lapm.initialized && s->u.v90_state.lapm.connected ?
+                   LM_STATE_CONNECTED:LM_STATE_CONNECTING;
+        return s->u.v90_state.startup.phase4_active &&
+               s->u.v90_state.startup.phase4.stage==4 &&
+               s->u.v90_state.startup.phase4.upstream.frames>0 ? LM_STATE_CONNECTED:LM_STATE_CONNECTING;
+    case SM_V34:
+        /* Selecting V.34 is not carrier readiness. Wait until local B1 is
+           queued and the peer's E plus an acquired data frame have arrived.
+           Re-evaluate each time so a retrain cannot retain stale readiness. */
+        return (!s->v34_lapm_requested ||
+                (s->v34_lapm.initialized && s->v34_lapm.connected &&
+                 !s->v34_lapm.reacquiring)) &&
+               s->u.v34_state.v34_tx.state == V34_DATA &&
+               s->u.v34_state.v34_tx.b1_mf == 0 &&
+               s->u.v34_state.v34_rx.p4_e_rx &&
+               s->u.v34_state.v34_rx.data_on &&
+               s->u.v34_state.v34_rx.data_acq_done &&
+               s->u.v34_state.v34_rx.P > 0 &&
+               s->u.v34_state.v34_rx.data_n >= 8*s->u.v34_state.v34_rx.P ?
+               LM_STATE_CONNECTED : LM_STATE_CONNECTING;
     case SM_V21:
     case SM_V23: 
         return LM_STATE_CONNECTED;
@@ -479,6 +524,7 @@ void lm_init(struct sm_state *sm, struct sm_hw_info *hw, const char *name)
     sm->hw_state->sm = sm;
     sm->hw->open(sm->hw_state);
     
+    sm->v8_history_count = 0;
     sm->debug_laststate = -1;
     sm->state = SM_IDLE;
 
@@ -545,10 +591,47 @@ enum {
 
 extern char *modem_command, *dial_number;
 
+/* Exercise the public readiness API without audio, PTYs, or a real call. */
+static int readiness_test(void)
+{
+    static struct sm_state sm;
+    for (int mask=0; mask<64; mask++) {
+        memset(&sm,0,sizeof(sm)); sm.state=SM_V34;
+        sm.u.v34_state.v34_tx.state = mask&1 ? V34_DATA : V34_STARTUP4_E;
+        sm.u.v34_state.v34_tx.b1_mf = mask&2 ? 0 : 1;
+        sm.u.v34_state.v34_rx.p4_e_rx = !!(mask&4);
+        sm.u.v34_state.v34_rx.data_on = !!(mask&8);
+        sm.u.v34_state.v34_rx.data_acq_done = !!(mask&16);
+        sm.u.v34_state.v34_rx.P=15;
+        sm.u.v34_state.v34_rx.data_n=mask&32 ? 120 : 119;
+        printf("stage %d %d\n",mask,lm_get_state(&sm)==LM_STATE_CONNECTED);
+    }
+    sm.v34_lapm_requested=1;
+    printf("lapm-uninitialized %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.initialized=1;
+    printf("lapm-negotiating %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.connected=1;
+    printf("lapm-connected %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm.reacquiring=1;
+    printf("lapm-reacquiring %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.v34_lapm_requested=0;
+    sm.u.v34_state.v34_rx.P=0;
+    printf("unset %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.u.v34_state.v34_rx.P=15;
+    sm.u.v34_state.v34_rx.p4_e_rx=0;
+    printf("retrain %d\n",lm_get_state(&sm)==LM_STATE_CONNECTED);
+    sm.state=SM_IDLE;
+    printf("idle %d\n",lm_get_state(&sm)==LM_STATE_IDLE);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (getenv("SIPFAX_READINESS_TEST")) return readiness_test();
     {
     {
+        const char *b1 = getenv("SIPFAX_B1_REFERENCE");
+        if (b1) { extern int V34_b1_reference(const char *); return V34_b1_reference(b1); }
         char *ef = getenv("SIPFAX_ENCODE_FILE");
         if (ef) { extern void V34_encode_test(const char *); V34_encode_test(ef); return 0; }
     }
@@ -579,6 +662,14 @@ int main(int argc, char **argv)
         if (gd) { extern void V34_datagen_test(const char *); V34_datagen_test(gd); return 0; }
     }
     {
+        if (getenv("SIPFAX_DATA_TIMELINE_TEST")) {
+            extern void V34_data_timeline_test(void);
+            V34_data_timeline_test(); return 0;
+        }
+        if (getenv("SIPFAX_TRACEBACK_RESET_TEST")) {
+            extern void V34_traceback_reset_test(void);
+            V34_traceback_reset_test(); return 0;
+        }
         char *dl = getenv("SIPFAX_DATALOOP");
         if (dl) { extern void V34_dataloop_test(void); V34_dataloop_test(); return 0; }
     }
@@ -707,7 +798,6 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
 
 
 

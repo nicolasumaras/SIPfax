@@ -1,0 +1,16 @@
+[Unit]
+Description=SIPfax experimental ATA187 redundant audio
+After=network.target asterisk.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -o root -g asterisk -m 0750 /run/sipfax-red
+ExecStart=/usr/bin/python /usr/local/lib/sipfax/sipfax_red.py
+ExecStopPost=/usr/bin/python /usr/local/lib/sipfax/sipfax_red.py --cleanup
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

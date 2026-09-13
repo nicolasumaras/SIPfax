@@ -1,3 +1,4 @@
+#include "v34clock.h"
 #include <stdlib.h>
 #include <time.h>
 /* 
@@ -16,6 +17,8 @@
 
 #include "lm.h"
 #include "v34priv.h"
+#include "v34rxlevel.h"
+#include "v34e.h"
 
 #define DEBUG
 
@@ -41,7 +44,7 @@ static void agc_init(V34DSPState *s);
 void baseband_decode_impl(V34DSPState *s, int si, int sq);
 static void v34_rx_data_params(V34DSPState *s, int R);   /* SIPFAX: data-mode reconfig */
 static void v34_tx_data_params(V34DSPState *s, int R);   /* SIPFAX: TX rate from negotiated ac */
-static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin, const s16 h[3][2], double nlnorm);  /* SIPFAX */
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int shape, int nonlin, const s16 h[3][2], double nlnorm);  /* SIPFAX */
 int g_japplied = 0;              /* SIPFAX: J-obey latch, reset on watchdog restart */
 int g_mp_type = -1, g_mp_aux = -1, g_mp_asym = -1;   /* SIPFAX: extra MP fields for the p4blk reporter */
 long g_b1c = 0, g_b1o = 0;       /* SIPFAX: RX descrambled-ones health meter */
@@ -88,19 +91,10 @@ int g_c0hist[U0H];   /* SIPFAX: the C0 folded into U0 at that time (9.6.3.3) */
 int  g_v0h[V0_PER];
 int  g_v0base[V0_PER];
 int  g_v0lock = 0, g_v0ph = 0, g_v0margin = 0, g_v0applied = 0;
-/* SIPFAX: automatic mapping-frame alignment, replacing the hand-set SIPFAX_DATA_SKIP.
-   Two things have to be right and the v0 lock pins both.
-   (1) 4D PAIRING. v0 recovery needs consecutive 2D symbols paired the way the encoder paired
-       them; measured, v0 locks for every ODD SIPFAX_DATA_SKIP and never for an even one. So a
-       failure to lock within the acquisition window means the pairing is off by one 2D symbol
-       - drop one and retry.
-   (2) FRAME GROUPING. With the pairing right, the locked phase phi and correctness are related
-       exactly: phi mod 20 == 19 decodes, everything else does not (measured over skip 1..39
-       plus 59: 99.8% and 99.7% at phi 59 and 79, 51-79% at all eighteen other phases). 20 4D
-       symbols is the rcnt cycle, P/gcd(r,P) = 5 mapping frames of 4. Dropping one 4D symbol
-       advances phi by one, so the correction is d = (19 - phi) mod 20 4D symbols. Verified
-       against the sweep: phi 51 -> d 8 -> skip 3+16 = 19; phi 58 -> d 1 -> 17+2 = 19;
-       phi 60 -> d 19 -> 21+38 = 59. */
+/* Automatic mapping-frame alignment. Sync correlation supplies the input's
+   4D-symbol phase. Align to phase zero modulo the bit-count cycle:
+   P/gcd(r,P) mapping frames, each containing four 4D symbols. Pairing
+   recovery remains separate: an odd 2D-symbol offset needs a pairing retry. */
 int  g_v0_pairtry = 0, g_v0_pairdrop = 0, g_v0_aligned = 0;
 long g_v0_realign = 0;
 static void v0_base_init(void)
@@ -371,14 +365,12 @@ static void index_to_rings(V34DSPState *s, int ring[4][2], int r0)
   
   m = s->M;
 
-  a = -1;
-  r1 = 0;
-  for(;;) {
-    tmp = r0 - s->z8_tab[a+1];
-    if (tmp < 0) break;
-    r1 = tmp;
-    a++;
-  }
+  /* z8 has one entry per shell, without a terminal sentinel. The final
+     shell contains the all-(M-1) tuple; do not read beyond it when a
+     minimum-shaping mapping uses the full M^8 index domain. */
+  a = 0;
+  while (a < 8*(m-1) && (unsigned)r0 >= (unsigned)s->z8_tab[a+1]) a++;
+  r1 = r0 - s->z8_tab[a];
   
   b = 0;
   for(;;) {
@@ -457,6 +449,9 @@ static int rings_to_index(V34DSPState *s, int ring[4][2])
   int a,b,c,d,e,f,g,h,r0,r1,r2,r3,r4,r5,m,i;
 
   m = s->M;
+  if (m < 1 || m > M_MAX) return -1;
+  for (i = 0; i < 8; i++)
+      if (ring[i/2][i%2] < 0 || ring[i/2][i%2] >= m) return -1;
 
   /* find back the parameters */
   c = ring[0][0] + ring[0][1];
@@ -812,6 +807,11 @@ int V34_init_low(V34DSPState *s, V34State *p, int transmit)
   
   /* copy the params */
   s->calling = p->calling;
+  s->rx_data_poly = 0;
+  s->rx_traceback_warmup = 0;
+  s->p4_adv_info_len = 0;
+  s->p4_adv_ca = s->p4_adv_ac = 0;
+  memset(s->p4_adv_h, 0, sizeof(s->p4_adv_h));
   s->S = p->S;
   s->expanded_shape = p->expanded_shape;
   s->R = p->R;
@@ -1000,11 +1000,8 @@ static int trellis_next_state(int conv_nb_states, int conv_reg, int trans)
 static int fig9_s1(int x0, int y0)
 {
     static int fix = -1;
-    /* DEFAULT 0 until trellis_trans_16 is rederived: flipping the labelling alone drops the
-       loopback from 99.9% to 70.3%, because v34table.c's static branch table was generated
-       under the OLD labelling and the relabelling does NOT induce a permutation of `trans`
-       (checked exhaustively over all 64 subset-label pairs), so the table cannot be permuted
-       into place - it has to be regenerated from the corrected labelling. */
+    /* Preserve the qualified default while Figure 9 interoperability is tested.
+       The corrected branch table is explicitly linked from v34fig9.c. */
     if (fix < 0) { char *e = getenv("SIPFAX_FIG9"); fix = e ? atoi(e) : 0; }
     return fix ? x0 : y0;
 }
@@ -1145,8 +1142,14 @@ static void encode_mapping_frame(V34DSPState *s)
   if (s->b <= 12) {
     /* (§ 9.3.2) simple case: no shell mapping */
     memset(m, 0, sizeof(m));
-    for(i=0;i<s->b;i++) ((u8 *)I)[i] = data[i];
-    for(i=s->b;i<12;i++) ((u8 *)I)[i] = 0;
+    /* Clause 9.3.2: each group has I1/I2; the first mp_size-8
+       groups also carry I3. Short frames must not read a high-frame bit. */
+    ptr = data;
+    for(j=0;j<4;j++) {
+      I[0][j] = *ptr++;
+      I[1][j] = *ptr++;
+      I[2][j] = j < mp_size-8 ? *ptr++ : 0;
+    }
     memset(Q, 0, sizeof(Q));
   } else {
     /* (§ 9.3.1) */
@@ -1190,19 +1193,6 @@ static void encode_mapping_frame(V34DSPState *s)
     s->Z_1 = Z[0];
     
     /* (§ 9.6.1) mapping to 2D symbols */
-    Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
-    {   /* SIPFAX: encoder-side ground truth for the sync work - the Z pair actually
-           transmitted, the U0 folded into Z[1] (which is the PREVIOUS trellis_encoder
-           call's return), and the v0 this symbol will carry. Diffing this against the
-           decoder's recovered values localises the remaining fault without another round
-           of reasoning about the indexing. */
-        extern FILE *g_encf;
-        int v0e = (s->sync_count == 0)
-                ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
-        if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
-        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
-                            s->sync_count, s->half_data_frame_count, s->conv_reg);
-    }
 
     C0 = 0; /* for trellis coding */
     for(i=0;i<2;i++) {
@@ -1211,10 +1201,6 @@ static void encode_mapping_frame(V34DSPState *s)
       assert(t >= 0 && t < L_MAX/4);
       x1 = s->constellation[t][0];
       y1 = s->constellation[t][1];
-      /* rotation by Z[i] * 90 degress clockwise */
-      rotate_clockwise(x, y, x1, y1, Z[i]);
-      u_re = x;
-      u_im = y;
 
       /* (§ 9.6.2) precoder */
       x = 0;
@@ -1231,6 +1217,26 @@ static void encode_mapping_frame(V34DSPState *s)
       c_re = shr_round0(p_re, 7 + w) << w;
       c_im = shr_round0(p_im, 7 + w) << w;
       C0 += c_re + c_im;
+      /* Table 11: c(2m+1) is known after processing the first symbol,
+         so combine the CURRENT modulo and sync bits before mapping it. */
+      if (i == 1) {
+          int v0_current = s->sync_count == 0
+              ? ((SYNC_PATTERN >> (15-s->half_data_frame_count)) & 1) : 0;
+          s->U0 = (s->conv_reg & 1) ^ ((C0 >> 1) & 1) ^ v0_current;
+          Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
+          /* Record the actual current-symbol rotation and source state. */
+          { extern FILE *g_encf;
+            if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
+            if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n",
+                    Z[0], Z[1], s->U0, v0_current,
+                    s->sync_count, s->half_data_frame_count, s->conv_reg);
+          }
+      }
+      /* Clause 9.6.1 requires clockwise rotation. The legacy helper's
+         positive argument rotates counterclockwise, so negate it. */
+      rotate_clockwise(x, y, x1, y1, (4 - Z[i]) & 3);
+      u_re = x;
+      u_im = y;
 
       Y[i][0] = clamp(u_re + c_re, 255);
       Y[i][1] = clamp(u_im + c_im, 255);
@@ -1287,7 +1293,7 @@ static void encode_mapping_frame(V34DSPState *s)
 
       put_sym(s, xp_re, xp_im);
     }
-    s->U0 = trellis_encoder(s, (C0 >> 1) & 1, Y);
+    (void)trellis_encoder(s, (C0 >> 1) & 1, Y);
 
     /* 4D symbol count & data frame count for synchronisation */
     if (++s->sync_count == 2*s->P) {
@@ -1545,6 +1551,13 @@ void put_bits(u8 **pp, int n, int bits)
     *pp = p;
 }
 
+/* MP numeric fields are ordered LSB first (Tables 20 and 21).
+   Keep put_bits unchanged: calc_crc already returns bit-reversed CRC. */
+static void mp_put_lsb(u8 **p, int n, unsigned int value)
+{
+    for (int i=0; i<n; ++i) *(*p)++ = (value >> i) & 1;
+}
+
 /* from § 10.1.2.3.2 */
 int calc_crc(u8 *buf, int size)
 {
@@ -1607,8 +1620,27 @@ static void V34_mod_MP(V34DSPState *s, u8 *buf, int size, int is_16states)
 }
 
 
+/* MP trellis code zero is a valid request for 16 states. The positive
+   advertised rate distinguishes a transmitted MP from an unset bridge. */
+static int v34_rx_trellis_states(const V34DSPState *s)
+{
+    int rt = s->p4_adv_ca > 0 ? s->p4_adv_trel : s->p4_trellis;
+    return rt == 0 ? 16 : rt == 1 ? 32 : 64;
+}
+
 /* send MP sequence. 'type' select its type (0 or 1). 'do_ack' selects
    if it is an acknowledge sequence */
+static void v34_begin_b1(V34DSPState *s)
+{
+    s->scrambler_reg = 0;
+    s->Z_1 = 0; s->U0 = 0; s->conv_reg = 0;
+    memset(s->x, 0, sizeof(s->x));
+    s->sync_count = 0;
+    s->half_data_frame_count = 2*s->J - 2;
+    s->mapping_frame = 0; s->rcnt = 0; s->acnt = 0;
+    s->b1_mf = s->P;
+}
+
 /* SIPFAX: our RECEIVER's own residual-ISI estimate, defined further down. Tentative
    declarations so the MP builder can advertise it. */
 static s16 p4_hest[3][2];
@@ -1620,6 +1652,14 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
     int i,j,crc;
 
     p = buf;
+    /* V.34 10.1.3.9: repeated MP/MP-prime information must be identical.
+       Freeze the first advertisement; only ACK and its CRC may change. */
+    if (s->p4_adv_info_len) {
+        memcpy(buf, s->p4_adv_info, s->p4_adv_info_len);
+        p += s->p4_adv_info_len;
+        type = s->p4_adv_type;
+        goto mp_crc;
+    }
     /* SIPFAX: mirror the parameters the caller proposed in its MP instead of
        advertising a fixed 28800/28800 + 16-state trellis. A peer will not
        acknowledge an MP whose parameters contradict its own proposal, and without
@@ -1683,15 +1723,15 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
             { char *mt = getenv("SIPFAX_MP_TREL"); if (mt) trel = atoi(mt) & 3; }   /* slmodem advertises 0 (16-state) */
         }
         mp_params_done:
-        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac; s->p4_adv_trel = trel;
+        s->p4_adv_ca = r_ca; s->p4_adv_ac = r_ac; s->p4_adv_trel = trel; s->p4_adv_shape = shape;
         put_bits(&p, 17, 0x1ffff); /* frame sync */
         put_bits(&p, 1, 0); /* start bit */
         put_bits(&p, 1, type);
         put_bits(&p, 1, 0); /* reserved */
-        put_bits(&p, 4, r_ca); /* call to answer max rate (negotiated) */
-        put_bits(&p, 4, r_ac); /* answer to call max rate (negotiated) */
+        mp_put_lsb(&p, 4, r_ca); /* call to answer max rate (negotiated) */
+        mp_put_lsb(&p, 4, r_ac); /* answer to call max rate (negotiated) */
         put_bits(&p, 1, 0); /* no aux channel */
-        put_bits(&p, 2, trel); /* trellis: match the caller's selection */
+        mp_put_lsb(&p, 2, trel); /* trellis: match the caller's selection */
         {   /* SIPFAX: bit 31 - the 9.7 warp we ask the CALLER to apply toward us.
                slmodem advertises 1 and this caller has likely never met an answerer
                that says 0; our RX has no dewarp yet, so this is default 0, but
@@ -1756,6 +1796,7 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
                                 for(k=0;k<6;k++) fhv[k]=(s16)v[k]; fh=1; } }
                         if (fh) hv = fhv[i*2+j];
                     }
+                    s->p4_adv_h[i][j] = hv;
                     for (hb = 0; hb < 16; hb++)
                         put_bits(&p, 1, (hv >> hb) & 1);
                 }
@@ -1768,6 +1809,11 @@ static void V34_send_MP(V34DSPState *s, int type, int do_ack)
 
     put_bits(&p, 1, 0); /* start bit */
 
+    s->p4_adv_info_len = p - buf;
+    s->p4_adv_type = type;
+    memcpy(s->p4_adv_info, buf, s->p4_adv_info_len);
+mp_crc:
+    buf[33] = do_ack ? 1 : 0;
     {   /* spec CRC: over information bits only (exclude sync/start/fill) */
         u8 cov[200]; int cn = 0, bp, clen = p - (buf + 17);
         for (bp = 17; bp < 17 + clen; bp++) {
@@ -2086,7 +2132,7 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                        caller one rate and transmitted another. */
                     if (s->p4_adv_ac > 0 && s->p4_adv_ac < their_ac) their_ac = s->p4_adv_ac;
                     Rt = ((cap > 0 && cap < their_ac) ? cap : their_ac) * 2400;
-                    if (Rt > 0 && Rt != s->R) {
+                    if (Rt > 0) {
                         extern int v34_dbg;
                         if (v34_dbg) fprintf(stderr, "[p4] TX: adopting negotiated ac=%d "
                                              "(was R=%d)\n", Rt, s->R);
@@ -2181,12 +2227,12 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                 static int tw = -1;
                 if (tw < 0) { char *e = getenv("SIPFAX_TX_POW"); tw = e ? atoi(e) : 1; }
                 if (tw && s->b > 12) {
-                    double shp0 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 0, s->h, 0.0);
+                    double shp0 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, s->expanded_shape, 0, s->h, 0.0);
                     double shp2 = shp0;
                     if (shp0 > 0) {
                         s->nl_meanc2 = shp0;
                         if (s->use_non_linear)
-                            shp2 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, 1, s->h, shp0);
+                            shp2 = v34_shaped_meanc2_cfg(s->R, s->conv_nb_states, s->expanded_shape, 1, s->h, shp0);
                         if (shp2 > 0) {
                             int amp_full = CALC_AMP(shp2), amp = amp_full, pg = 128;
                             double mx = shp_maxsi;   /* peak |component| from the warped run */
@@ -2214,13 +2260,7 @@ static void V34_mod(V34DSPState *s, s16 *samples, unsigned int nb)
                 static int tb = -1;
                 if (tb < 0) { char *e = getenv("SIPFAX_TX_B1"); tb = e ? atoi(e) : 1; }
                 if (tb) {
-                    s->scrambler_reg = 0;
-                    s->Z_1 = 0; s->U0 = 0; s->conv_reg = 0;
-                    memset(s->x, 0, sizeof(s->x));
-                    s->sync_count = 0;
-                    s->half_data_frame_count = 2*s->J - 2;
-                    s->mapping_frame = 0; s->rcnt = 0; s->acnt = 0;
-                    s->b1_mf = s->P;
+                    v34_begin_b1(s);
                 } else {
                     s->b1_mf = 0;
                 }
@@ -2851,19 +2891,13 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
 
     trellis_ptr = s->trellis_ptr;
     v0_base_init();
-    {   /* SIPFAX: PRECODER FRONT CHAIN (9.6.2 + 9.6.3.3). When the peer precodes, the
-           encoder folds C0(m) - the modulo bit from c(2m), c(2m+1) - into U0, so the
-           branch half holding the transmitted tuple is (parity ^ v0 ^ C0), not
-           (parity ^ v0). c(n) depends only on the receiver's own reconstruction of
-           PAST symbols, so it is knowable before this 4D symbol is scored: run the
-           9.6.2 filter on zero-delay odd-lattice decisions of the incoming soft
-           symbols. The encoder applies U0 one 4D symbol late (it returns U0 at the end
-           of symbol m and folds it into m+1), so the half uses the PREVIOUS symbol's
-           C0, exactly like v0. Measured through a clean simulated channel with the
-           caller's own h: 55.9% bit match without this, vs 99.7% unprecoded. */
+    {   /* Legacy C0 experiment, disabled by default. Normal post-channel
+           decoding scores Y=u+c. Its trellis half is Y0 xor V0; adding C0
+           again corrupts that constraint. The post-traceback inverse below
+           removes c before constellation lookup. */
         int c0_new = 0;
         static int fcen = -1;
-        if (fcen < 0) { char *e = getenv("SIPFAX_FC"); fcen = e ? atoi(e) : 1; }
+        if (fcen < 0) { char *e = getenv("SIPFAX_FC"); fcen = e ? atoi(e) : 0; }
         if (fcen && s->rx_precode) {
             int i2, w3 = (s->b < 56) ? 1 : 2, csum = 0;
             for (i2 = 0; i2 < 2; i2++) {
@@ -2903,11 +2937,11 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
     switch(s->conv_nb_states) {
     case 16:
         nbbt = 2;
-        p = &trellis_trans_4[0][0];
+        p = fig9_s1(1,0) ? &trellis_trans_4_fig9[0][0] : &trellis_trans_4[0][0];
         break;
     case 32:
         nbbt = 3;
-        p = &trellis_trans_8[0][0];
+        p = fig9_s1(1,0) ? &trellis_trans_8_fig9[0][0] : &trellis_trans_8[0][0];
         break;
     default:
         nbbt = 4;
@@ -3386,10 +3420,8 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
                 extern int *g_v0orc; extern long g_v0orn, g_v0ori;
                 static int voff = -99; long vi;
                 int v0h = 0;
-                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : -1; }
-                /* SIPFAX: measured exactly - half == (conv_reg[t]&1) ^ v0[t-1] == U0[t],
-                   100.00% over 16000 noise-free symbols. The source-state parity is right;
-                   it needs the PREVIOUS symbol,s v0, hence the default offset of -1. */
+                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : 0; }
+                /* Equation 9-32 uses the current interval's sync bit. */
                 vi = g_v0ori + voff;
                 if (g_v0orc && vi >= 0 && vi < g_v0orn) v0h = g_v0orc[vi];
                 n = (((state & 1) ^ v0h ^ s->fc_c0_use) ? nb_trans : 0);
@@ -3551,11 +3583,19 @@ static void put_bit(V34DSPState *s, int b)
 {
     int poly;
 
-    if (!s->calling)
-        poly = V34_GPC;
-    else
-        poly = V34_GPA;
+    poly = s->rx_data_poly;
+    if (!poly) poly = s->calling ? V34_GPA : V34_GPC;
     b = unscramble_bit(s, b, poly);
+    unsigned long long position = s->rx_bit_position++;
+    if (s->rx_erasure_bits) { --s->rx_erasure_bits; return; }
+    {   /* Offline evidence preserves the bit positions across erased frames. */
+        static FILE *positions; static int opened;
+        if (!opened) {
+            const char *path = getenv("SIPFAX_RX_BIT_POSITIONS"); opened = 1;
+            if (path) positions = fopen(path, "w");
+        }
+        if (positions) fprintf(positions, "%llu\n", position);
+    }
     {   /* SIPFAX: live decode health meter. A compliant caller opens data mode with one
            data frame of scrambled ONES (B1, 10.1.3.1) and idles structured data after;
            the ones-fraction of the first descrambled bits is ground truth the receive
@@ -3598,9 +3638,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
 
       /* decision */
       x = (x >> 8) * 2 + 1;
-      x = clamp(x, C_RADIUS);
+      /* Precoded Y=u+c may exceed the base constellation. Preserve Y
+         until c has been reconstructed and removed below. */
+      x = clamp(x, (s->rx_precode && !s->rx_precode2) ? 255 : C_RADIUS);
       y = (y >> 8) * 2 + 1;
-      y = clamp(y, C_RADIUS);
+      y = clamp(y, (s->rx_precode && !s->rx_precode2) ? 255 : C_RADIUS);
 
       /* SIPFAX: (9.6.2) PRECODER INVERSE.
          x,y are now the DECIDED transmitted coordinate Y. The transmitter formed
@@ -3671,19 +3713,11 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
       }
       t = s->constellation_to_code[(x+C_RADIUS) >> 1][(y+C_RADIUS) >> 1];
       /* mapping to the symbol */
-      /* SIPFAX: quadrant handedness. rotate_clockwise() is really CCW - case 1 is
-         (x,y)=(-y1,x1), i.e. multiplication by +j, and V34_baseband_to_carrier emits
-         Re{(si+j*sq)e^{+j phi}}. Phase 4 negates it to get spec CW (10.1.3.3), and that
-         negation was validated on a real caller (FINDINGS: TRN decodes to 0.998 ones with
-         CW, 0.32-0.51 the other way). Data mode's 9.6.1 mapper and the decoder's
-         constellation_to_code table were left UN-negated, so the two directions disagree
-         about handedness. That cannot move the trellis metric - Z is read long after mse
-         is computed, and data_slice scans all four rotations - but it does corrupt the
-         extracted BITS: with Z mirrored, I1 stays correct while I2 flips whenever I1=1 and
-         I0 flips whenever U0=1. Metric 23.3 with 50% ones is exactly that signature.
-         SIPFAX_Z_SIGN=1 negates on decode so the two arms can be compared. */
+      /* The lookup table encodes counterclockwise quadrant indices.
+         Convert to the clockwise Z used by the clause 9.6.1 mapper before
+         differential decoding. SIPFAX_Z_SIGN=0 retains the legacy diagnostic. */
       { static int zs = -1;
-        if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 0; }
+        if (zs < 0) { char *ez = getenv("SIPFAX_Z_SIGN"); zs = ez ? atoi(ez) : 1; }
         Z[i] = zs ? ((4 - ((t >> 14) & 3)) & 3) : (t >> 14); }
       /* SIPFAX: the constellation_to_code cell packs i | (j << 14), so the index field is
          FOURTEEN bits, not eight. Masking to 0xff truncated the quarter-constellation index
@@ -3755,9 +3789,21 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
   /* now everything is "decoded", we can write the data */
   ptr = data;
   if (s->b <= 12) {
-    for(i=0;i<s->b;i++) *ptr++ = ((u8 *)I)[i];
+    for(j=0;j<4;j++) {
+      *ptr++ = I[0][j];
+      *ptr++ = I[1][j];
+      if (j < mp_size-8) *ptr++ = I[2][j];
+    }
   } else {
     r0 = rings_to_index(s, m);
+    if (r0 < 0) {
+        /* Invalid decisions erase this mapping frame. Keep frame counters and
+         * the self-synchronizing descrambler clock, but emit no guessed bits.
+         * A further 23 received bits replace the unknown scrambler history. */
+        memset(data, 0, sizeof(data));
+        s->rx_erasure_bits = (unsigned)mp_size + 23;
+        goto mapping_frame_ready;
+    }
 
     n = s->K;
     if (mp_size < s->b) n--;
@@ -3777,6 +3823,7 @@ static void decode_mapping_frame(V34DSPState *s, s16 rx_mapping_frame[8][2])
     }
   }
 
+mapping_frame_ready:
   /* send an auxilary channel bit if needed */
   s->acnt += s->W;
   if (s->acnt < s->P) {
@@ -3805,7 +3852,6 @@ void baseband_decode_pub(V34DSPState *s, int si, int sq) { extern void baseband_
 void baseband_decode_impl(V34DSPState *s, int si, int sq)
 {
     s16 y[2][2];
-    static int delay = 0;
     int mse,v0;
 
     {   /* SIPFAX: 9.7 DEWARP. If the transmitter applied the non-linear encoder
@@ -3970,9 +4016,12 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
             if (en) {
                 if (g_v0lock && !g_v0_aligned) {
                     g_v0_aligned = 1;
-                    g_v0_realign = ((19 - (long)g_v0ph) % 20 + 20) % 20;
-                    if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (mod20=%d) -> drop %ld "
-                                         "4D symbols\n", g_v0ph, g_v0ph % 20, g_v0_realign);
+                    int divisor = s->P, remainder = s->r;
+                    while (remainder) { int next = divisor % remainder; divisor = remainder; remainder = next; }
+                    int cycle = 4 * s->P / divisor;
+                    g_v0_realign = ((-(long)g_v0ph) % cycle + cycle) % cycle;
+                    if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (cycle=%d) -> drop %ld "
+                                         "4D symbols\n", g_v0ph, cycle, g_v0_realign);
                 }
                 /* no lock in twice the acquisition window: the 4D pairing is off by one */
                 {   /* SIPFAX: how long to wait before concluding the 4D pairing is wrong. v0_try_lock
@@ -3994,8 +4043,9 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
         memcpy(&s->rx_mapping_frame[s->rx_mapping_frame_count][0], 
                &y[0][0], 4 * sizeof(s16));
         s->y0_buf[(s->rx_mapping_frame_count >> 1) & 3] = s->y0_out;
-        delay++;
-        if (delay > TRELLIS_LENGTH) {
+        if (s->rx_traceback_warmup < TRELLIS_LENGTH) {
+            ++s->rx_traceback_warmup;
+        } else {
 
             s->rx_mapping_frame_count += 2;
             if (s->rx_mapping_frame_count == 8) {
@@ -4240,12 +4290,33 @@ static void V34_demod(V34DSPState *s,
 {
     int si, sq, i, j, k , ph, spl;
     int v, frac, ph1;
+    double filtered_sample;
+    static int state_trace = -1;
+    if (state_trace < 0) {
+        const char *e = getenv("SIPFAX_V34_STATE_TRACE");
+        state_trace = e && !strcmp(e, "1");
+    }
 
     for(i=0;i<nb;i++) {
         /* Automatic Gain Control */
         spl = samples[i];
+        s->rx_sample_count++;
+        if (s->matched_s_enabled &&
+            (s->state == V34_STARTUP3_WAIT_S1 || s->state == V34_STARTUP3_WAIT_S2) &&
+            v34_s_detect_sample(&s->s_detector, samples[i])) {
+            double transition = s->rx_sample_count - s->s_detector.samples +
+                                s->s_detector.transition_sample;
+            s->sbar_end_sample = transition + 16.0 * 8000 / s->symbol_rate;
+            s->state = s->state == V34_STARTUP3_WAIT_S1 ?
+                       V34_STARTUP3_SINV1 : V34_STARTUP3_SINV2;
+            s->sym_count = 0;
+            if (v34_dbg || state_trace)
+                fprintf(stderr, "[dec] matched Sbar sample=%.3f end=%.3f score=%.6f\n",
+                        transition, s->sbar_end_sample, s->s_detector.score);
+        }
 
-        if (v34_dbg) s->dbg_n++;
+        if (v34_dbg || state_trace) s->dbg_n++;
+        if (s->state == V34_STARTUP3_WAIT_MD && s->md_wait_samples) s->md_wait_samples--;
         agc_estimate(s, spl);
         spl = (spl * s->agc_gain) >> 14;
 
@@ -4278,9 +4349,17 @@ static void V34_demod(V34DSPState *s,
 
             /* we have here EQ_FRAC = 3 symbols per baud */
 
-            if (v34_dbg && s->state != s->dbg_last) { fprintf(stderr, "[dec] demod state %d -> %d (si=%d) at %ld ms\n", s->dbg_last, s->state, si, s->dbg_n/8); fflush(stderr); s->dbg_last = s->state; }
+            if ((v34_dbg || state_trace) && s->state != s->dbg_last) { fprintf(stderr, "[dec] demod state %d -> %d (si=%d) at %ld ms\n", s->dbg_last, s->state, si, s->dbg_n/8); fflush(stderr); s->dbg_last = s->state; }
+            /* The FIR output represents an earlier PCM instant. Its centre
+               is coefficient RC_FILTER_SIZE/2, interpolated at baud_phase. */
+            filtered_sample = (double)s->rx_sample_count - s->rx_filter_wsize +
+                ((double)(RC_FILTER_SIZE / 2) * 65536 - s->baud_phase) / s->baud_num;
             switch(s->state) {
             case V34_STARTUP3_WAIT_S1:
+                if (s->matched_s_enabled) {
+                    v34_symbol_sync(s, si);
+                    break;
+                }
                 /* wait for the S signal */
                 fprintf(stderr, "waiting S1 %d\n", si);
                 /* XXX: find a better test ! */
@@ -4300,12 +4379,33 @@ static void V34_demod(V34DSPState *s,
                 break;
             case V34_STARTUP3_SINV1:
                 v34_symbol_sync(s, si);
-                if (++s->sym_count >= 16 * EQ_FRAC) {
-                    s->state = V34_STARTUP3_S2;
+                if (s->matched_s_enabled ? filtered_sample >= s->sbar_end_sample :
+                    ++s->sym_count >= 16 * EQ_FRAC) {
+                    s->md_end_sample = s->sbar_end_sample + s->caller_md_ms * 8.0;
+                    s->state = s->caller_md_ms ? V34_STARTUP3_WAIT_MD : V34_STARTUP3_PP;
+                    s->md_wait_samples = (unsigned)s->caller_md_ms * 8;
                     s->sym_count = 0;
                 }
                 break;
 
+            case V34_STARTUP3_WAIT_MD:
+                if (s->matched_s_enabled ? filtered_sample >= s->md_end_sample :
+                    !s->md_wait_samples) {
+                    if (s->matched_s_enabled)
+                        v34_s_detect_init(&s->s_detector, s->symbol_rate, s->carrier_freq);
+                    s->state = V34_STARTUP3_WAIT_S2;
+                }
+                break;
+            case V34_STARTUP3_WAIT_S2:
+                if (s->matched_s_enabled) {
+                    v34_symbol_sync(s, si);
+                    break;
+                }
+                if (abs(si) > 13000) {
+                    s->state = V34_STARTUP3_S2;
+                    s->sym_count = 0;
+                }
+                break;
             case V34_STARTUP3_S2:
                 v34_symbol_sync(s, si);
                 if (++s->sym_count >= 128 * EQ_FRAC) {
@@ -4316,13 +4416,17 @@ static void V34_demod(V34DSPState *s,
 
             case V34_STARTUP3_SINV2:
                 v34_symbol_sync(s, si);
-                if (++s->sym_count >= 100 * EQ_FRAC) {
+                if (s->matched_s_enabled ? filtered_sample >= s->sbar_end_sample :
+                    ++s->sym_count >= 16 * EQ_FRAC) {
                     s->state = V34_STARTUP3_PP;
                     s->sym_count = 0;
                 }
                 break;
 
             case V34_STARTUP3_PP:
+                if (s->matched_s_enabled && !s->sym_count && (v34_dbg || state_trace))
+                    fprintf(stderr, "[dec] matched PP input=%.3f filtered=%.3f target=%.3f\n",
+                            (double)s->rx_sample_count, filtered_sample, s->sbar_end_sample);
 #if 1
                 /* PP is used to fast train the equalizer */
 
@@ -4393,8 +4497,85 @@ static void V34_demod_init(V34DSPState *s, V34State *p)
 
     V34_init_low(s, p, 0);
     s->state = V34_STARTUP3_WAIT_S1;
+    s->dbg_last = -1;
+    {
+        const char *e = getenv("SIPFAX_V34_MATCHED_S");
+        s->matched_s_enabled = e && !strcmp(e, "1") &&
+            v34_s_detect_init(&s->s_detector, s->symbol_rate, s->carrier_freq);
+    }
 }
 
+
+/* Live RX parameters describe the transmitter for carrier/training selection.
+   Data must use that same peer's polynomial, not invert the role a second time.
+   Legacy diagnostic initializers still accept the local role. */
+static void V34_demod_peer_init(V34DSPState *s, V34State *peer)
+{
+    V34_demod_init(s, peer);
+    s->rx_data_poly = peer->calling ? V34_GPC : V34_GPA;
+}
+
+
+/* Offline encoder reference. Symbol coordinates are Q7, before pulse shaping.
+   SIPFAX_B1_NL_MEAN enables 9.7 with supplied positive mean energy in lattice
+   units. It tests the projection, not the live normalisation estimate.
+   This is a model reference, not proof of interoperability with a caller. */
+static FILE *b1_reference_file;
+static void b1_reference_symbol(int i, int q)
+{
+    fprintf(b1_reference_file, "%d %d\n", i, q);
+}
+int V34_b1_reference(const char *path)
+{
+    V34State p;
+    static V34DSPState tx;
+    const char *rate = getenv("SIPFAX_B1_RATE");
+    const char *role = getenv("SIPFAX_B1_CALLING");
+    if (role && strcmp(role,"0") && strcmp(role,"1")) return 2;
+    const char *shape = getenv("SIPFAX_SHAPE");
+    const char *trellis = getenv("SIPFAX_B1_TRELLIS");
+    const char *h = getenv("SIPFAX_B1_H");
+    const char *norm = getenv("SIPFAX_B1_NL_MEAN");
+    double nonlinear_mean = 0;
+    if (norm) {
+        char *end;
+        nonlinear_mean = strtod(norm, &end);
+        if (end == norm || *end || !isfinite(nonlinear_mean) || nonlinear_mean <= 0) return 2;
+    }
+    memset(&p, 0, sizeof(p));
+    p.S = V34_S3429; p.R = rate ? atoi(rate) : 16800;
+    p.calling = role ? atoi(role) : 1; p.use_high_carrier = 1;
+    p.expanded_shape = shape ? atoi(shape) : 1;
+    p.conv_nb_states = trellis ? atoi(trellis) : 64;
+    p.use_non_linear = norm != NULL;
+    if (p.R < 4800 || p.R > 33600 || p.R % 2400 ||
+        (p.conv_nb_states != 16 && p.conv_nb_states != 32 && p.conv_nb_states != 64)) return 2;
+    if (h) {
+        int v[6], n = 0;
+        if (sscanf(h, "%d,%d,%d,%d,%d,%d%n", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &n) != 6 || h[n]) return 2;
+        for (int k = 0; k < 6; ++k) {
+            if (v[k] < -32768 || v[k] > 32767) return 2;
+            p.h[k/2][k%2] = v[k];
+        }
+    }
+    b1_reference_file = fopen(path, "w");
+    if (!b1_reference_file) { perror(path); return 1; }
+    { extern void dsp_init(void); dsp_init(); }
+    V34_static_init();
+    memset(&tx, 0, sizeof(tx));
+    V34_init_low(&tx, &p, 1);
+    tx.nl_meanc2 = nonlinear_mean;
+    v34_begin_b1(&tx);
+    g_symtap = b1_reference_symbol;
+    for (int frame = 0; frame < tx.P; ++frame) encode_mapping_frame(&tx);
+    g_symtap = 0;
+    fprintf(stderr, "[b1] reference R=%d shape=%d trellis=%d frames=%d symbols=%d\n",
+            p.R, p.expanded_shape, p.conv_nb_states, tx.P, tx.P*8);
+    int result = ferror(b1_reference_file) ? 1 : 0;
+    if (fclose(b1_reference_file)) result = 1;
+    b1_reference_file = 0;
+    return result;
+}
 
 /* ---- offline Phase-3 decode harness ---- */
 void V34_decode_file(const char *path, int calling)
@@ -4408,6 +4589,9 @@ void V34_decode_file(const char *path, int calling)
     { extern void dsp_init(void); dsp_init(); }
     V34_static_init();
     V34_demod_init(&rx, &p);
+    { const char *md = getenv("SIPFAX_DECODE_MD_MS");
+      rx.caller_md_ms = md ? atoi(md) : 0;
+      if (rx.caller_md_ms < 0 || rx.caller_md_ms > 4445) return; }
     v34_dbg = 1; rx.dbg_last = -1; rx.dbg_n = 0;
     { extern int eq_notrack, eq_freeze; char *a=getenv("SIPFAX_EQ_NOTRACK"), *b=getenv("SIPFAX_EQ_FREEZE");
       eq_notrack = a?atoi(a):0; eq_freeze = b?atoi(b):0;
@@ -4418,9 +4602,7 @@ void V34_decode_file(const char *path, int calling)
             path, calling ? "CALLER" : "ANSWER");
     while ((n = fread(buf, 2, 512, f)) > 0) {
         for (i = 0; i < n; i++) {
-            int v = buf[i] * 5;
-            if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-            buf[i] = (s16)v;
+            buf[i] = v34_rx_level(buf[i]);
         }
         V34_demod(&rx, buf, n);
     }
@@ -4481,7 +4663,7 @@ static double v34_shaped_meanc2(int R, int nb_states)
    shaping, the peer's precoder taps and the 9.7 warp - so tx_amp can be set from the
    power actually leaving the modulator. nlnorm is the 9.7 normaliser (average energy
    of x(n)); pass 0 with nonlin off. */
-static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin,
+static double v34_shaped_meanc2_cfg(int R, int nb_states, int shape, int nonlin,
                                     const s16 h[3][2], double nlnorm)
 {
     V34State p;
@@ -4490,7 +4672,7 @@ static double v34_shaped_meanc2_cfg(int R, int nb_states, int nonlin,
     memset(&p, 0, sizeof(p));
     p.S = V34_S3429; p.R = R; p.conv_nb_states = nb_states;
     p.use_high_carrier = 1; p.calling = 0;
-    { char *e = getenv("SIPFAX_SHAPE"); p.expanded_shape = e ? atoi(e) : 1; }
+    p.expanded_shape = shape;
     p.use_non_linear = nonlin;
     if (h) memcpy(p.h, h, sizeof(p.h));
     memset(&tx2, 0, sizeof(tx2));
@@ -4786,6 +4968,7 @@ void V34_cma_decode_file(const char *path)
 
 
 FILE *cma_dumpf = 0;
+static FILE *cma_statef = 0; /* opt-in offline receiver transition trace */
 FILE *cma_t2df = 0;
 FILE *p4bitf = 0;
 int cma_t1 = 18, cma_t2 = 23;   /* caller GPC default; GPA=5,23 */
@@ -4831,7 +5014,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
     }
     { double p2 = yi*yi + yq*yq;                      /* squelch: hold everything in silence */
       s->cma_sq = 0.99*s->cma_sq + 0.01*p2;
-      if (s->cma_started && s->cma_sq < 0.05*s->cma_pow) return; }
+      /* Data framing must keep every T/2 position through missing audio.
+         Startup may wait for signal, but dropping positions after acquisition
+         shifts the equalizer history and mapping-frame alignment. */
+      if (!s->data_on && s->cma_started && s->cma_sq < 0.05*s->cma_pow) return; }
     g = (s->cma_pow > 1e-12) ? 1.0/sqrt(s->cma_pow) : 1.0;
     yi *= g; yq *= g;
     for (i = CMANT-1; i > 0; i--) { s->cma_bufi[i] = s->cma_bufi[i-1]; s->cma_bufq[i] = s->cma_bufq[i-1]; }
@@ -5017,7 +5203,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
             fclose(tf); tapdumped = 1; } }
         static u8 jpat[16]; static u8 jppat[16]; static int jpat_init = 0;
         unsigned int poly = (cma_t1 == 5) ? (1u|(1u<<18)) : (1u|(1u<<5));  /* GPA : GPC */
-        double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][2]; unsigned int regsnap[4];
+        double ct, st_, pi_, pq_, o2i, o2q, o4i, o4q; int qd, r, k, j, w, wm, b2s[4][4]; unsigned int regsnap[4];
         static u8 jpat16[16];
         if (!jpat_init) { for (k = 0; k < 16; k++) { jpat[k] = (0x0991 >> (15-k)) & 1;
                                              jpat16[k] = (0x0D91 >> (15-k)) & 1;
@@ -5043,6 +5229,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
         pi_ = oi*ct - oq*st_; pq_ = oi*st_ + oq*ct;
         ei = 0; eq = 0; mu = 0;                             /* taps frozen */
         if (cma_dumpf) fprintf(cma_dumpf, "%.4f %.4f 1 %.4f %.4f %.4f\n", pi_, pq_, oi, oq, s->srx_th);
+        if (cma_statef)
+            fprintf(cma_statef, "%ld,%ld,%d,%d,%d,%ld,%.9g,%.9g,%.9g\n",
+                    s->rx3_n, s->cma_qn, s->p4_e_rx, s->data_on,
+                    s->data_acq_n, s->data_n, oi, oq, s->srx_th);
         /* sign-based slicer: boundaries on the AXES (max margin for the diagonal
            lattice). The old floor((ang+45)/90) slicer had boundaries ON the
            diagonals - i.e. through the constellation points themselves. */
@@ -5236,8 +5426,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                              fprintf(stderr, "[data] symbol-timing offset %+.3f input samples"
                                      " (%.3f symbol)\n", t, t/(7.0/3.0)); }
                 }
-                int our_ca = 0, their_ca, R;   /* 0 = follow the caller, no cap */
-                { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
+                int our_ca = s->p4_adv_ca, their_ca, R;
+                /* Live decoding must use the frozen advertisement. Environment caps
+                   are only a fallback for standalone recordings with no TX bridge. */
+                if (our_ca <= 0) { char *mc = getenv("SIPFAX_MP_CA"); if (mc) our_ca = atoi(mc); }
                 their_ca = s->p4_mp_rate_ca > 0 ? s->p4_mp_rate_ca : 7;
                 /* SIPFAX: 'ca' is the CALL-TO-ANSWER rate - what the caller TRANSMITS and
                    therefore what we must RECEIVE. our_ca defaulted to 4, hard-capping the
@@ -5255,9 +5447,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        not the caller's own field - which commands OUR transmitter. They
                        coincided while we mirrored; they will not once SIPFAX_MP_TREL
                        diverges. Bridged from the TX instance's advertisement. */
-                    int rt = s->p4_adv_trel;
-                    if (rt <= 0 && s->p4_trellis >= 0) rt = s->p4_trellis;   /* mirror fallback */
-                    s->conv_nb_states = (rt == 0) ? 16 : (rt == 1) ? 32 : 64;
+                    s->conv_nb_states = v34_rx_trellis_states(s);
                 }
                 {   /* SIPFAX: does the caller precode even though our MP advertises
                        h = 0,0,0? Two comments in this file disagree about that, and it is
@@ -5274,11 +5464,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                        the caller then precodes its TX toward us with THAT h, so our RX must
                        invert with OUR advertised h (p4_hest), not peer_h. */
                     int rxp = ep ? atoi(ep) : 0;   /* SIPFAX: default OFF - with our h only rho~0.88 the precoding leaves residual ISI, and the delta+THP path (0.584) is worse than CMA (0.559); needs a more accurate h and/or a residual EQ after the THP modulo before this helps */
-                    if (rxp && p4_have_h) {
+                    if (rxp && (s->p4_adv_ca > 0 || p4_have_h)) {
                         int hi5;
                         for (hi5 = 0; hi5 < 3; hi5++) {
-                            s->h[hi5][0] = p4_hest[hi5][0];
-                            s->h[hi5][1] = p4_hest[hi5][1];
+                            s->h[hi5][0] = s->p4_adv_ca > 0 ? s->p4_adv_h[hi5][0] : p4_hest[hi5][0];
+                            s->h[hi5][1] = s->p4_adv_ca > 0 ? s->p4_adv_h[hi5][1] : p4_hest[hi5][1];
                         }
                         s->rx_precode = 1;
                         fprintf(stderr, "[data] RX precoder inverse ON (our advertised h) = "
@@ -5419,6 +5609,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                    loop pulls down. SIPFAX_DATA_AGC=0 restores the open-loop gain. */
                 if (s->data_agc <= 0) s->data_agc = sqrt(s->data_meanc2 / s->rx16_rms);
                 gc = s->data_agc;
+                long source_symbol = s->data_source_n++;
+                int was_acquired = s->data_acq_done;
                 if (!s->data_acq_done) {
                     /* SIPFAX: the gain is no longer searched - v34_shaped_meanc2() measures
                        it from our own mapper, because the lattice objective is minimised by
@@ -5488,6 +5680,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                           acqdly = ea ? atol(ea) : 0; }
                         if (acqseen < acqdly) { acqseen++; }
                         else {
+                        s->data_acq_source[s->data_acq_n] = source_symbol;
+                        s->data_acq_raw_i[s->data_acq_n] = oi;
+                        s->data_acq_raw_q[s->data_acq_n] = oq;
+                        s->data_acq_srx[s->data_acq_n] = s->srx_th;
                         s->data_acq_i[s->data_acq_n] = (oi*ct0 - oq*st0) * gc;
                         s->data_acq_q[s->data_acq_n] = (oi*st0 + oq*ct0) * gc;
                         s->data_acq_n++;
@@ -5971,7 +6167,11 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                     used*4 < s->L*3 ? "  <-- COLLAPSED, score is an artifact" : "");
                         }
                         gc = s->data_agc;
-                        {   /* SIPFAX: is the acquisition FINDING the optimum, or is there
+                        static int acquisition_audit = -1;
+                        if (acquisition_audit < 0) { const char *e=getenv("SIPFAX_ACQ_AUDIT"); acquisition_audit=e ? atoi(e) : 0; }
+                        if (acquisition_audit) { /* Offline diagnostic only: this exhaustive
+                               scan does not select or modify receive parameters. */
+                            /* SIPFAX: is the acquisition FINDING the optimum, or is there
                                no optimum to find? The only transforms between the equaliser
                                output and the lattice score are a rotation and a scale, and
                                the acquisition fixes the gain by measurement and searches the
@@ -6001,6 +6201,24 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                     }
                 }
                 if (s->data_acq_done) {
+                /* Experimental lossless handoff: consume accepted acquisition samples
+                   once, in their original equalizer frame, then process the current
+                   symbol (acquisition runs on the sample after the buffer fills). */
+                static int replay_enabled = -1;
+                if (replay_enabled < 0) { const char *e=getenv("SIPFAX_ACQ_REPLAY"); replay_enabled=e ? atoi(e) : 0; }
+                int replay_n = replay_enabled && !was_acquired ? s->data_acq_n : 0;
+                double saved_oi=oi, saved_oq=oq, saved_srx=s->srx_th;
+                if (replay_n) {
+                    s->data_th -= s->data_frq * (replay_n-1)*0.5;
+                    fprintf(stderr,"[data] replaying %d accepted acquisition symbols\n",replay_n);
+                }
+                for (int replay_i=0; replay_i<(replay_n ? replay_n+1 : 1); replay_i++) {
+                if (replay_i < replay_n) {
+                    oi=s->data_acq_raw_i[replay_i]; oq=s->data_acq_raw_q[replay_i];
+                    s->srx_th=s->data_acq_srx[replay_i]; gc=s->data_agc;
+                } else if (replay_n) {
+                    oi=saved_oi; oq=saved_oq; s->srx_th=saved_srx; gc=s->data_agc;
+                }
                 if (s->data_nra && s->nra_n < 300) {
                     /* SIPFAX: bootstrap the carried gain from the received data power over
                        the first ~300 symbols (what a real modem's AGC holds across the
@@ -6085,9 +6303,15 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                        if (e5) df = fopen(e5, "w"); }
                             if (df) fprintf(df, "%d %d\n", si2, sq2);
                         }
+                        { static FILE *seqf; static int seq_opened;
+                          if (!seq_opened) { const char *e=getenv("SIPFAX_DATA_FEED_SEQUENCE"); seq_opened=1; if (e) seqf=fopen(e,"w"); }
+                          if (seqf) fprintf(seqf,"%ld\n",replay_i < replay_n ? s->data_acq_source[replay_i] : source_symbol);
+                        }
                         baseband_decode_impl(s, si2, sq2);
                     }
                 }
+                }
+                oi=saved_oi; oq=saved_oq; s->srx_th=saved_srx;
                 }
                 { extern int v34_dbg; if (v34_dbg && (s->data_n % 20000) == 0)
                     fprintf(stderr, "[data] clock %+.1f ppm\n", s->cma_tinc/(7.0/6.0)*1e6),
@@ -6185,9 +6409,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                 s->p4_ybits = ((s->p4_ybits << 1) | (unsigned int)yb) & 0x7fffff;
                 s->p4_ring[s->p4_rn & P4_RING_MASK] = (u8)xb; s->p4_rn++;
                 if (p4bitf) fputc('0'+xb, p4bitf);
-                if (xb) { if (++s->p4_ones_run >= 19 && s->p4_mp_rx && !s->p4_e_rx) {
-                            s->p4_e_rx = 1; { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn); } } }
-                else s->p4_ones_run = 0;
+                if (v34_e_bit(&s->p4_ones_run, xb, s->p4_mp_rx && s->p4_mp_crcok) && !s->p4_e_rx) {
+                    s->p4_e_rx = 1;
+                    if (v34_dbg) fprintf(stderr, "[p4] E received at sym %ld\n", s->cma_qn);
+                }
                 if (!s->p4_mpp_rx && s->p4_rn > 700 && (++s->p4_try >= 128)) {
                     int Ls[2] = { 88, 188 }, li;
                     s->p4_try = 0;
@@ -6222,8 +6447,8 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             type = f[18];
                             if ((type ? 188 : 88) != L) continue;
                             crc_off = type ? 171 : 69;
-                            rate_ca = (f[20]<<3)|(f[21]<<2)|(f[22]<<1)|f[23];
-                            rate_ac = (f[24]<<3)|(f[25]<<2)|(f[26]<<1)|f[27];
+                            rate_ca = f[20]|(f[21]<<1)|(f[22]<<2)|(f[23]<<3);
+                            rate_ac = f[24]|(f[25]<<1)|(f[26]<<2)|(f[27]<<3);
                             ackb = f[33];
                             for (mi = 0; mi < 15; mi++) msk |= ((unsigned int)f[35+mi]) << mi;
                             for (i3 = 17; i3 < crc_off; i3++) {   /* spec CRC: exclude start bits */
@@ -6232,9 +6457,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                             }
                             for (i3 = 0; i3 < 16; i3++) rx_crc |= ((int)f[crc_off+i3]) << (15-i3);
                             ok = (calc_crc(cb, cn) == rx_crc);
-                            {   /* accept on CRC, or on consensus of the reliable head fields */
+                            {   /* Repeated header agreement is diagnostic only: parameters must
+                                   be protected by a valid complete-frame CRC. */
                                 int key = (type<<28) ^ (rate_ca<<12) ^ (rate_ac<<4) ^ (f[29]<<2) ^ (f[30]<<1) ^ ackb;
-                                int trel = (f[29]<<1) | f[30];
+                                int trel = f[29] | (f[30]<<1);
                                 int consensus = (key == s->p4_key);
                                 s->p4_keyn = consensus ? s->p4_keyn+1 : 1; s->p4_key = key;
                                 { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] FOLD L=%d type=%d ca=%d ac=%d trel=%d ack=%d nonlin=%d shape=%d crc=%s cons=%d\n", L, type, rate_ca*2400, rate_ac*2400, trel, ackb, f[31], f[32], ok?"OK":"fail", s->p4_keyn); }
@@ -6250,7 +6476,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                    inversion. Note linmodem's own encoder stubs this out -
                                    dzeta is hardcoded to 0.3125 with the real formula
                                    commented out - so we neither apply it nor invert it. */
-                                if (ok) s->peer_nonlin = f[31];
+                                if (ok) { s->peer_nonlin = f[31]; s->peer_shape = f[32]; }
                                 if (ok && type == 1) {
                                     /* SIPFAX: the fold decoder never read the peer's
                                        precoder coefficients, so peer_h stayed zero even
@@ -6274,7 +6500,7 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
                                                 s->peer_h[2]/16384.0, s->peer_h[3]/16384.0,
                                                 s->peer_h[4]/16384.0, s->peer_h[5]/16384.0); }
                                 }
-                                if (ok || s->p4_keyn >= 2) {
+                                if (ok) {
                                     s->p4_mp_rate_ca = rate_ca; s->p4_mp_rate_ac = rate_ac; s->p4_mp_mask = msk;
                                     s->p4_trellis = trel; s->p4_mp_crcok = ok;
                                     if (!s->p4_mp_rx) { extern int v34_dbg; if (v34_dbg) fprintf(stderr, "[p4] MP READ (%s): ca=%d ac=%d trellis=%dstate ack=%d\n", ok?"CRC":"consensus", rate_ca*2400, rate_ac*2400, (1<<(4+trel)), ackb); }
@@ -6633,11 +6859,17 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
    flattens (37.6/3.6/15.6 -> 3.9/3.4/3.8). Leaving it off cost lattice-rms 0.498 against
    0.166 on a signal that resolves. */
 static double p4_ted_kp = 0.10, p4_ted_ki = 0.002, p4_ted_sign = -1.0;
+static unsigned p4_clock_window = 0; /* Experimental; instantaneous by default. */
 double p4_ted_last = 0.0;   /* SIPFAX: exported - seeds the data-mode clock */
 static void p4_ted_init(void)
 {
     static int done; char *e;
     if (done) return; done = 1;
+    e = getenv("SIPFAX_CLOCK_AVERAGE");
+    if (e && !strcmp(e,"1024")) p4_clock_window = 1024;
+    else if (e && !strcmp(e,"2048")) p4_clock_window = 2048;
+    else if (e && strcmp(e,"0"))
+        fprintf(stderr,"[p4] unsupported clock average; using instantaneous estimate\n");
     e = getenv("SIPFAX_TED_KP");   if (e) p4_ted_kp   = atof(e);
     e = getenv("SIPFAX_TED_KI");   if (e) p4_ted_ki   = atof(e);
     e = getenv("SIPFAX_TED_SIGN"); if (e) p4_ted_sign = atof(e);
@@ -6675,6 +6907,7 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
            tfr accumulates the rate error (samples per half-symbol); the proportional term
            nudges the phase directly. */
         double tfr = 0, gmi = 0, gmq = 0, gpi = 0, gpq = 0;
+        V34ClockHistory clock_history; v34_clock_reset(&clock_history);
         for (i = 0; i < P4_NT; i++) { bufi[i] = 0; bufq[i] = 0; }
         ns = 0;
         while (pos < nz - 2) {
@@ -6732,10 +6965,15 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                 if (tfr >  0.02) tfr =  0.02;    /* +-4000 ppm: far past any real clock */
                 if (tfr < -0.02) tfr = -0.02;
                 p4_ted_last = tfr;
+                if (p4_clock_window) v34_clock_push(&clock_history,tfr);
                 gpi = oi; gpq = oq;
             }
             pos += P4_SPS/2.0 + tfr;
         }
+        /* Publish a stable trailing estimate only when explicitly selected.
+           A short pass retains its instantaneous estimate, never old history. */
+        if (p4_clock_window)
+            p4_ted_last = v34_clock_mean(&clock_history,p4_clock_window,p4_ted_last);
     }
     { extern double g_p4ffe_i[], g_p4ffe_q[]; extern int g_p4ffe_valid; int q;
       for (q = 0; q < P4_NT; q++) { g_p4ffe_i[q] = wi[q]; g_p4ffe_q[q] = wq[q]; }
@@ -6845,9 +7083,9 @@ static int p4_mp_decode(const double *si, const double *sq, int ns, int sixteen,
                (slmodem's own MP does the same, 24 ack=0 frames then 4 ack=1), so the
                window's head stays ack=0 for up to 2.5 s after the caller has actually
                acknowledged - longer than it waits for our E before retraining. */
-            if (out_ca)  *out_ca  = (db[i+20]<<3)|(db[i+21]<<2)|(db[i+22]<<1)|db[i+23];
-            if (out_ac)  *out_ac  = (db[i+24]<<3)|(db[i+25]<<2)|(db[i+26]<<1)|db[i+27];
-            if (out_trel) *out_trel = (db[i+29]<<1)|db[i+30];
+            if (out_ca)  *out_ca  = db[i+20]|(db[i+21]<<1)|(db[i+22]<<2)|(db[i+23]<<3);
+            if (out_ac)  *out_ac  = db[i+24]|(db[i+25]<<1)|(db[i+26]<<2)|(db[i+27]<<3);
+            if (out_trel) *out_trel = db[i+29]|(db[i+30]<<1);
             if (out_shape) *out_shape = db[i+32];
             /* SIPFAX: bit 31 is the peer's non-linear-encoder request. This decoder pulled
                out shape (bit 32) and the precoder coefficients but never nonlin, and it is
@@ -7220,6 +7458,8 @@ static int data_slice(V34DSPState *s, double xi, double xq, double *di, double *
 static void v34_tx_data_params(V34DSPState *s, int R)
 {
     int S = s->S, d, e;
+    /* The peer's MP controls this transmitter, including when R is unchanged. */
+    if (s->p4_mp_rx) s->expanded_shape = s->peer_shape;
     s->R = R;
     if (!s->use_high_carrier) { d = S_tab[S][2]; e = S_tab[S][3]; }
     else                      { d = S_tab[S][4]; e = S_tab[S][5]; }
@@ -7260,7 +7500,8 @@ static void v34_rx_data_params(V34DSPState *s, int R)
     s->q = 0;
     if (s->b <= 12) s->K = 0;
     else { s->K = s->b - 12; while (s->K >= 32) { s->K -= 8; s->q++; } }
-    { char *e2 = getenv("SIPFAX_SHAPE"); if (e2) s->expanded_shape = atoi(e2); }
+    if (s->p4_adv_ca > 0) s->expanded_shape = s->p4_adv_shape;
+    else { char *e2 = getenv("SIPFAX_SHAPE"); if (e2) s->expanded_shape = atoi(e2); }
     if (!s->expanded_shape) s->M = (int) ceil(pow(2.0, s->K / 8.0));
     else                    s->M = (int) rint(1.25 * pow(2.0, s->K / 8.0));
     s->L = 4 * s->M * (1 << s->q);
@@ -7288,6 +7529,9 @@ static void v34_rx_data_params(V34DSPState *s, int R)
         if (dr < 0) { char *e3 = getenv("SIPFAX_DEC_RESET"); dr = e3 ? atoi(e3) : 1; }
         if (dr) {
             s->phase_4d = 0;
+            s->rx_traceback_warmup = 0;
+            s->rx_mapping_frame_count = 0;
+            s->trellis_ptr = 0;
             s->Z_1 = 0;
             s->U0 = 0;
             memset(s->x, 0, sizeof(s->x));
@@ -7400,7 +7644,8 @@ void V34_demod_cma(V34DSPState *s, const s16 *samples, unsigned int nb)
                        and the 9.7 encoder never did, off the same CRC gate and the same
                        rx->tx copy. Captures decode nonlin=1 offline while the live journal
                        shows zero "non-linear encoder ON" events for the same calls. */
-                    if (nlreq) s->peer_nonlin = 1;
+                    s->peer_nonlin = nlreq;
+                    s->peer_shape = sh;
                     s->p4_mp_crcok = 1; s->p4_mp_rx = 1;
                     if (ak && !s->p4_mpp_rx) {
                         s->p4_mpp_rx = 1;
@@ -7598,10 +7843,27 @@ void V34_stream_decode_file(const char *path)
 {
     extern int v34_dbg;
     V34State p; static V34DSPState rx; s16 buf[512]; FILE *f; int n, i;
+    unsigned stream_block_samples = 512;
     memset(&p, 0, sizeof(p)); memset(&rx, 0, sizeof(rx));
     p.S = V34_S3429; p.R = 33600; p.conv_nb_states = 16; p.use_high_carrier = 1; p.calling = 0;
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     rx.S = p.S; rx.use_high_carrier = 1;
+    {
+        const char *live = getenv("SIPFAX_STREAM_LIVE_INIT");
+        if (live && !strcmp(live, "1")) {
+            /* Match the answer server's Phase-2 -> Phase-3 RX handoff.
+               The DSP role describes the transmitting peer (the caller). */
+            const char *shape = getenv("SIPFAX_SHAPE");
+            const char *role = getenv("SIPFAX_STREAM_CALLING");
+            stream_block_samples = 160; /* default live media frame size */
+            p.R = 19200;
+            p.calling = role ? atoi(role) : 1;
+            p.expanded_shape = shape ? atoi(shape) : 1;
+            V34_demod_peer_init(&rx, &p);
+            fprintf(stderr, "[stream] live RX initialization: peer calling=%d shape=%d R=%d S=%.0f\n",
+                    rx.calling, rx.expanded_shape, rx.R, rx.symbol_rate);
+        }
+    }
     rx.put_bit = stream_put_bit; rx.opaque = 0;
     {   /* SIPFAX: SIPFAX_FORCE_DATA=<rate> skips the handshake and drops the receiver
            straight into data mode, so a known-good modulated signal can be fed through
@@ -7634,6 +7896,23 @@ void V34_stream_decode_file(const char *path)
             fprintf(stderr, "[stream] FORCE_DATA: entering data mode at R=%d\n", atoi(fd));
         }
     }
+    /* Offline replay has no transmitting instance to bridge our advertisement.
+       Supply the recorded receive rate/trellis/shaping explicitly. Optional RX_H
+       above supplies its recorded coefficients; otherwise they remain zero. */
+    { const char *mp = getenv("SIPFAX_STREAM_MP");
+      if (mp) {
+          int rate, trellis, shape, used=0;
+          if (sscanf(mp,"%d,%d,%d%n",&rate,&trellis,&shape,&used)!=3 || mp[used] ||
+              rate<2400 || rate>33600 || rate%2400 || trellis<0 || trellis>2 ||
+              shape<0 || shape>1) {
+              fprintf(stderr,"[stream] invalid recorded MP; expected rate,trellis,shape\n");
+              exit(2);
+          }
+          rx.p4_adv_ca=rate/2400; rx.p4_adv_trel=trellis; rx.p4_adv_shape=shape;
+          memcpy(rx.p4_adv_h,rx.h,sizeof(rx.p4_adv_h));
+          fprintf(stderr,"[stream] recorded MP: ca=%d trellis=%d shape=%d\n",rate,trellis,shape);
+      }
+    }
     { char *db = getenv("SIPFAX_DATABITS"); if (db) g_databitf = fopen(db, "w"); }
     v34_dbg = 1;
     f = fopen(path, "rb"); if (!f) { perror(path); return; }
@@ -7642,18 +7921,40 @@ void V34_stream_decode_file(const char *path)
        failed every subsequent build and test in a way that looked like a code fault.
        Opt in with SIPFAX_SOFTDUMP=<path>. */
     { char*e=getenv("SIPFAX_SOFTDUMP"); if(e) cma_dumpf = fopen(e,"w"); }
+    { const char *e = getenv("SIPFAX_STREAM_STATE");
+      if (e) {
+          cma_statef = fopen(e, "w");
+          if (!cma_statef) { perror(e); fclose(f); return; }
+          fprintf(cma_statef, "sample24k,symbol,e_received,data_on,acq_symbols,data_symbols,i,q,carrier\n");
+      } }
     { char*e=getenv("SIPFAX_P4BITS"); if(e) p4bitf=fopen(e,"w"); }
     { char *t2 = getenv("SIPFAX_T2DUMP"); if (t2) cma_t2df = fopen(t2, "w"); } fprintf(stderr, "[stream] decoding %s via V34_demod_cma\n", path);
     { long fed = 0;
-      while ((n = fread(buf, 2, 512, f)) > 0) {
+      int measure = getenv("SIPFAX_STREAM_TIMING") != NULL;
+      double worst_ms=0, total_ms=0; long calls=0, overruns=0, worst_sample=0;
+      while ((n = fread(buf, 2, stream_block_samples, f)) > 0) {
           if (g_force_at > 0 && fed >= g_force_at && !rx.p4_e_rx) {
               rx.p4_e_rx = 1;
               fprintf(stderr, "[stream] switching to data mode at t=%.2fs (cma_phase=%d)\n",
                       fed/8000.0, rx.cma_phase);
           }
-          V34_demod_cma(&rx, buf, n); fed += n;
-      } }
+          struct timespec before, after;
+          if (measure) clock_gettime(CLOCK_MONOTONIC,&before);
+          V34_demod_cma(&rx, buf, n);
+          if (measure) {
+              clock_gettime(CLOCK_MONOTONIC,&after);
+              double ms=(after.tv_sec-before.tv_sec)*1000.0+(after.tv_nsec-before.tv_nsec)/1e6;
+              calls++; total_ms+=ms;
+              if (ms>worst_ms) { worst_ms=ms; worst_sample=fed; }
+              if (ms>n*1000.0/8000) overruns++;
+          }
+          fed += n;
+      }
+      if (measure) fprintf(stderr,"[stream-timing] calls=%ld mean_ms=%.6f worst_ms=%.6f worst_sample=%ld deadline_overruns=%ld block_samples=%u\n",
+                           calls,calls?total_ms/calls:0,worst_ms,worst_sample,overruns,stream_block_samples);
+    }
     fclose(f);
+    if (cma_statef) { fclose(cma_statef); cma_statef = 0; }
     if(cma_dumpf){fclose(cma_dumpf);cma_dumpf=0;} if(cma_t2df){fclose(cma_t2df);cma_t2df=0;} if(p4bitf){fclose(p4bitf);p4bitf=0;} fprintf(stderr, "[stream] END: J_received=%d locked=%d rot=%d cma_cnt=%d\n", rx.J_received, rx.srx_locked, rx.srx_rot, rx.cma_cnt);
     if (g_databitf) { fclose(g_databitf); g_databitf = 0; }
     fprintf(stderr, "[data] decoded %ld bits (%ld ones, %.1f%%) from %ld symbols\n",
@@ -7806,6 +8107,11 @@ static void dataloop_symsink(int si, int sq)
             }
         }
         if (dl_sigma > 0) { a += dl_sigma*dl_gauss(); b += dl_sigma*dl_gauss(); }
+        /* Diagnostic prefix loss for mapping-frame acquisition tests. */
+        { static long drop = -1;
+          if (drop < 0) { const char *e = getenv("SIPFAX_DL_DROP");
+              drop = e ? atol(e) : 0; if (drop < 0) drop = 0; }
+          if (drop > 0) { --drop; return; } }
         baseband_decode_pub(g_rx_state, (int)lrint(a), (int)lrint(b));
     }
 }
@@ -7827,6 +8133,9 @@ void V34_dataloop_test(void)
     memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx)); memset(&pt,0,sizeof(pt)); memset(&pr,0,sizeof(pr));
     { extern void dsp_init(void); dsp_init(); } V34_static_init();
     pt.S=V34_S3429; pt.R=R; pt.use_high_carrier=1; pt.calling=1; pt.conv_nb_states=64;
+    { const char *trellis = getenv("SIPFAX_DL_TRELLIS");
+      if (trellis) { int t=atoi(trellis); if (t!=16 && t!=32 && t!=64) exit(2); pt.conv_nb_states=t; } }
+    { const char *role = getenv("SIPFAX_DL_CALLING"); if (role) pt.calling = atoi(role) != 0; }
     { char *se=getenv("SIPFAX_DL_SHAPE"); pt.expanded_shape = se?atoi(se):0; }
     { char *nl=getenv("SIPFAX_DL_NONLIN"); pt.use_non_linear = nl?atoi(nl):0; }
     {   /* SIPFAX: enable the TRANSMIT precoder in the loopback so the receive side can be
@@ -7849,8 +8158,15 @@ void V34_dataloop_test(void)
                     pt.h[0][0],pt.h[0][1],pt.h[1][0],pt.h[1][1],pt.h[2][0],pt.h[2][1]);
         }
     }
-    memcpy(&pr,&pt,sizeof(pr)); pr.calling=0;
+    memcpy(&pr,&pt,sizeof(pr)); pr.calling=!pt.calling;
     V34_init_low(&tx,&pt,1); V34_init_low(&rx,&pr,0);
+    { const char *peer = getenv("SIPFAX_DL_PEER_ROLE");
+      if (peer && !strcmp(peer, "1")) {
+          pr.calling = pt.calling;
+          V34_demod_peer_init(&rx, &pr);
+          fprintf(stderr, "[dataloop] peer RX calling=%d data_poly=%d\n", pr.calling, rx.rx_data_poly);
+      } }
+
     {   /* SIPFAX: the receiver inverts the precoder exactly when the transmitter uses it */
         /* SIPFAX: OFF by default - the inverse below is NOT yet correct. With it off the
            loopback still reaches 97.9% through a precoding transmitter; with it on,
@@ -7902,6 +8218,61 @@ void V34_dataloop_test(void)
 
 void V34_mptest(void)
 {
+    if (getenv("SIPFAX_MPTEST_SHAPING")) {
+        static V34DSPState tx, rx, reference;
+        V34State p;
+        extern void dsp_init(void);
+        dsp_init(); V34_static_init();
+        for (int R=12000; R<=24000; R+=12000) {
+            for (int peer=0; peer<2; peer++) for (int own=0; own<2; own++) {
+                memset(&p, 0, sizeof(p));
+                p.S=V34_S3429; p.R=R; p.conv_nb_states=32;
+                p.use_high_carrier=1; p.expanded_shape=1-peer;
+                memset(&tx,0,sizeof(tx)); memset(&rx,0,sizeof(rx));
+                memset(&reference,0,sizeof(reference));
+                V34_init_low(&tx,&p,0); V34_init_low(&rx,&p,0);
+                tx.p4_mp_rx=1; tx.peer_shape=peer;
+                rx.p4_adv_ca=R/2400; rx.p4_adv_shape=own;
+                v34_tx_data_params(&tx,R); v34_rx_data_params(&rx,R);
+                p.expanded_shape=peer; V34_init_low(&reference,&p,0);
+                int txok=tx.L==reference.L && tx.M==reference.M;
+                p.expanded_shape=own; V34_init_low(&reference,&p,0);
+                int rxok=rx.L==reference.L && rx.M==reference.M;
+                double power=v34_shaped_meanc2_cfg(R,32,tx.expanded_shape,0,NULL,0);
+                printf("%d %d %d %d %d %d %d %.12g\n",R,peer,own,
+                       tx.expanded_shape,rx.expanded_shape,txok,rxok,power);
+            }
+        }
+        return;
+    }
+    if (getenv("SIPFAX_MPTEST_RX_TRELLIS")) {
+        V34DSPState s;
+        memset(&s, 0, sizeof(s));
+        for (int advertised=-1; advertised<3; advertised++) {
+            s.p4_adv_ca = advertised < 0 ? 0 : 5;
+            s.p4_adv_trel = advertised < 0 ? 0 : advertised;
+            for (int peer=0; peer<3; peer++) {
+                s.p4_trellis = peer;
+                printf("%d %d %d\n", advertised, peer, v34_rx_trellis_states(&s));
+            }
+        }
+        return;
+    }
+    /* Independent generated-symbol input for MP field-order/CRC tests. */
+    const char *input = getenv("SIPFAX_MPTEST_SYMBOLS");
+    if (input) {
+        static double i[P4_MAXSY], q[P4_MAXSY];
+        int n=0, ca=0, ac=0, trel=0, ack=0, shape=0, nonlin=0;
+        unsigned int mask=0; short h[6]={0};
+        FILE *f=fopen(input, "r");
+        if (!f) { perror(input); exit(2); }
+        while (n<P4_MAXSY && fscanf(f, "%lf %lf", &i[n], &q[n])==2) n++;
+        fclose(f);
+        int frames=p4_mp_decode(i,q,n,0,V34_GPC,&ca,&ac,&trel,&ack,&shape,&mask,h,&nonlin);
+        printf("{\"frames\":%d,\"ca\":%d,\"ac\":%d,\"trellis\":%d,\"ack\":%d}\n",
+               frames,ca,ac,trel,ack);
+        return;
+    }
     static V34DSPState s; V34State p;
     memset(&s, 0, sizeof(s)); memset(&p, 0, sizeof(p));
     { extern void dsp_init(void); dsp_init(); }
@@ -7909,11 +8280,37 @@ void V34_mptest(void)
     p.S = V34_S3429; p.R = 16800; p.use_high_carrier = 1; p.calling = 0;
     p.conv_nb_states = 64;
     V34_init_low(&s, &p, 0);
+    if (getenv("SIPFAX_MPTEST_STABLE")) {
+        int kind = atoi(getenv("SIPFAX_MPTEST_STABLE"));
+        s.p4_mp_rx=0; p4_have_h=1; p4_hest[0][0]=1234;
+        V34_send_MP(&s,kind,0);
+        s.p4_mp_rx=1; s.p4_mp_rate_ca=3; s.p4_mp_rate_ac=4;
+        s.p4_trellis=2; s.p4_mp_mask=0x3ffe; p4_hest[0][0]=5678;
+        V34_send_MP(&s,kind,0);
+        V34_send_MP(&s,kind,1);
+        V34_init_low(&s,&p,0);
+        V34_send_MP(&s,kind,0);
+        return;
+    }
+    if (getenv("SIPFAX_MPTEST_CHANNEL_RESET")) {
+        static V34State session;
+        extern void v34_phase2_free(void *);
+        for (int attempt=0; attempt<3; attempt++) {
+            p4_have_h=1;
+            for (int k=0;k<3;k++) for (int j=0;j<2;j++) p4_hest[k][j]=4713+k+j;
+            memset(&session,0,sizeof(session)); V34_init(&session,0);
+            if (attempt==1) { p4_have_h=1; p4_hest[0][0]=1234; }
+            V34_send_MP(&session.v34_tx,1,0);
+            if (session.phase2) v34_phase2_free(session.phase2);
+        }
+        return;
+    }
     /* simulate the caller having proposed ca=16800 (7), ac=9600 (4), 64-state (2) */
     s.p4_mp_rx = 1; s.p4_mp_rate_ca = 7; s.p4_mp_rate_ac = 4;
     s.p4_trellis = 2; s.p4_mp_mask = 0x0fff;
     V34_send_MP(&s, 1, 0);      /* MP  */
     V34_send_MP(&s, 1, 1);      /* MP' */
+    V34_init_low(&s, &p, 0);    /* new negotiation clears the advertisement */
     s.p4_mp_rx = 0;             /* pre-negotiation fallback */
     V34_send_MP(&s, 1, 0);
     fprintf(stderr, "[mptest] 3 frames dumped\n");
@@ -8044,7 +8441,9 @@ void V34_p4block_test(void)
                        fprintf(stderr, " type=%d aux=%d asym=%d nonlin=%d h=%.4f%+.4fj %.4f%+.4fj %.4f%+.4fj",
                              g_mp_type, g_mp_aux, g_mp_asym,
                              nlo, hco[0]/16384.0, hco[1]/16384.0, hco[2]/16384.0,
-                             hco[3]/16384.0, hco[4]/16384.0, hco[5]/16384.0); }
+                             hco[3]/16384.0, hco[4]/16384.0, hco[5]/16384.0);
+                       fprintf(stderr, " h_q14=%d,%d,%d,%d,%d,%d",
+                             hco[0], hco[1], hco[2], hco[3], hco[4], hco[5]); }
             fprintf(stderr, "\n");
         }
     }
@@ -8060,12 +8459,18 @@ void V34_static_init(void)
 
 /* V.34 Phase-2 answer state machine (v34_phase2.c) */
 extern void *v34_phase2_new(void);
+extern void v34_phase2_retrain(void *state);
 extern int v34_phase2_run(void *p, s16 *out, s16 *in, int n);
 extern int v34_phase2_symrate(void *p);
+extern int v34_phase2_md_ms(void *p);
 extern void v34_phase2_free(void *p);
 
 void V34_init(struct V34State *s, int calling)
 {
+    /* A previous attempt's receive channel must not be advertised on a retrain.
+       Current-attempt estimation may populate these again during Phase 4. */
+    p4_have_h = 0;
+    memset(p4_hest, 0, sizeof(p4_hest));
     /* Fixed V.34 params for first bring-up (S=2400 baud, R=19200, 16-state).
        TODO: derive S/R from the V.34 phase-2 INFO/probing negotiation. */
     s->S = V34_S2400;
@@ -8089,7 +8494,7 @@ void V34_init(struct V34State *s, int calling)
     s->calling = calling;
     V34_mod_init(&s->v34_tx, s);
     s->calling = !calling;
-    V34_demod_init(&s->v34_rx, s);
+    V34_demod_peer_init(&s->v34_rx, s);
     s->calling = calling;
 
     /* SIPfax answers: run the V.34 Phase-2 negotiation before Phase 3 */
@@ -8103,14 +8508,21 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
         int r = v34_phase2_run(s->phase2, output, input, nb_samples);
         if (r == 1) {
             int sr = v34_phase2_symrate(s->phase2);
+            int md_ms = v34_phase2_md_ms(s->phase2);
+            if (md_ms < 0) {
+                fprintf(stderr, "[v34p2] missing CRC-valid INFO1c; training parameters unavailable\n");
+                return 1;
+            }
             if (sr >= 0) s->S = sr;   /* 0..5 == V34_S2400..V34_S3429 */
             /* hand off to Phase 3, preserving the serial data callbacks */
             get_bit_func gb = s->v34_tx.get_bit; void *go = s->v34_tx.opaque;
             put_bit_func pb = s->v34_rx.put_bit; void *po = s->v34_rx.opaque;
             s->calling = 0; V34_mod_init(&s->v34_tx, s);
             s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
-            s->calling = 1; V34_demod_init(&s->v34_rx, s); s->calling = 0;
+            s->calling = 1; V34_demod_peer_init(&s->v34_rx, s); s->calling = 0;
             s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
+            s->v34_rx.caller_md_ms = md_ms;
+            fprintf(stderr, "[v34p3] caller MD interval=%d ms (CRC validated)\n", md_ms);
             v34_phase2_free(s->phase2); s->phase2 = 0; s->phase2_active = 0; s->p3n = 0; s->p3x1 = 0; s->p3go = 0;
             { char *rp = getenv("SIPFAX_P3_REPLAY"); s->p3rep = 0; s->p3rep_len = 0; s->p3rep_ptr = 0;
               if (rp) { FILE *rf = fopen(rp, "rb"); if (rf) { fseek(rf,0,SEEK_END); long sz=ftell(rf); fseek(rf,0,SEEK_SET);
@@ -8176,7 +8588,10 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
                     s->tb_restarts = rst;
                     s->v34_tx.get_bit = gb; s->v34_tx.opaque = go;
                     s->v34_rx.put_bit = pb; s->v34_rx.opaque = po;
-                    memset(output, 0, nb_samples * sizeof(s16));
+                    v34_phase2_retrain(s->phase2);
+                    /* This callback starts the 560-sample silence interval;
+                       do not add a separate block of mute ahead of it. */
+                    v34_phase2_run(s->phase2, output, input, nb_samples);
                     return 0;
                 }
             }
@@ -8184,7 +8599,18 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     }
     { static int rxcma = -1; if (rxcma < 0) { char *e = getenv("SIPFAX_RX_CMA"); rxcma = e ? atoi(e) : 0; }
       if (rxcma) { extern void V34_demod_cma(V34DSPState*, const s16*, unsigned int); V34_demod_cma(&s->v34_rx, input, nb_samples); }
-      else V34_demod(&s->v34_rx, input, nb_samples); }
+      else {
+          /* Match the offline decoder's input units, only for legacy V.34 RX. */
+          s16 scaled[160];
+          unsigned int offset = 0;
+          while (offset < (unsigned int)nb_samples) {
+              unsigned int n = (unsigned int)nb_samples - offset, i;
+              if (n > 160) n = 160;
+              for (i = 0; i < n; i++) scaled[i] = v34_rx_level(input[offset + i]);
+              V34_demod(&s->v34_rx, scaled, n);
+              offset += n;
+          }
+      } }
     {   /* SIPFAX: flush the stale J HERE, before this block's V34_mod sees J_received
            and queues S into the same tx buffer. While muted (p3go && !J_received) the
            modulator kept cycling J through the queue, and the leftover ~100 symbols
@@ -8241,6 +8667,8 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
     s->v34_tx.p4_trellis = s->v34_rx.p4_trellis;   /* SIPFAX: MP 29:30 - trellis REQUIRED of our TX */
     s->v34_rx.p4_adv_trel = s->v34_tx.p4_adv_trel;
     s->v34_rx.p4_adv_ca = s->v34_tx.p4_adv_ca;
+    s->v34_rx.p4_adv_shape = s->v34_tx.p4_adv_shape;
+    memcpy(s->v34_rx.p4_adv_h, s->v34_tx.p4_adv_h, sizeof(s->v34_rx.p4_adv_h));
     s->v34_tx.p4_trellis    = s->v34_rx.p4_trellis;
     s->v34_tx.p4_mp_mask    = s->v34_rx.p4_mp_mask;
     {   /* SIPFAX: the precoder coefficients in the peer's MP are what ITS receiver computed
@@ -8248,6 +8676,7 @@ int V34_process(struct V34State *s, s16 *output, s16 *input, int nb_samples)
            them, and the non-linear-encoder request, to the tx instance. */
         int hq; for (hq = 0; hq < 6; hq++) s->v34_tx.peer_h[hq] = s->v34_rx.peer_h[hq];
         s->v34_tx.peer_nonlin = s->v34_rx.peer_nonlin;
+        s->v34_tx.peer_shape = s->v34_rx.peer_shape;
     }
     V34_mod(&s->v34_tx, output, nb_samples);
     {   /* Phase-3 output stage: /5 level-match then optional pre-emphasis, both TUNABLE
@@ -8574,4 +9003,64 @@ void V34_test(void)
 
     fprintf(stderr, "errors=%d nb_bits=%d Pe=%f\n", 
            errors, nb_bits, (float) errors / (float)nb_bits);
+}
+
+/* Regression uses real decoder entry points; no synthetic warmup predicate. */
+void V34_traceback_reset_test(void)
+{
+    static V34DSPState a, b;
+    V34State p;
+    extern void dsp_init(void);
+    dsp_init(); V34_static_init();
+    memset(&p,0,sizeof(p)); p.S=V34_S3429; p.R=12000;
+    p.conv_nb_states=16; p.use_high_carrier=1;
+    V34DSPState *states[3]={&a,&b,&a};
+    for(int run=0;run<3;run++) {
+        V34DSPState *s=states[run];
+        if(run<2) {memset(s,0,sizeof(*s)); V34_init_low(s,&p,0);}
+        /* Third run reconfigures an already partially filled mapping frame. */
+        v34_rx_data_params(s,12000);
+        for(int pair=1;pair<=TRELLIS_LENGTH+1;pair++) {
+            baseband_decode_impl(s,128,128);
+            baseband_decode_impl(s,128,128);
+            int expected=pair<=TRELLIS_LENGTH?0:2;
+            if(s->rx_mapping_frame_count!=expected) {
+                fprintf(stderr,"traceback warmup failed: run=%d pair=%d mapping=%d expected=%d\n",
+                        run,pair,s->rx_mapping_frame_count,expected);
+                exit(1);
+            }
+        }
+    }
+    puts("PASS: fresh receiver, second receiver, and in-place decoder reset wait 30 traceback pairs");
+}
+
+/* Exercise the real front-end accounting without feeding a synthetic decoder. */
+void V34_data_timeline_test(void)
+{
+    static V34DSPState s;
+    const int lengths[]={137,412,1372};
+    for(int run=0;run<3;run++) {
+        memset(&s,0,sizeof(s));
+        s.cma_started=1; s.cma_pow=1; s.cma_sq=1;
+        s.cma_phase=2; s.data_on=1;
+        /* Existing acquisition skip exits after history and timing processing. */
+        s.cma_skipn=-100000;
+        for(int i=0;i<lengths[run]+64;i++) {
+            V34_cma_t2sample(&s,i<lengths[run]?0:1,0);
+            if(s.cma_t2!=i+1) {
+                fprintf(stderr,"data timeline lost position: run=%d input=%d advanced=%ld\n",
+                        run,i+1,(long)s.cma_t2);
+                exit(1);
+            }
+        }
+        for(int i=0;i<CMANT;i++) {
+            if(s.cma_bufi[i]!=1 || s.cma_bufq[i]!=0) {
+                fprintf(stderr,"data history failed to resume after silence\n");exit(1);
+            }
+        }
+    }
+    memset(&s,0,sizeof(s));s.cma_started=1;s.cma_pow=1;
+    for(int i=0;i<412;i++) V34_cma_t2sample(&s,0,0);
+    if(s.cma_t2) {fprintf(stderr,"startup silence was not squelched\n");exit(1);}
+    puts("PASS: data positions and history survive silence; startup squelch remains");
 }

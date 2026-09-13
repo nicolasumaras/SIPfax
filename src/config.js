@@ -137,6 +137,7 @@ export class SipfaxConfig extends EventEmitter {
 
 function seedFromEnv(env) {
   const adminPass = env.SIPFAX_ADMIN_PASSWORD;
+  const modemEngine = (env.SIPFAX_MODEM_ENGINE ?? 'spandsp').toLowerCase();
   return {
     maxSessions: Number.parseInt(env.SIPFAX_MAX_SESSIONS ?? '1', 10) || 1,
     admin: {
@@ -159,8 +160,8 @@ function seedFromEnv(env) {
     },
     trunk: { codecs: parseList(env.SIPFAX_TRUNK_CODECS, ['ulaw', 'alaw']) },
     modem: {
-      engine: (env.SIPFAX_MODEM_ENGINE ?? 'spandsp').toLowerCase(),
-      modulation: env.SIPFAX_MODEM_MODULATION ?? 'v34',
+      engine: modemEngine,
+      modulation: env.SIPFAX_MODEM_MODULATION ?? (modemEngine === 'linmodem' ? 'v90' : 'v34'),
       slmodemd: env.SIPFAX_SLMODEMD ?? null,
       command: env.SIPFAX_MODEM_COMMAND ?? null
     }

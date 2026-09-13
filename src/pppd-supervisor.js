@@ -1,16 +1,30 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 const DEFAULT_DNS_SERVERS = ['1.1.1.1', '9.9.9.9'];
 
 export function renderChapSecrets(credentials, path) {
+  let target = path;
+  try { target = realpathSync(path); } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   const lines = credentials.chapSecrets().map(({ username, password }) => {
     return `${quotePppSecret(username)} * ${quotePppSecret(password)} *`;
   });
-  writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
+  // Readers in other pppd processes must see a complete credential set.
+  const staging = mkdtempSync(join(dirname(target), '.sipfax-secrets-'));
+  try {
+    const pending = join(staging, 'secrets');
+    writeFileSync(pending, `${lines.join('\n')}\n`, { mode: 0o600 });
+    renameSync(pending, target);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
   return path;
 }
 
@@ -105,10 +119,12 @@ export class PppdSupervisor extends EventEmitter {
     this.stop(callId);
 
     const sessionDir = mkdtempSync(join(this.tempDir, `sipfax-pppd-${sanitizePathPart(callId)}-`));
+    const notifyToken = randomBytes(32).toString('hex');
     const egressDescriptorPath = egressDescriptor
-      ? this.writeEgressDescriptor(callId, egressDescriptor)
+      ? this.writeEgressDescriptor(callId, { ...egressDescriptor, notifyToken })
       : null;
     const session = {
+      notifyToken,
       callId,
       slavePath,
       lease: { ...lease },
@@ -134,10 +150,12 @@ export class PppdSupervisor extends EventEmitter {
       notifyScript: this.notifyScript,
       callId
     });
+    let resolveExit;
+    session.exited = new Promise(resolve => { resolveExit = resolve; });
 
     // pppd has no command-line option to select a secrets file; it always
     // reads /etc/ppp/{chap,pap}-secrets. Render the per-call credentials there
-    // before launch (single active call) and remove the file on teardown.
+    // before launch. The shared file is retained on per-call teardown.
     // secretsDir defaults to /etc/ppp; tests inject a writable temp dir.
     const secretsFile = join(
       this.secretsDir,
@@ -153,9 +171,11 @@ export class PppdSupervisor extends EventEmitter {
     session.args = args;
 
     child.stdout?.on('data', (chunk) => {
+      if (this.sessions.get(callId) !== session) return;
       this.acceptNotifyChunk(callId, chunk);
     });
     child.stderr?.on('data', (chunk) => {
+      if (this.sessions.get(callId) !== session) return;
       const text = chunk.toString('utf8').trim();
       if (text) {
         session.lastError = text;
@@ -163,10 +183,18 @@ export class PppdSupervisor extends EventEmitter {
       }
     });
     child.on('error', (error) => {
+      if (!child.pid) resolveExit(); // Spawn failure has no process to await.
+      if (this.sessions.get(callId) !== session) return;
       session.lastError = error.message;
       this.acceptEvent(callId, { state: 'failed', error: error.message });
     });
     child.on('exit', (code, signal) => {
+      resolveExit();
+      // A stopped process may exit after a replacement has reused its Call-ID.
+      if (this.sessions.get(callId) !== session) {
+        this.removeSessionFiles(session);
+        return;
+      }
       session.endedAt = new Date();
       session.sessionDurationSeconds = Math.max(0, Math.floor((session.endedAt.getTime() - session.startedAt.getTime()) / 1000));
       this.acceptEvent(callId, { state: 'closed', code, signal });
@@ -188,17 +216,37 @@ export class PppdSupervisor extends EventEmitter {
     return this.snapshot(callId);
   }
 
+  whenExited(callId) {
+    return this.sessions.get(callId)?.exited ?? null;
+  }
+
   stop(callId) {
     const session = this.sessions.get(callId);
     if (!session) {
       return false;
     }
 
-    if (session.process && !session.process.killed) {
+    // A failed spawn has no child PID. Never signal its empty process handle.
+    if (session.process?.pid > 0 && !session.process.killed) {
       session.process.kill('SIGTERM');
     }
     this.removeSessionFiles(session);
     this.sessions.delete(callId);
+    return true;
+  }
+
+  acceptHookEvent(event, token) {
+    const session = this.sessions.get(event?.callId);
+    if (!session || typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token) ||
+        !timingSafeEqual(Buffer.from(token), Buffer.from(session.notifyToken))) return false;
+    if (!['ip-up', 'ip-down'].includes(event.state) ||
+        !/^ppp[0-9]+$/.test(event.interfaceName ?? '') ||
+        event.localAddress !== session.lease.localAddress ||
+        event.remoteAddress !== session.lease.clientAddress) return false;
+    this.acceptEvent(event.callId, {
+      state: event.state, interfaceName: event.interfaceName,
+      localAddress: event.localAddress, clientAddress: event.remoteAddress
+    });
     return true;
   }
 
@@ -218,6 +266,13 @@ export class PppdSupervisor extends EventEmitter {
       const line = session.notifyBuffer.slice(0, newlineIndex).trim();
       session.notifyBuffer = session.notifyBuffer.slice(newlineIndex + 1);
       if (!line) {
+        continue;
+      }
+
+      // With nodetach, pppd also writes ordinary diagnostic lines to stdout.
+      // Only object-shaped notifications belong to the JSON event protocol.
+      if (!line.startsWith('{')) {
+        this.emit('pppd-log', { callId, line });
         continue;
       }
 
@@ -299,7 +354,7 @@ export class PppdSupervisor extends EventEmitter {
 
   writeEgressDescriptor(callId, descriptor) {
     mkdirSync(this.leaseDir, { recursive: true, mode: 0o750 });
-    const descriptorPath = join(this.leaseDir, `${sanitizePathPart(callId)}.json`);
+    const descriptorPath = join(this.leaseDir, `${callKey(callId)}.json`);
     writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, { mode: 0o640 });
     return descriptorPath;
   }
@@ -328,5 +383,5 @@ function quotePppSecret(value) {
 }
 
 function sanitizePathPart(value) {
-  return String(value).replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return callKey(value);
 }

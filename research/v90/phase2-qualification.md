@@ -2839,3 +2839,41 @@ work/native-reproducibility-audit.json and work/native-reproducibility-regressio
 Target-host rebuilding and final-artifact hardware qualification remain required.
 The ongoing V34 endurance call continues using native37793e5f, unaffected by
 these local builds and the source build-setting change.
+
+
+## V.34 30-minute physical endurance
+
+Candidate source `832f532` / native
+`37793e5fd859cf5087d46400dec3b17bb2e593287cd6f6a8c338afde2887d3fc`,
+with the unchanged 12k V.34-only configuration and 1024-symbol clock average,
+had an initial failed dial `060ef8c2-e494-44fb-a45b-3ac69c3db719` (678,
+no connection). Keep that failure alongside the prior four short successes.
+The next attempt `1b7835aa-bed6-4dc7-b7ab-7a42c269dce2` passes 1,802.783030
+seconds of traffic: 63 checksum-verified 32-KiB downloads (2,064,384 bytes),
+63 verified 1-KiB URL payloads (64,512 bytes), and 13 public HTTP checks.
+Median download payload throughput is 9,900.82 bit/s at a 12,000-bit/s link.
+The independent audit checks both before/after RAS counters, PPP source and
+connection identity, monotonically increasing connection duration, traffic
+coverage without gaps over 120 seconds, sequential transfer labels, the
+fixture PASS response, and final disconnection with no active connection.
+All six RAS error counters remain zero and the audit has no failed checks.
+Seven negative controls reject modified HTTP/query hashes, before-probe CRC
+errors, foreign connection identity, reset duration, missing activity and
+duplicate download labels. This demonstrates sustained V.34-only operation;
+it does not establish automatic fallback, bulk upload, established-link
+impairment recovery, or repeatable startup. The earlier failed dial remains
+part of the campaign. The controller restored qualified native e62a02b2 and
+removed its trial drop-in. Raw traces remain on CT105.
+
+Evidence: work/v34-sustained-1b7835aa-bed6-4dc7-b7ab-7a42c269dce2.json
+and its -audit.json; work/v34-sustained-hardware-1789261419.json;
+work/v34-sustained-auditor-controls.json.
+
+Fresh qualified-V90 restoration attempt
+`ab518fe0-88ca-49f0-bf0f-372b5f13b678` connects at 49,296 bit/s, passes the
+559-byte public HTTP checksum with zero six-category RAS errors, opens IPCP
+and disconnects cleanly. The post-call audit verifies all 25 managed release
+files, the erasure guard, removal of trial flags and idle endpoints. The
+temporary endurance fixture is inactive. Evidence:
+work/v34-sustained-final-restoration-audit.json and
+work/v90-ppp-lifecycle-ab518fe0-88ca-49f0-bf0f-372b5f13b678.json.

@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`4e66827f-6081-420d-a325-72d160e2b72e`, connected at 49,296 bit/s,
+`ab518fe0-88ca-49f0-bf0f-372b5f13b678`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passes four consecutive short 12,000-bit/s PPP calls, including two with startup retraining. Test sustained traffic, established-link impairment recovery and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passed four consecutive short 12,000-bit/s PPP calls, including two with startup retraining; a subsequent endurance dial failed with error 678 before connecting. A subsequent 1,802.783-second V.34 session passes transfer integrity and cleanup. Test established-link impairment recovery and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -109,6 +109,21 @@ is clean. This gives four consecutive successful short calls for832f532. It does
 not qualify sustained traffic, an established link through impairment, automatic
 V90-to-V34 selection or the final integrated release. Next run sustained V34
 traffic and broaden recovery testing while preserving the qualified V90 build.
+
+The first subsequent endurance attempt, `060ef8c2-e494-44fb-a45b-3ac69c3db719`,
+failed with error 678 before connection. It remains in the campaign evidence;
+the four earlier short successes do not imply all later startups succeeded.
+
+The next unchanged-candidate endurance call,
+`1b7835aa-bed6-4dc7-b7ab-7a42c269dce2`, passes 1,802.783 seconds at
+12,000 bit/s. The independent audit verifies 63 downloads (2,064,384 bytes),
+63 small URL-carried requests (64,512 payload bytes), 13 public HTTP checks,
+server verification, continuous connection identity and duration, zero errors
+in all six RAS categories, and clean disconnection. Median download payload
+rate is 9,900.82 bit/s. These request-URL transfers are not bulk uploads. This
+is one sustained V.34-only success; automatic fallback, impairment recovery
+and startup reliability remain open. The controller restored the qualified
+native binary and removed the temporary trial configuration.
 
 ## Immediate dependencies
 

@@ -24,7 +24,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 
 | Item | Verified evidence | Remaining work |
 | --- | --- | --- |
-| 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
+| 1. Repeatable startup, calls and PPP | Both the qualified baseline and exact packaged candidate397a090 passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. Candidate installation and final rollback also pass. | Repeat if runtime files or the qualified profile change before release. This V90 series does not establish combined-profile/V34 startup reliability. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
 | 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | The latest V.34-only candidate passed four consecutive short 12,000-bit/s PPP calls, including two with startup retraining; a subsequent endurance dial failed with error 678 before connecting. A subsequent 1,802.783-second V.34 session passes transfer integrity and cleanup. The timeline fix also passes the bounded three-packet established-link loss case. Repeat and broaden impairment coverage, test automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The qualified snapshot and packaged candidate397a090 both passed installation, rollback and reinstallation with physical PPP/checksum/cleanup checks. The candidate source archive rebuilds to the tested native hash; all25 managed files were audited and production restored. | Review PR29, complete final-head CI, merge, and finish qualification of the final artifact. Repeat packaging/deployment checks if the artifact changes. Earlier binary results do not qualify later source. |
@@ -165,6 +165,16 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+Candidate397 also passes repeated established-link loss in attempt
+`d1e4b62c-8984-4d09-a48c-d08fcc139fb5`: three separate events each drop
+exactly three inbound RTP packets on the active call port. The baseline and
+nine recovery HTTP checks pass at49,296bit/s with unchanged PPP identity,
+monotonic connection duration and zero six-category RAS counters. Independent
+audit verifies all three nft counters, hashes, cleanup, removed injection rules,
+and all25 restored baseline files. This extends the observed recovery evidence
+to repeated bounded loss in one call; jitter, opposite-direction impairment,
+failed-link cleanup and normal V34 selection remain separate requirements.
+
 The exact packaged candidate `397a090` (native `164008c9…624b39f`) passes
 a 1,804.810-second V90 endurance call, attempt
 `64fac0ad-b5a6-456b-8847-2ad4d1261918`: 224 verified 32-KiB downloads
@@ -178,7 +188,15 @@ succeeded. A fresh baseline call `f4a95e34-7343-444a-a837-33f042179cb3`
 passed at 49,296 bit/s, and all 25 restored files and idle endpoints were audited.
 The fixture is stopped. The test controller now waits for server teardown as
 well as notebook disconnection; the original rollback failure is retained.
-Final-artifact repeated calls remain pending. CI also passes current source
+The same packaged candidate subsequently passes all ten planned physical calls
+in campaign `release397-repeatability-1789268042`, each at49,296bit/s with
+PPP/IPCP, the expected559-byte public payload hash, zero six-category modem
+errors and resource cleanup. Ten distinct attempts are retained. Installation,
+rollback and final live hashes of all25 restored files pass independent checks.
+The final call was on the candidate; the subsequent live audit verifies restored
+files and idle endpoints, not a fresh baseline call. This closes the bounded
+V90 repeatability check for that artifact/profile, not combined-profile or V34
+reliability. CI also passes source
 `0bbd271` (run 34733177081), whose changes since the packaged candidate are
 tests and documentation.
 

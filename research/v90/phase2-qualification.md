@@ -2477,3 +2477,34 @@ Candidate /tmp/v34-retrain-entry-candidate has native SHA-256
 356931ce7976f3ead5bf016c0eb513427a9b1307dfc40386df18cb2929145b14.
 Evidence: work/v34-retrain-entry-full-target-validation.log. Physical fallback
 still requires a hardware trial and successful PPP traffic.
+
+
+### Physical V34 PPP milestone with retrain response correction
+
+Source0221dfb, native356931ce7976f3ead5bf016c0eb513427a9b1307dfc40386df18cb2929145b14,
+was tested with the existing V34-only12k limits, FIG9,64-symbol acquisition replay,
+CMA and opt-in LAPM settings. Attempt b43f1f65-8bdc-432e-9de8-719e0b41b933
+CONNECTS at12000bit/s. The native trace records three B1 entries and two caller
+retrain responses before ODP detection, stream selection and LAPM connection.
+Each corrected restart enters OPEN at70ms and SEQ at120ms (50ms Tone A), followed
+by ranging. The short call alone cannot prove the correction caused success.
+
+Server state reaches ipcp-open on ppp0. Two public HTTP probes use PPP source
+10.64.0.2, return200 and559bytes each, and match SHA-256
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d.
+All six RAS error counters are zero before and after both probes, with the last
+statistics at21050ms after connection. LAPM data counters show errors=0 while
+connected. The call disconnects and frees sessions, addresses and media lines.
+Evidence: work/v34-retrain-entry-hardware-1789258267.json,
+work/v90-final-live-b43f1f65-8bdc-432e-9de8-719e0b41b933.json,
+work/v34-retrain-entry-hardware-timeline.json and
+work/v34-retrain-entry-hardware-acceptance-audit.json. Full receiver trace remains
+on CT105 at /tmp/v34-retrain-entry-candidate-hardware-native.log.
+
+The controller restores qualifiedV90. Restoration attempt
+c085e4bd-53e9-4337-b148-70943c37ca46 passes49296bit/s, PPP/IPCP, the expected
+559-byte checksum and zero RAS errors. work/v34-retrain-entry-hardware-final-audit.json
+verifies all25 managed release files, enabled guard, removed trial flags and idle
+endpoints. No experimental deployment remains active. DialUpLab still reports
+1.1.1.0. Repeatability, longer V34 traffic, automatic V90-to-V34 negotiation and
+the other release gates remain open; do not label this one short call a release.

@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`5901548f-c295-4402-b44b-de3b94e8b29b`, connected at 49,296 bit/s,
+`c085e4bd-53e9-4337-b148-70943c37ca46`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | Complete the intended impairment matrix and obtain physical V.34 PPP plus integrity-checked traffic. Current V.34 trials fail with errors 678/721/777. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | A V.34-only hardware call now passes at 12,000 bit/s with PPP and two verified HTTP probes. Repeat it, test longer transfers and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -64,8 +64,19 @@ CT105; this does not prove ATA reception or correct analog playout. The only
 PBX-to-ATA timestamp rewind coincides with the early-media handoff, about 17
 seconds before the first observed retrain. The deployed RED encoder preserves
 that timestamp and carries no stale redundant block across the handoff.
-Next distinguish a caller protocol rejection from ATA playout effects; neither
-fallback nor a causal link to the startup rewind is established.
+A causal link to the startup rewind remains unproven. The retrain milestone
+below establishes a working V.34-only path, not automatic fallback qualification.
+
+Development `0221dfb` fixes the answer retrain entry: exactly 70 ms silence,
+then Tone A instead of replaying the initial INFO0a exchange. Physical attempt
+`b43f1f65-8bdc-432e-9de8-719e0b41b933` reaches LAPM and PPP/IPCP at
+12,000 bit/s after two retrain responses. Two 559-byte public HTTP probes match
+the expected checksum and show zero six-category RAS errors; teardown is clean.
+The 21-second post-connect observation is a short milestone, not endurance or
+repeatability. The initial training problem is not eliminated. Next repeat this
+candidate without discarding failures, extend V.34 traffic testing, and verify
+selection through normal V.90/V.34 negotiation. Production remains the qualified
+V.90 build; its fresh restoration call and manifest audit pass.
 
 ## Immediate dependencies
 

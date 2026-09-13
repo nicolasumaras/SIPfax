@@ -2713,3 +2713,39 @@ managed files, guard, removed trial flags and idle endpoints. Earlier CI34727480
 for4076a56 is now completedSUCCESS for both application and native jobs;
 work/v34-clock-average-prior-ci.json records that result. It does not qualify
 the newer averaging implementation's CI or physical behavior.
+
+
+### B1 boundary audit reveals a receiver reset defect
+
+Capture70252 belongs to the failed averaged-clock trial. Full-capture echo
+reconstruction stays on CT105;20-second receiver replays start at18 and42seconds
+to isolate its two E detections. The first E is at28.82096s: the first40 expected
+B1 symbols fit above99.8% explained energy, followed by collapse; full120-symbol
+fit is0.510. The final E at51.77388s has0.99627 explained energy across all120
+symbols, with every20-symbol segment above0.995. Both best offsets are zero in
+a +/-256-symbol search, and16-state reference outperforms32/64 controls.
+The final replay decodes600initial bits as100% ones whereas the live call had
+47.8%, despite matching averaged clock seed-24.6ppm. This supports investigating
+receiver initialization; replay state is not identical to live state. Evidence:
+work/audit_v34_latest_b1.py and work/v34-b1-70252-audit.json. Raw samples and
+receiver state traces remain under /tmp/v34-b1-70252 on CT105.
+
+Code inspection identifies a concrete defect: baseband_decode_impl used a
+function-static delay for its30-pair Viterbi traceback warmup. That counter
+survived retraining and was shared by independent receiver instances. Later
+receivers advanced mapping frames immediately from unfilled traceback history.
+Warmup is now a saturating per-receiver field, reset by low-level initialization
+and data-decoder reconfiguration. The latter also clears mapping-frame position
+and traceback pointer so a partial old mapping frame cannot survive the reset.
+
+The regression invokes the actual decoder for a fresh receiver, a second
+receiver and in-place reconfiguration. Each must suppress mapping-frame
+advancement for30pairs, then advance by2 on pair31. The fixed build passes.
+An isolated control restoring only the old static counter fails at second
+receiver / first pair (mapping2 instead of0), demonstrating the regression catches
+the old behavior. Existing B1, MP, readiness, acquisition, retrain and serial/DTE
+regressions pass; the build also runs existing sanitizer tests. Evidence:
+work/v34-traceback-target-validation.log and
+work/v34-traceback-negative-control.json. Candidate /tmp/v34-traceback-candidate
+has SHA-25637793e5fd859cf5087d46400dec3b17bb2e593287cd6f6a8c338afde2887d3fc.
+Physical reliability still needs verification; this is not yet a fallback release.

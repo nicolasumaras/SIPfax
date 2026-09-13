@@ -662,6 +662,10 @@ int main(int argc, char **argv)
         if (gd) { extern void V34_datagen_test(const char *); V34_datagen_test(gd); return 0; }
     }
     {
+        if (getenv("SIPFAX_TRACEBACK_RESET_TEST")) {
+            extern void V34_traceback_reset_test(void);
+            V34_traceback_reset_test(); return 0;
+        }
         char *dl = getenv("SIPFAX_DATALOOP");
         if (dl) { extern void V34_dataloop_test(void); V34_dataloop_test(); return 0; }
     }

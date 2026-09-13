@@ -156,6 +156,7 @@ typedef struct V34DSPState {
     int state_error[TRELLIS_MAX_STATES];
     int state_error1[TRELLIS_MAX_STATES];
     int trellis_ptr;
+    unsigned rx_traceback_warmup; /* Per receiver and per decoder initialization. */
 
     /* decoder synchronization */
     int phase_4d; /* index of the current 2d symbol in the 4D symbol

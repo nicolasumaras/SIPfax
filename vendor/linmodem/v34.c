@@ -808,6 +808,7 @@ int V34_init_low(V34DSPState *s, V34State *p, int transmit)
   /* copy the params */
   s->calling = p->calling;
   s->rx_data_poly = 0;
+  s->rx_traceback_warmup = 0;
   s->p4_adv_info_len = 0;
   s->p4_adv_ca = s->p4_adv_ac = 0;
   memset(s->p4_adv_h, 0, sizeof(s->p4_adv_h));
@@ -3851,7 +3852,6 @@ void baseband_decode_pub(V34DSPState *s, int si, int sq) { extern void baseband_
 void baseband_decode_impl(V34DSPState *s, int si, int sq)
 {
     s16 y[2][2];
-    static int delay = 0;
     int mse,v0;
 
     {   /* SIPFAX: 9.7 DEWARP. If the transmitter applied the non-linear encoder
@@ -4043,8 +4043,9 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
         memcpy(&s->rx_mapping_frame[s->rx_mapping_frame_count][0], 
                &y[0][0], 4 * sizeof(s16));
         s->y0_buf[(s->rx_mapping_frame_count >> 1) & 3] = s->y0_out;
-        delay++;
-        if (delay > TRELLIS_LENGTH) {
+        if (s->rx_traceback_warmup < TRELLIS_LENGTH) {
+            ++s->rx_traceback_warmup;
+        } else {
 
             s->rx_mapping_frame_count += 2;
             if (s->rx_mapping_frame_count == 8) {
@@ -7525,6 +7526,9 @@ static void v34_rx_data_params(V34DSPState *s, int R)
         if (dr < 0) { char *e3 = getenv("SIPFAX_DEC_RESET"); dr = e3 ? atoi(e3) : 1; }
         if (dr) {
             s->phase_4d = 0;
+            s->rx_traceback_warmup = 0;
+            s->rx_mapping_frame_count = 0;
+            s->trellis_ptr = 0;
             s->Z_1 = 0;
             s->U0 = 0;
             memset(s->x, 0, sizeof(s->x));
@@ -8996,4 +9000,33 @@ void V34_test(void)
 
     fprintf(stderr, "errors=%d nb_bits=%d Pe=%f\n", 
            errors, nb_bits, (float) errors / (float)nb_bits);
+}
+
+/* Regression uses real decoder entry points; no synthetic warmup predicate. */
+void V34_traceback_reset_test(void)
+{
+    static V34DSPState a, b;
+    V34State p;
+    extern void dsp_init(void);
+    dsp_init(); V34_static_init();
+    memset(&p,0,sizeof(p)); p.S=V34_S3429; p.R=12000;
+    p.conv_nb_states=16; p.use_high_carrier=1;
+    V34DSPState *states[3]={&a,&b,&a};
+    for(int run=0;run<3;run++) {
+        V34DSPState *s=states[run];
+        if(run<2) {memset(s,0,sizeof(*s)); V34_init_low(s,&p,0);}
+        /* Third run reconfigures an already partially filled mapping frame. */
+        v34_rx_data_params(s,12000);
+        for(int pair=1;pair<=TRELLIS_LENGTH+1;pair++) {
+            baseband_decode_impl(s,128,128);
+            baseband_decode_impl(s,128,128);
+            int expected=pair<=TRELLIS_LENGTH?0:2;
+            if(s->rx_mapping_frame_count!=expected) {
+                fprintf(stderr,"traceback warmup failed: run=%d pair=%d mapping=%d expected=%d\n",
+                        run,pair,s->rx_mapping_frame_count,expected);
+                exit(1);
+            }
+        }
+    }
+    puts("PASS: fresh receiver, second receiver, and in-place decoder reset wait 30 traceback pairs");
 }

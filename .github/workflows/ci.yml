@@ -85,6 +85,8 @@ jobs:
         run: python3 tools/tests/v34-generated-audio.py vendor/linmodem/lm
       - name: Test V34 carrier readiness
         run: python3 tools/tests/v34-readiness.py vendor/linmodem/lm
+      - name: Test V34 data sample continuity across silence
+        run: python3 tools/tests/v34-data-timeline.py vendor/linmodem/lm
       - name: Test V34 decoder reset and traceback warmup
         run: python3 tools/tests/v34-traceback-reset.py vendor/linmodem/lm
       - name: Test V34 acquisition buffer handoff

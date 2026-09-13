@@ -5014,7 +5014,10 @@ static void V34_cma_t2sample(V34DSPState *s, double yi, double yq)
     }
     { double p2 = yi*yi + yq*yq;                      /* squelch: hold everything in silence */
       s->cma_sq = 0.99*s->cma_sq + 0.01*p2;
-      if (s->cma_started && s->cma_sq < 0.05*s->cma_pow) return; }
+      /* Data framing must keep every T/2 position through missing audio.
+         Startup may wait for signal, but dropping positions after acquisition
+         shifts the equalizer history and mapping-frame alignment. */
+      if (!s->data_on && s->cma_started && s->cma_sq < 0.05*s->cma_pow) return; }
     g = (s->cma_pow > 1e-12) ? 1.0/sqrt(s->cma_pow) : 1.0;
     yi *= g; yq *= g;
     for (i = CMANT-1; i > 0; i--) { s->cma_bufi[i] = s->cma_bufi[i-1]; s->cma_bufq[i] = s->cma_bufq[i-1]; }
@@ -9029,4 +9032,35 @@ void V34_traceback_reset_test(void)
         }
     }
     puts("PASS: fresh receiver, second receiver, and in-place decoder reset wait 30 traceback pairs");
+}
+
+/* Exercise the real front-end accounting without feeding a synthetic decoder. */
+void V34_data_timeline_test(void)
+{
+    static V34DSPState s;
+    const int lengths[]={137,412,1372};
+    for(int run=0;run<3;run++) {
+        memset(&s,0,sizeof(s));
+        s.cma_started=1; s.cma_pow=1; s.cma_sq=1;
+        s.cma_phase=2; s.data_on=1;
+        /* Existing acquisition skip exits after history and timing processing. */
+        s.cma_skipn=-100000;
+        for(int i=0;i<lengths[run]+64;i++) {
+            V34_cma_t2sample(&s,i<lengths[run]?0:1,0);
+            if(s.cma_t2!=i+1) {
+                fprintf(stderr,"data timeline lost position: run=%d input=%d advanced=%ld\n",
+                        run,i+1,(long)s.cma_t2);
+                exit(1);
+            }
+        }
+        for(int i=0;i<CMANT;i++) {
+            if(s.cma_bufi[i]!=1 || s.cma_bufq[i]!=0) {
+                fprintf(stderr,"data history failed to resume after silence\n");exit(1);
+            }
+        }
+    }
+    memset(&s,0,sizeof(s));s.cma_started=1;s.cma_pow=1;
+    for(int i=0;i<412;i++) V34_cma_t2sample(&s,0,0);
+    if(s.cma_t2) {fprintf(stderr,"startup silence was not squelched\n");exit(1);}
+    puts("PASS: data positions and history survive silence; startup squelch remains");
 }

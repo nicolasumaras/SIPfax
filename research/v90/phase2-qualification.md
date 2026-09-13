@@ -2508,3 +2508,41 @@ verifies all25 managed release files, enabled guard, removed trial flags and idl
 endpoints. No experimental deployment remains active. DialUpLab still reports
 1.1.1.0. Repeatability, longer V34 traffic, automatic V90-to-V34 negotiation and
 the other release gates remain open; do not label this one short call a release.
+
+
+### Unchanged-candidate V34 repeatability campaign
+
+Three additional calls use source0221dfb and the same native356931ce...145b14,
+V34-only12k limits and diagnostic settings. No tuning occurs between calls.
+Each trial restores qualifiedV90 and confirms idle resources before the next.
+Full traces now have unique per-trial paths on CT105; the first successful call's
+/tmp/v34-retrain-entry-candidate-hardware-native.log is preserved.
+
+| Attempt | Result | Observations |
+| --- | --- | --- |
+| f3535254-e3f4-4457-b3e4-4304b80b67ec | Failed777 | Four B1 entries; three retrains; no ODP detection. |
+| 57d57a2f-239f-44b1-9806-5403bea5cc91 | Failed678 | Three B1 entries; ODP detected once, no LAPM connection. |
+| 666be31e-447e-4660-9654-4ad9b0c34faf | Connected12000 | Two B1 entries; one retrain; LAPM and two valid public HTTP probes. |
+
+The successful repeat's probes each return559bytes and the expected
+ff67a9d764d6a2367a187734e697f6a53217db9a21c101d410a113ca871a299d checksum,
+from PPP source10.64.0.2. Both before/after sets have all six RAS counters zero.
+Including the initial milestone, the retained sample is two successes and two
+failures: repeatability is not achieved. Do not infer a population success rate.
+Evidence: work/v34-retrain-repeat-results.json and per-attempt reports; metadata
+comparison work/v34-retrain-repeat-comparison.json. Raw audio stays on CT105.
+
+All four calls measure line echo delay1428samples. The first success acquires
+RMS0.143 with seed-42.6ppm; the second succeeds atRMS0.149 with seed+167.9ppm.
+Failed attempts also acquire atRMS0.144..0.170 and include seeds-1.3,+213.7,
++226.4,+332.0ppm (one earlier acquisition is worse at0.373). This contradicts a
+simple rule that every positive seed fails or every low acquisition RMS succeeds.
+Compare actual subsequent receive integrity and caller retrain timing next;
+these metadata alone do not identify the cause. No new parameter was deployed.
+
+Restoration attempt7ba4b285-6670-473e-a693-a75ecab219f9 passes49296bit/s,
+PPP/IPCP, expected559-byte public HTTP checksum and zero RAS counters.
+work/v34-retrain-repeat-final-audit.json verifies all25 qualified files, guard,
+removed trial flags and idle endpoints. PR29 stays draft. CI34727480442 on4076a56
+has application tests completed successfully; native-modem was still running
+at the recorded check (work/v34-retrain-repeat-ci.json), not a passed check.

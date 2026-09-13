@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`c085e4bd-53e9-4337-b148-70943c37ca46`, connected at 49,296 bit/s,
+`7ba4b285-6670-473e-a693-a75ecab219f9`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -26,7 +26,7 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Qualified native passed ten consecutive physical calls at 49,296 bit/s with checksums and resource cleanup. | Repeat qualification on the final integrated release; preserve failures rather than replacing samples. |
 | 2. Integrity-checked sustained download and genuine bulk upload | Attempt `13e84b91-8a75-47e4-b7ae-153d66ae37c2` ran 3,605.869 seconds: 441 verified downloads totaling 14,450,688 bytes and 89 public HTTP checks, with zero reported modem errors. | Test true request-body uploads after the notebook runs DialUpLab 1.2.0. The 441 URL-carried 1-KiB payloads establish neither bulk upload nor upstream capacity. |
-| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | A V.34-only hardware call now passes at 12,000 bit/s with PPP and two verified HTTP probes. Repeat it, test longer transfers and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
+| 3. Controlled impairment/recovery and V.34 fallback | Qualified native recovered from natural renegotiation and a controlled three-packet RTP loss case, with intact traffic and cleanup. | Two of four V.34-only hardware calls pass at 12,000 bit/s with PPP and verified HTTP probes; the other two fail. Fix repeatability, test longer transfers and automatic fallback, and complete the intended impairment matrix; earlier failures remain part of the evidence. |
 | 4. Review, merge, reproducible release and rollback | The retained integrated snapshot passed installation, rollback and reinstallation, each with a physical PPP/checksum/cleanup test; all 25 managed files were audited. | Review PR29, complete final-head CI, merge, package the final source, build on the target, and qualify that final artifact. Earlier binary results do not qualify later source. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
@@ -77,6 +77,17 @@ repeatability. The initial training problem is not eliminated. Next repeat this
 candidate without discarding failures, extend V.34 traffic testing, and verify
 selection through normal V.90/V.34 negotiation. Production remains the qualified
 V.90 build; its fresh restoration call and manifest audit pass.
+
+Three unchanged-candidate repeats produced failures 777 and 678, followed by a
+second successful 12-kbit/s call (`666be31e-447e-4660-9654-4ad9b0c34faf`). Both
+of its public HTTP checksums and all RAS counters pass. Thus the observed series
+is two successes and two failures; this small sample fails the repeatability
+gate and is not an estimated long-term success rate. Raw traces are retained
+under unique per-trial paths on CT105. Both successful and failed calls can
+acquire below 0.2 lattice RMS; the second success uses a +167.9-ppm clock seed.
+Neither acquisition RMS nor a near-zero clock seed alone explains the outcome.
+Next compare post-acquisition bit integrity and caller retrain timing in these
+retained traces before selecting another clock or detection change.
 
 ## Immediate dependencies
 

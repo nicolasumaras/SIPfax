@@ -165,6 +165,20 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+Updated application candidate9156097 passes its own V90 endurance call,
+`8fbaa1da-32e7-48d9-9d48-943555c9c983`: 1,802.686 seconds, 221 verified
+downloads totaling7,241,728 bytes, 221 small URL transfers and45 public HTTP
+checks. Independent audit verifies all hashes, continuous connection identity
+and timing, zero six-category RAS errors, final fixture PASS and disconnection.
+Median download payload rate is40,592.13bit/s. The updated controller also
+verifies zero server sessions, pppd processes, leases and media lines before
+automatic rollback, which succeeds. These transfers still do not qualify bulk
+upload. Fresh restored-baseline attempt
+`4e4b8b1e-86ba-4cb3-b36d-5c7dff4b75d7` passes at49,296bit/s with PPP,
+checksum and cleanup; all25 restored files are verified and the fixture is
+inactive. Updated-artifact repeated calls are now running, and remaining
+release gates stay open.
+
 Failed-worker cleanup review found that `ExternalModemProcessBackend` emits
 `backend-exit`, but `Line` did not forward it to the session manager. A focused
 regression reproduces the resulting allocated-call leak without a PTY-close

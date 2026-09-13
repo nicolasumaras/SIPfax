@@ -126,6 +126,11 @@ export class MultiSessionManager {
     line.on('pty-closed', ({ callId }) => {
       if (ownsCall(callId)) this.closePty(callId);
     });
+    line.on('backend-exit', ({ callId }) => {
+      if (ownsCall(callId) && this.sessions.get(callId).session.state !== 'terminated') {
+        this.terminate(callId);
+      }
+    });
     line.on('backend-log', ({ callId, line: msg }) => console.log(`modem[${callId}] ${String(msg).trim()}`));
     line.on('backend-error', ({ callId, error }) => console.error(`modem[${callId}] error: ${error?.message ?? error}`));
     const session = new CallSession({

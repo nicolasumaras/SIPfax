@@ -165,6 +165,18 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+Failed-worker cleanup review found that `ExternalModemProcessBackend` emits
+`backend-exit`, but `Line` did not forward it to the session manager. A focused
+regression reproduces the resulting allocated-call leak without a PTY-close
+event. Development source now forwards the exit and terminates only the owning
+current call, preserving asynchronous RTP release and ignoring stale events
+after Call-ID reuse. The regression also covers a surviving second call and
+synchronous exit notification during teardown. All89 JavaScript tests pass.
+This application change is not yet deployed or physically qualified; earlier
+candidate397 results remain evidence for candidate397, not this changed runtime.
+Next perform physical worker-failure cleanup/redial and qualify the updated
+integrated artifact before release.
+
 The opposite-direction bounded-loss case also passes on candidate397:
 attempt `b965d53d-65fa-4e2e-9ba0-8f0815d1de9e` drops exactly three RTP
 packets leaving the active server port toward PBX192.168.1.29. The audit

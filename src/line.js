@@ -47,6 +47,7 @@ export class Line extends EventEmitter {
     if (modem?.on) {
       modem.on('backend-log', (line) => this.emit('backend-log', { callId, line }));
       modem.on('backend-error', (error) => this.emit('backend-error', { callId, error }));
+      modem.on('backend-exit', (exit) => this.emit('backend-exit', { callId, exit }));
       modem.on('backend-control', (event) => this.#handleModemControl(event));
     }
 

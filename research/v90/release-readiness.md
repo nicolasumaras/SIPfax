@@ -90,8 +90,12 @@ The failed678 recording starts with clean B1 and ODP, then delivers a median
 5,056 receive bits/s while transmitting at12k. Replaying it with its +226.4ppm
 seed yields zero valid HDLC frames; zero seed recovers four valid77-byte XID
 commands but still leaves gaps. Successful calls deliver the full receive rate.
-Next assess the Phase4 clock estimate used to initialize data tracking across
-these recordings. The evidence does not justify a universal zero-seed override.
+The clock-publication replay confirms this seed came from a CRC-valid MP pass.
+A trailing1,024- or2,048-symbol mean improves that recording and preserves four
+valid frames on a second failed-call recording; a256-symbol mean regresses the
+second recording to zero valid frames. Next cross-check the longer windows on
+successful-call recordings before a hardware comparison. The evidence does not
+justify a universal zero-seed override or deployment of the averaging prototype.
 
 ## Immediate dependencies
 

@@ -2595,3 +2595,52 @@ Phase4 instantaneous Gardner rate estimate is a reliable initializer for the
 separate live data timing loop; compare stable-window estimates against retained
 successful and failed recordings before changing the default. No production
 configuration or binary was changed during this analysis.
+
+
+### Phase4 clock publication and averaging cross-check
+
+A temporary instrumented native copy under /tmp/v34-clock-publication-audit
+records each Phase4 equalizer pass and MP validation during capture68966 replay.
+Data mode's +226.4ppm seed is the final pass of the four-point hypothesis that
+successfully decodes one MP frame. It is not a stale rejected hypothesis in this
+recording. Earlier pass estimates vary from about-566ppm to-136ppm before ending
+at-226.417757ppm; the data loop negates this value. This audit does not establish
+whether all other calls publish only validated estimates. Evidence:
+work/audit_v34_clock_publication.py and work/v34-clock-publication-audit.json.
+
+An isolated diagnostic build stores the final2048 symbol-rate integrator samples
+per equalizer pass and, when requested, replaces only its published final estimate
+with a trailing mean. The subsequent receiver and LAPM scanner are unchanged.
+No running service uses this build. All raw and decoded data remain on CT105.
+The two24-second recording comparisons are:
+
+| Capture | Averaging symbols | Seed ppm | Delivered / missing bits | HDLC valid / total |
+| --- | ---: | ---: | ---: | ---: |
+| 68966 | 0 | +226.4 | 37689 / 59723 | 0 / 72 |
+| 68966 | 256 | -44.6 | 76331 / 21109 | 4 / 44 |
+| 68966 | 1024 | -56.1 | 76642 / 20798 | 4 / 45 |
+| 68966 | 2048 | -49.9 | 76382 / 21058 | 4 / 46 |
+| 66046 | 0 | +22.9 | 74994 / 10770 | 4 / 48 |
+| 66046 | 256 | -130.5 | 58049 / 27715 | 0 / 104 |
+| 66046 | 1024 | -85.6 | 75873 / 9891 | 4 / 48 |
+| 66046 | 2048 | -62.7 | 75840 / 9924 | 4 / 53 |
+
+The256-symbol window regresses the second recording, so success on68966 alone
+would have been misleading. The longer windows preserve four valid frames on
+both recordings and reduce missing positions relative to their respective
+controls, but neither establishes duplex LAPM or eliminates corruption. Both
+recordings came from failed physical calls; successful physical-call recordings
+still need a comparable replay before considering a hardware candidate. Worst
+callbacks remain below15ms with no20ms overruns. The newly compiled zero-window
+68966 control differs from the earlier build by10 delivered bits; its seed and
+zero-valid-frame outcome agree. Preserve this difference rather than claiming
+bit-identical baselines across separately compiled instrumentation builds.
+
+Evidence: work/contrast_v34_clock_average.py,
+work/contrast_v34_clock_average_66046.py,
+work/v34-clock-average-68966.json and work/v34-clock-average-66046.json.
+The second experiment uses /tmp/v34-clock-average-66046 and preserves the first
+experiment's outputs. Production source, deployment and clock defaults are
+unchanged. Next replay a successful physical recording with explicit retrain
+boundary handling, then decide whether a longer averaged seed warrants a bounded
+hardware comparison. All five acceptance gates remain open.

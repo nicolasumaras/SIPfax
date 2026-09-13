@@ -2814,3 +2814,28 @@ conditions before the campaign. Next run sustained V34 traffic, then test
 established-link recovery and automatic mode selection. All five release items
 remain active. PR29 is still draft; bfe2ef0 application CI passed while native CI
 was in progress at the recorded check (work/v34-traceback-repeat-pr-status.json).
+
+
+### Release source and native path reproducibility
+
+The exact832f532 source archive is generated twice in different output directories
+with tools/package-source.py. Both archives match SHA-256
+919d1a8eaa4b825966ea9ee667f1226dc4bf1b77921aeecef36b3afa76a19dd4,
+24140123bytes. The archive contains the clock-history header and traceback/clock
+regressions. Evidence: work/v34-candidate-source-repro-audit.json. This packages
+source; it does not qualify a final integrated native/application artifact.
+
+The native Makefile now normalizes checkout paths to /usr/src/sipfax using
+-ffile-prefix-map, retaining debug information while avoiding build-directory
+variation. Two clean local builds in distinct directories are byte-identical,
+as is a third build through the new regression. Native SHA-256:
+c3d6901e2c03d537e3be5d58c16cfd069c469ead759ee7b848e9a98eb24f37cc.
+Compiler: gcc (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2).
+The CI regression tools/tests/native-build-reproducibility.py compares a default
+native build with a clean copy built elsewhere using the same toolchain. This
+proves path independence for that build profile, not cross-compiler or cross-libc
+identity. These local binaries are not deployed to CT105. Evidence:
+work/native-reproducibility-audit.json and work/native-reproducibility-regression.log.
+Target-host rebuilding and final-artifact hardware qualification remain required.
+The ongoing V34 endurance call continues using native37793e5f, unaffected by
+these local builds and the source build-setting change.

@@ -2,6 +2,8 @@
 #USE_X11=y
 
 CFLAGS= -O2 -Wall -g -D_GNU_SOURCE -std=gnu99 -fcommon
+# Keep debug information and source macros independent of the checkout path.
+CPPFLAGS += -ffile-prefix-map=$(abspath ../..)=/usr/src/sipfax
 CPPFLAGS += -I../spandsp-v42/src -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN
 LDFLAGS= -g
 V42_OBJS= ../spandsp-v42/src/v42.o ../spandsp-v42/src/hdlc.o \

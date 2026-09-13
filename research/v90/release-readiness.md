@@ -165,6 +165,23 @@ or fallback: a caller requesting V34 is still needed for that test.
 
 ## Immediate dependencies
 
+The exact packaged candidate `397a090` (native `164008c9…624b39f`) passes
+a 1,804.810-second V90 endurance call, attempt
+`64fac0ad-b5a6-456b-8847-2ad4d1261918`: 224 verified 32-KiB downloads
+(7,340,032 bytes), 224 small URL-carried transfers, and 45 public HTTP checks.
+Independent verification checks continuous call identity, hashes, timing,
+zero six-category RAS counters, final server PASS and notebook disconnection.
+Median download payload rate is 40,585.85 bit/s. This does not qualify bulk upload.
+The automatic rollback initially refused because server teardown had not yet
+completed. Subsequent live inspection found all resources idle; rollback then
+succeeded. A fresh baseline call `f4a95e34-7343-444a-a837-33f042179cb3`
+passed at 49,296 bit/s, and all 25 restored files and idle endpoints were audited.
+The fixture is stopped. The test controller now waits for server teardown as
+well as notebook disconnection; the original rollback failure is retained.
+Final-artifact repeated calls remain pending. CI also passes current source
+`0bbd271` (run 34733177081), whose changes since the packaged candidate are
+tests and documentation.
+
 The last notebook API health check reports DialUpLab 1.1.1.0. The tested XP
 1.2.0 package provides the bulk-upload API; its installation remains pending.
 A second physical modem is also needed for item 5. Neither dependency blocks

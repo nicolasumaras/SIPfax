@@ -3101,3 +3101,35 @@ endurance, automatic fallback, bulk upload, multi-call operation or PR merge.
 Evidence: work/release-397a090-source-manifest.json;
 work/release397-target-package-audit.json;
 work/v90-integrated397-release-1789265738-audit.json.
+
+### Packaged candidate397 V90 endurance
+
+The exact source package397a090 and native SHA-256
+164008c9fd2b2ee767402b7eb5fa9ae223b510358466f0dc748d6269f624b39f
+completed attempt64fac0ad-b5a6-456b-8847-2ad4d1261918 in the normal V90
+profile. Independent audit verifies 1,804.809879 seconds of traffic:
+224 downloads totaling7,340,032 bytes, 224 URL-carried1-KiB checks and
+45 public HTTP checks. All expected payload hashes, continuous connection
+identity/duration, six RAS error counters, final fixture PASS and notebook
+disconnection pass. Median download payload rate is40,585.85 bit/s.
+The URL-carried requests do not qualify genuine bulk upload.
+
+The campaign controller exited unsuccessfully because its immediate rollback
+preflight still saw server resources after notebook disconnection. This is
+retained as a controller/teardown timing failure, separate from the passing
+traffic audit. A subsequent live check found sessions, pppd, leases and media
+all idle without intervention. The guarded rollback retry succeeded and the
+fixture is inactive. Fresh baseline attemptf4a95e34-7343-444a-a837-33f042179cb3
+then passed49,296-bit/s PPP/IPCP, the559-byte public checksum, zero RAS errors
+and cleanup; all25 restored release files were independently checked.
+The local endurance controller now waits up to40 seconds for server teardown
+in addition to notebook disconnection. This does not retroactively change
+the original campaign result or prove that the new wait has passed a full run.
+
+Evidence: work/release397-v90-sustained-64fac0ad-b5a6-456b-8847-2ad4d1261918-audit.json;
+work/release397-sustained-trial-1789266038.json;
+work/release397-post-endurance-health.json;
+work/release397-sustained-manual-rollback.log;
+work/release397-post-endurance-restoration-audit.json.
+Final packaged-artifact repeatability is now being tested; all five release
+gates retain their unverified requirements.

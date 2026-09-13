@@ -2946,3 +2946,38 @@ work/release-aa571ec-v34-loss-diagnostics.json;
 work/release-aa571ec-after-loss-state-audit.json. Raw traces remain on CT105.
 Full CI run 34730504340 for e8804da completed successfully in both jobs;
 subsequent heads still require their own final check.
+
+
+## V34 post-loss sample accounting: isolated reproduction and replay
+
+Inspection finds that V34_cma_t2sample returns on low EMA power before updating
+the equalizer history and cma_t2. An isolated harness calling this real function
+with a settled data-mode state, 412 silent half-symbol inputs and 64 resumed
+inputs advances only 359 of 476 positions (298 during silence). A temporary
+prototype keeps the original squelch during startup but bypasses its early
+return when data_on is set; it advances all 476 positions. The harness stops
+before decoder work, so it establishes sample-accounting loss, not recovery.
+
+On-target replay of failed loss-call capture 74466 compares the qualified-source
+f0b8aadb candidate against that one-condition prototype. At restart offset 12 s,
+both acquire at lattice RMS 0.157 with the same -58.2 ppm seed and identical
+first 113,177 delivered bits. Original replay produces 47 CRC-valid HDLC frames
+and no valid frames after their first bit divergence. The prototype produces
+67 valid frames, including 20 after divergence; its last valid frame ends at
+delivered bit 289,453 instead of 111,131. An independent HDLC unstuffing and
+CRC checker confirms these counts. Delivered bits rise from 231,806 to 304,154;
+missing bits fall from 77,594 to 16,362. Offsets 13 and 14 fail acquisition in
+both versions and are retained as such, not treated as recovery cases. All
+observed 20-ms callbacks remain within deadline.
+
+Successful capture 69114, offset 18 s with a 30-second window, remains byte-
+identical in both decoded bits and position files: 243,925 delivered bits,
+459 missing and 55 valid frames. This is one clean-call replay control, not
+general regression coverage. All audio, bit streams and receiver traces stay
+on CT105. The prototype is confined to a temporary build and is not deployed.
+The next step is a bounded implementation/regression and live recovery trial;
+phase, gain and timing adaptation during erasures may still need protection.
+
+Evidence: work/v34-squelch-probe.json; work/v34-loss-74466-squelch.json;
+work/v34-loss-74466-frame-recovery.json; work/v34-success-69114-squelch.json;
+work/v34-success-69114-squelch-identity.json.

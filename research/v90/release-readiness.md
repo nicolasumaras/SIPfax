@@ -1,6 +1,6 @@
 # V.90 release readiness
 
-Status as of 2026-09-12. PR29 remains a draft. The five acceptance items below
+Status as of 2026-09-13. PR29 remains a draft. The five acceptance items below
 are the release scope; passing the current one-call V.90 subset does not close them.
 Detailed historical experiments and corrections are in
 [phase2-qualification.md](phase2-qualification.md).
@@ -14,7 +14,7 @@ The erasure guard is enabled and admission is limited to one call.
 Subsequent development binaries are experimental and are restored after trials.
 
 The latest restoration verification, attempt
-`ab518fe0-88ca-49f0-bf0f-372b5f13b678`, connected at 49,296 bit/s,
+`a0d6b9ca-211a-482a-ac9f-b40aa8455a25`, connected at 49,296 bit/s,
 opened PPP/IPCP, passed the 559-byte public HTTP checksum, recorded zero CRC,
 timeout, alignment, hardware-overrun, framing and buffer-overrun counters, and
 cleanly disconnected. Its final audit verified all 25 managed release files and
@@ -25,9 +25,9 @@ idle endpoints. This is a restoration check, not a new endurance campaign.
 | Item | Verified evidence | Remaining work |
 | --- | --- | --- |
 | 1. Repeatable startup, calls and PPP | Exact packaged candidate9156097 passed ten consecutive physical V90 calls at49,296bit/s with PPP/IPCP, checksums, zero RAS errors and resource cleanup. Installation, rollback and restored-file audits pass. Earlier baseline and candidate397 series also pass. | Repeat if runtime files or the qualified profile change. Normal-profile V90 results do not establish combined-profile/V34 startup reliability. |
-| 2. Integrity-checked sustained download and genuine bulk upload | Candidate9156097 passed1,802.686 seconds with221 verified downloads totaling7,241,728 bytes and45 public HTTP checks, zero RAS errors, server cleanup and automatic rollback. The older qualified native separately passed one hour. | Genuine request-body upload remains unverified and requires the notebook update. URL-carried1-KiB transfers are not bulk upload. Updated-candidate V34 endurance is currently running, not passed. |
+| 2. Integrity-checked sustained download and genuine bulk upload | Candidate9156097 passed1,802.686 seconds with221 verified downloads totaling7,241,728 bytes and45 public HTTP checks, zero RAS errors, server cleanup and automatic rollback. The older qualified native separately passed one hour. | Genuine request-body upload remains unverified and requires the notebook update. URL-carried1-KiB transfers are not bulk upload. Candidate915 V34-only endurance passed 1,805.546 seconds and 63 verified downloads. Its controller restoration assertion failed; manual rollback and a fresh baseline call passed. |
 | 3. Controlled impairment/recovery and V.34 fallback | Candidate397 passed repeated inbound three-packet events and one outbound three-packet event. Candidate915 passed a60-second outbound jitter case with receiver timing, traffic and cleanup audits, plus physical worker-crash cleanup/redial. The native timeline fix passed three bounded V34 loss trials after a retained startup failure. | Complete normal V90/V34 selection and V34 reliability/updated-artifact qualification. Caller mode selection needs the XP modem setting. Retain transition reordering and earlier startup failures; bounded cases are not arbitrary impairment tolerance. |
-| 4. Review, merge, reproducible release and rollback | Candidate915 source archive reproduces, rebuilds to the tested native hash, and passes target preflight, installation and rollback with25-file audits. Exact source915 CI passed; the older candidate397 also passed the explicit installation/rollback/reinstallation cycle. PR20 review found no distinct missing V90 component. | Complete PR29 review, final-head CI/merge and qualification of the final runtime/profile. Recheck packaging and deployment if that artifact changes. |
+| 4. Review, merge, reproducible release and rollback | Candidate915 source archive reproduces, rebuilds to the tested native hash, and passes target preflight, installation and rollback with25-file audits. Exact source915 and documentation head9067a8a CI passed; the older candidate397 also passed the explicit installation/rollback/reinstallation cycle. PR20 review found no distinct missing V90 component. | Complete PR29 review, final-head CI/merge and qualification of the final runtime/profile. Recheck packaging and deployment if that artifact changes. |
 | 5. Concurrent hardware calls and isolation | One-call admission remains enforced. A concurrent PPP process regression checks cross-call hook rejection, reserved addresses until exit, safe reuse, and survival of the other session and its files during teardown. Child processes are simulated. | Obtain a second simultaneous physical modem connection and verify distinct sessions, addresses, traffic and teardown without disturbing the other call. |
 
 ## Current V.34 investigation
@@ -274,3 +274,41 @@ continued V.34 diagnosis or release review.
 CI completed successfully for `c5962e0` (serial framing), `5f7c5cd`
 (channel reset) and `9e1c135` (LAPM integration, run 34724716055). Later
 heads require their own final result; queued/running checks are not passed checks.
+
+
+## Candidate915 V.34 endurance and restoration assertion (2026-09-13)
+
+Exact packaged source `9156097756997ad3be1c77120aae85d6d5fedd65`, native
+SHA-256 `164008c9fd2b2ee767402b7eb5fa9ae223b510358466f0dc748d6269f624b39f`,
+passed V.34-only attempt `dfe13ef1-6ef5-4fad-bc73-2a0ba5824644` at
+12,000 bit/s. The independent audit verifies 1,805.546 seconds, 63 downloads
+(2,064,384 bytes), 63 small URL-carried transfers, 13 public HTTP checks,
+continuous connection identity and duration, all six RAS error counters zero,
+final server verification and disconnection. Median download payload throughput
+was 9,903.44 bit/s. URL transfers do not qualify genuine bulk upload.
+All server calls, PPP processes, leases and media lines were idle after teardown.
+
+The traffic child exited successfully, but the campaign controller exited 1:
+the temporary-profile removal assertion incorrectly required every trial setting
+to be absent. The baseline already had `SIPFAX_V90_LAPM_DIAGNOSTICS=1`.
+Live inspection confirmed the trial drop-in was removed, only that diagnostic
+setting remained among the 14 selected keys, the fixture was inactive, and the
+notebook and server were idle. The original controller failure is retained.
+Guarded manual rollback succeeded. Fresh baseline call
+`a0d6b9ca-211a-482a-ac9f-b40aa8455a25` passed at 49,296 bit/s with the expected
+public checksum, PPP/IPCP, zero RAS errors and teardown. All 25 restored release
+files, erasure guard and idle endpoints were independently audited.
+
+The local profile helper now snapshots the 14 selected pre-test environment
+values and requires exact restoration, preserving pre-existing diagnostics.
+The next ten-call V.34 series has started but is not yet qualified. Its auditor
+also requires empty PPP process/session lists and distinct physical attempts.
+V.34 startup reliability and caller-selected V.34 with V.90 offered remain open.
+
+Evidence: `work/release915-v34-sustained-dfe13ef1-6ef5-4fad-bc73-2a0ba5824644-audit.json`,
+`work/release915-v34-sustained-trial-1789272378.json`,
+`work/release915-v34-profile-disable-inspection.json`,
+`work/release915-v34-manual-rollback.log`, and
+`work/release915-v34-post-endurance-restoration-audit.json`.
+CI run34737395603 passed both jobs on documentation head9067a8a;
+subsequent heads still require their own check results.

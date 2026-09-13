@@ -3133,3 +3133,41 @@ work/release397-sustained-manual-rollback.log;
 work/release397-post-endurance-restoration-audit.json.
 Final packaged-artifact repeatability is now being tested; all five release
 gates retain their unverified requirements.
+
+
+## Candidate915 V.34 endurance and restoration assertion (2026-09-13)
+
+Exact packaged source `9156097756997ad3be1c77120aae85d6d5fedd65`, native
+SHA-256 `164008c9fd2b2ee767402b7eb5fa9ae223b510358466f0dc748d6269f624b39f`,
+passed V.34-only attempt `dfe13ef1-6ef5-4fad-bc73-2a0ba5824644` at
+12,000 bit/s. The independent audit verifies 1,805.546 seconds, 63 downloads
+(2,064,384 bytes), 63 small URL-carried transfers, 13 public HTTP checks,
+continuous connection identity and duration, all six RAS error counters zero,
+final server verification and disconnection. Median download payload throughput
+was 9,903.44 bit/s. URL transfers do not qualify genuine bulk upload.
+All server calls, PPP processes, leases and media lines were idle after teardown.
+
+The traffic child exited successfully, but the campaign controller exited 1:
+the temporary-profile removal assertion incorrectly required every trial setting
+to be absent. The baseline already had `SIPFAX_V90_LAPM_DIAGNOSTICS=1`.
+Live inspection confirmed the trial drop-in was removed, only that diagnostic
+setting remained among the 14 selected keys, the fixture was inactive, and the
+notebook and server were idle. The original controller failure is retained.
+Guarded manual rollback succeeded. Fresh baseline call
+`a0d6b9ca-211a-482a-ac9f-b40aa8455a25` passed at 49,296 bit/s with the expected
+public checksum, PPP/IPCP, zero RAS errors and teardown. All 25 restored release
+files, erasure guard and idle endpoints were independently audited.
+
+The local profile helper now snapshots the 14 selected pre-test environment
+values and requires exact restoration, preserving pre-existing diagnostics.
+The next ten-call V.34 series has started but is not yet qualified. Its auditor
+also requires empty PPP process/session lists and distinct physical attempts.
+V.34 startup reliability and caller-selected V.34 with V.90 offered remain open.
+
+Evidence: `work/release915-v34-sustained-dfe13ef1-6ef5-4fad-bc73-2a0ba5824644-audit.json`,
+`work/release915-v34-sustained-trial-1789272378.json`,
+`work/release915-v34-profile-disable-inspection.json`,
+`work/release915-v34-manual-rollback.log`, and
+`work/release915-v34-post-endurance-restoration-audit.json`.
+CI run34737395603 passed both jobs on documentation head9067a8a;
+subsequent heads still require their own check results.

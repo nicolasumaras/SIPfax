@@ -86,8 +86,12 @@ gate and is not an estimated long-term success rate. Raw traces are retained
 under unique per-trial paths on CT105. Both successful and failed calls can
 acquire below 0.2 lattice RMS; the second success uses a +167.9-ppm clock seed.
 Neither acquisition RMS nor a near-zero clock seed alone explains the outcome.
-Next compare post-acquisition bit integrity and caller retrain timing in these
-retained traces before selecting another clock or detection change.
+The failed678 recording starts with clean B1 and ODP, then delivers a median
+5,056 receive bits/s while transmitting at12k. Replaying it with its +226.4ppm
+seed yields zero valid HDLC frames; zero seed recovers four valid77-byte XID
+commands but still leaves gaps. Successful calls deliver the full receive rate.
+Next assess the Phase4 clock estimate used to initialize data tracking across
+these recordings. The evidence does not justify a universal zero-seed override.
 
 ## Immediate dependencies
 

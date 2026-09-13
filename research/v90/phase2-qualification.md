@@ -2546,3 +2546,52 @@ work/v34-retrain-repeat-final-audit.json verifies all25 qualified files, guard,
 removed trial flags and idle endpoints. PR29 stays draft. CI34727480442 on4076a56
 has application tests completed successfully; native-modem was still running
 at the recorded check (work/v34-retrain-repeat-ci.json), not a passed check.
+
+
+### Receive-delivery comparison and in-place replay of failed call68966
+
+The four-call DTE-counter comparison separates stable one-second intervals with
+unchanged retrain index,12000-bit/s configured rate, and11900..12100 transmitted
+bits. Both successful calls deliver11984..12012 receive bits per connected
+interval (20 and21 intervals respectively). The failed678 call's initial epoch
+instead delivers2842..7510 bits/s, median5056 across seven intervals ending at
+seconds17..23. This is delivered-bit accounting, not a measured wire BER or RTP
+loss count; suppressed decoder output and other receiver behavior can reduce it.
+See work/audit_v34_receive_delivery.py and work/v34-retrain-receive-delivery.json.
+
+First600 decoded B1 bits distinguish two failure classes: callf3535254's three
+acquisitions have52.3%,48.5%,47.3% ones, with no ODP. Call57d57a2f initially has
+100% ones and detects ODP, then loses receive integrity before LAPM connects.
+The two successful calls have98.5% and100% ones. Low lattice RMS alone does not
+validate decoded B1. The2400-bit percentages include post-B1 protocol data and
+must not be treated as a B1 bit-error measurement. Evidence:
+work/v34-retrain-bit-health-events.json.
+
+Capture68966 corresponds by recording end time to failed attempt57d57a2f.
+All echo reconstruction, PCM, decoded bits, bit positions and full replay logs
+remain on CT105 under /tmp/v34-lapm-68966. Emitted MP decoding verifies12k caps,
+16-state unshaped receive advertisement and zero precoder taps on each retry.
+The in-place receiver reproduces the +226.4ppm clock seed and clean first B1
+(98% ones in the replay); its full capture replay has no20ms callback overruns.
+The replay does not reproduce every live retrain reset.
+
+For the first24seconds of the same post-echo recording, only the clock seed is
+changed between two receiver/scanner runs:
+
+| Seed | Delivered bits | Missing decoded positions | HDLC frames / valid |
+| --- | ---: | ---: | ---: |
+| Actual live +226.4ppm | 37699 | 59713 | 72 / 0 |
+| Zero | 76035 | 21405 | 44 / 4 |
+
+Both detect ODP and select candidate0. The four valid frames reach the actual
+LAPM parser as77-byte XID commands with valid envelopes. This is more than an
+accidental short-frame CRC count, but neither offline run establishes a duplex
+link. Worst callback times are13.29 and13.22ms. Evidence:
+work/v34-repeat-68966-replay.json, work/v34-repeat-68966-clock-contrast.json and
+work/v34-repeat-68966-valid-frame-audit.json. Zero still leaves substantial gaps;
+previous zero-seed hardware failed, and +167.9ppm succeeded in another call.
+Do not deploy a zero-seed rule from this contrast. Next examine whether the
+Phase4 instantaneous Gardner rate estimate is a reliable initializer for the
+separate live data timing loop; compare stable-window estimates against retained
+successful and failed recordings before changing the default. No production
+configuration or binary was changed during this analysis.

@@ -176,8 +176,15 @@ automatic rollback, which succeeds. These transfers still do not qualify bulk
 upload. Fresh restored-baseline attempt
 `4e4b8b1e-86ba-4cb3-b36d-5c7dff4b75d7` passes at49,296bit/s with PPP,
 checksum and cleanup; all25 restored files are verified and the fixture is
-inactive. Updated-artifact repeated calls are now running, and remaining
-release gates stay open.
+inactive. Updated candidate9156097 also passes all ten consecutive planned
+calls in campaign `release915-repeatability-1789271469`, each at49,296bit/s
+with PPP/IPCP, expected public HTTP hash, zero six-category modem errors and
+resource cleanup. Installation, automatic rollback and all25 restored files
+pass independent audits. The final call belongs to the candidate; the subsequent
+live audit verifies restored files and idle endpoints, not another baseline
+dial. This completes the bounded V90 repeatability check for candidate915's
+normal profile. V34, bulk upload, broader impairments and the other release
+requirements remain open.
 
 Failed-worker cleanup review found that `ExternalModemProcessBackend` emits
 `backend-exit`, but `Line` did not forward it to the session manager. A focused

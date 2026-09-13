@@ -301,7 +301,7 @@ files, erasure guard and idle endpoints were independently audited.
 
 The local profile helper now snapshots the 14 selected pre-test environment
 values and requires exact restoration, preserving pre-existing diagnostics.
-The next ten-call V.34 series has started but is not yet qualified. Its auditor
+The next ten-call V.34 series stopped on call six with error 678 after five successes; it did not qualify startup reliability. Its auditor
 also requires empty PPP process/session lists and distinct physical attempts.
 V.34 startup reliability and caller-selected V.34 with V.90 offered remain open.
 
@@ -312,3 +312,27 @@ Evidence: `work/release915-v34-sustained-dfe13ef1-6ef5-4fad-bc73-2a0ba5824644-au
 `work/release915-v34-post-endurance-restoration-audit.json`.
 CI run34737395603 passed both jobs on documentation head9067a8a;
 subsequent heads still require their own check results.
+
+
+### Candidate915 V.34 repeatability failure retained (2026-09-13)
+
+Campaign `release915-v34-repeatability-1789274392` stopped on its sixth call:
+five consecutive 12,000-bit/s calls passed PPP/IPCP, the public checksum,
+zero RAS error counters and empty process/session teardown; attempt
+`50fedfc9-8e8e-41dd-8fd3-9bd6662c072b` then failed to connect with error 678.
+The ten-call requirement did not pass. Calls seven through ten were not attempted.
+The corrected temporary-profile helper restored all saved selected environment
+values successfully; automatic rollback and notebook cleanup passed.
+Fresh baseline call `e4b74d8e-c1db-432b-9611-21fe73bc5704` passed at 49,296 bit/s,
+and the live audit verified all 25 managed files, the erasure guard and idle state.
+
+Per-call audio remains on CT105 (failed-call PID84802 by capture modification
+window). Invocation-relative native summaries show four B1 transmit entries,
+no LIVE MP READ, no ODP detection and no LAPM link in the intervening failed
+startup segment, versus successful link establishment in adjacent calls.
+The complete traces stay on CT105; these counts locate the failure stage but
+do not establish its cause. Repeated-loss testing is prepared but remains gated
+on startup qualification. The failed attempt is retained rather than replaced
+by retries. Evidence: `work/release915-v34-repeatability-outcome.json`,
+`work/release915-v34-post-repeatability-restoration-audit.json`, and
+`work/release915-v34-failure-startup-aggregate.json`.

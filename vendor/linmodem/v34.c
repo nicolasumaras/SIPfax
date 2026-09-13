@@ -1,3 +1,4 @@
+#include "v34clock.h"
 #include <stdlib.h>
 #include <time.h>
 /* 
@@ -6854,11 +6855,17 @@ static void p4_slice(double x, double y, int sixteen, int *qo, int *zo, double *
    flattens (37.6/3.6/15.6 -> 3.9/3.4/3.8). Leaving it off cost lattice-rms 0.498 against
    0.166 on a signal that resolves. */
 static double p4_ted_kp = 0.10, p4_ted_ki = 0.002, p4_ted_sign = -1.0;
+static unsigned p4_clock_window = 0; /* Experimental; instantaneous by default. */
 double p4_ted_last = 0.0;   /* SIPFAX: exported - seeds the data-mode clock */
 static void p4_ted_init(void)
 {
     static int done; char *e;
     if (done) return; done = 1;
+    e = getenv("SIPFAX_CLOCK_AVERAGE");
+    if (e && !strcmp(e,"1024")) p4_clock_window = 1024;
+    else if (e && !strcmp(e,"2048")) p4_clock_window = 2048;
+    else if (e && strcmp(e,"0"))
+        fprintf(stderr,"[p4] unsupported clock average; using instantaneous estimate\n");
     e = getenv("SIPFAX_TED_KP");   if (e) p4_ted_kp   = atof(e);
     e = getenv("SIPFAX_TED_KI");   if (e) p4_ted_ki   = atof(e);
     e = getenv("SIPFAX_TED_SIGN"); if (e) p4_ted_sign = atof(e);
@@ -6896,6 +6903,7 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
            tfr accumulates the rate error (samples per half-symbol); the proportional term
            nudges the phase directly. */
         double tfr = 0, gmi = 0, gmq = 0, gpi = 0, gpq = 0;
+        V34ClockHistory clock_history; v34_clock_reset(&clock_history);
         for (i = 0; i < P4_NT; i++) { bufi[i] = 0; bufq[i] = 0; }
         ns = 0;
         while (pos < nz - 2) {
@@ -6953,10 +6961,15 @@ static int p4_equalize(const double *zi, const double *zq, int nz, double off,
                 if (tfr >  0.02) tfr =  0.02;    /* +-4000 ppm: far past any real clock */
                 if (tfr < -0.02) tfr = -0.02;
                 p4_ted_last = tfr;
+                if (p4_clock_window) v34_clock_push(&clock_history,tfr);
                 gpi = oi; gpq = oq;
             }
             pos += P4_SPS/2.0 + tfr;
         }
+        /* Publish a stable trailing estimate only when explicitly selected.
+           A short pass retains its instantaneous estimate, never old history. */
+        if (p4_clock_window)
+            p4_ted_last = v34_clock_mean(&clock_history,p4_clock_window,p4_ted_last);
     }
     { extern double g_p4ffe_i[], g_p4ffe_q[]; extern int g_p4ffe_valid; int q;
       for (q = 0; q < P4_NT; q++) { g_p4ffe_i[q] = wi[q]; g_p4ffe_q[q] = wq[q]; }

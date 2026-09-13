@@ -26,6 +26,10 @@ jobs:
         run: |
           gcc -O1 -g -std=gnu99 -fcommon -fsanitize=address,undefined -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v34-dte.c vendor/linmodem/v34dte.c vendor/linmodem/serial.c vendor/linmodem/v90lapmlink.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/{v42,hdlc,crc,bit_operations,logging,alloc,async}.c -o /tmp/v34-dte-test
           /tmp/v34-dte-test
+      - name: Test V34 clock estimate history
+        run: |
+          gcc -O1 -g -std=gnu99 -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-clock-history.c -lm -o /tmp/v34-clock-history-test
+          /tmp/v34-clock-history-test
       - name: Test V34 retrain response waveform
         run: |
           gcc -O1 -g -std=gnu99 -fsanitize=address,undefined tools/tests/v34-retrain-entry.c vendor/linmodem/v34_phase2.c vendor/linmodem/v34info1c.c -lm -o /tmp/v34-retrain-entry-test

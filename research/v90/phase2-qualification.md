@@ -2644,3 +2644,40 @@ experiment's outputs. Production source, deployment and clock defaults are
 unchanged. Next replay a successful physical recording with explicit retrain
 boundary handling, then decide whether a longer averaged seed warrants a bounded
 hardware comparison. All five acceptance gates remain open.
+
+
+### Successful-call replay and experimental clock-history option
+
+Successful physical call666be31e uses capture69114. Echo cancellation is replayed
+on the full capture before slicing30-second windows at17,18 and19seconds, around
+the sole retrain. These are explicit alternative initializations, not an exact
+reproduction of all live receiver state. Instantaneous-seed controls recover
+0,55,0 valid frames respectively, despite all reporting+167.9ppm and clean B1.
+Both1024- and2048-symbol averages recover54,55,56 valid frames at those offsets.
+The windows cover different recording end times, so compare variants within an
+offset rather than interpreting54/55/56 as differing rates over identical data.
+Worst callback stays below13.6ms. The18-second variants deliver243925bits with
+459 missing decoded positions. An independent bit-unstuffing/CRC16 decoder
+confirms55 valid frames and the same ordered frame digest for all three variants:
+05ee36e7cfc8e21bb921b54ed834b71fb50be01950c05c31a60ebb1217292f88.
+No frame payloads leave CT105. Evidence: work/v34-success-69114-clock.json,
+work/v34-success-69114-clock-offsets.json and
+work/v34-success-69114-frame-identity.json.
+
+The candidate now supports explicit SIPFAX_CLOCK_AVERAGE=1024 or2048. Unset,
+0 and unsupported values retain instantaneous estimates; unsupported values log
+a warning. History is local to one equalizer pass, bounded at2048 samples and
+reset before each pass. A short pass falls back to its own last estimate rather
+than stale history. Existing manual data-clock overrides still take precedence.
+The option remains off by default pending physical qualification.
+
+The rolling-history regression covers both windows, more than three buffer
+wraps, insufficient history, invalid bounds, alternating positive/negative rates
+and reset. CT105 ASan/UBSan, full native build, serial/DTE, retrain waveform,
+B1 reference, readiness, MP and acquisition regressions pass. Packaged candidate
+/tmp/v34-clock-average-candidate has SHA-256
+b048fd0a367928518a695c6b525c0065100a094f23dcbfcd91d392d11f936bdd.
+Its18-second successful-call replay also recovers55 valid frames at all three
+settings. Evidence: work/v34-clock-average-target-validation.log and
+work/v34-success-69114-final-clock.json. No averaged candidate has yet passed
+physical PPP; production remains qualifiedV90.

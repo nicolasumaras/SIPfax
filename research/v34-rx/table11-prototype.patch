@@ -1,0 +1,106 @@
+diff --git a/vendor/linmodem/v34.c b/vendor/linmodem/v34.c
+index c5725d2..a008be7 100644
+--- a/vendor/linmodem/v34.c
++++ b/vendor/linmodem/v34.c
+@@ -1190,19 +1190,6 @@ static void encode_mapping_frame(V34DSPState *s)
+     s->Z_1 = Z[0];
+     
+     /* (§ 9.6.1) mapping to 2D symbols */
+-    Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
+-    {   /* SIPFAX: encoder-side ground truth for the sync work - the Z pair actually
+-           transmitted, the U0 folded into Z[1] (which is the PREVIOUS trellis_encoder
+-           call's return), and the v0 this symbol will carry. Diffing this against the
+-           decoder's recovered values localises the remaining fault without another round
+-           of reasoning about the indexing. */
+-        extern FILE *g_encf;
+-        int v0e = (s->sync_count == 0)
+-                ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
+-        if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
+-        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
+-                            s->sync_count, s->half_data_frame_count, s->conv_reg);
+-    }
+ 
+     C0 = 0; /* for trellis coding */
+     for(i=0;i<2;i++) {
+@@ -1211,10 +1198,6 @@ static void encode_mapping_frame(V34DSPState *s)
+       assert(t >= 0 && t < L_MAX/4);
+       x1 = s->constellation[t][0];
+       y1 = s->constellation[t][1];
+-      /* rotation by Z[i] * 90 degress clockwise */
+-      rotate_clockwise(x, y, x1, y1, Z[i]);
+-      u_re = x;
+-      u_im = y;
+ 
+       /* (§ 9.6.2) precoder */
+       x = 0;
+@@ -1231,6 +1214,31 @@ static void encode_mapping_frame(V34DSPState *s)
+       c_re = shr_round0(p_re, 7 + w) << w;
+       c_im = shr_round0(p_im, 7 + w) << w;
+       C0 += c_re + c_im;
++      /* Table 11: c(2m+1) is known after processing the first symbol,
++         so combine the CURRENT modulo and sync bits before mapping it. */
++      if (i == 1) {
++          int v0_current = s->sync_count == 0
++              ? ((SYNC_PATTERN >> (15-s->half_data_frame_count)) & 1) : 0;
++          s->U0 = (s->conv_reg & 1) ^ ((C0 >> 1) & 1) ^ v0_current;
++    Z[1] = (Z[0] + 2 * I[0][j] + s->U0) & 3;
++    {   /* SIPFAX: encoder-side ground truth for the sync work - the Z pair actually
++           transmitted, the U0 folded into Z[1] (which is the PREVIOUS trellis_encoder
++           call's return), and the v0 this symbol will carry. Diffing this against the
++           decoder's recovered values localises the remaining fault without another round
++           of reasoning about the indexing. */
++        extern FILE *g_encf;
++        int v0e = (s->sync_count == 0)
++                ? ((SYNC_PATTERN >> (15 - s->half_data_frame_count)) & 1) : 0;
++        if (!g_encf) { char *e = getenv("SIPFAX_ENCDUMP"); if (e) g_encf = fopen(e,"w"); }
++        if (g_encf) fprintf(g_encf, "%d %d %d %d %d %d %d\n", Z[0], Z[1], s->U0, v0e,
++                            s->sync_count, s->half_data_frame_count, s->conv_reg);
++    }
++
++      }
++      /* rotation by Z[i] * 90 degress clockwise */
++      rotate_clockwise(x, y, x1, y1, Z[i]);
++      u_re = x;
++      u_im = y;
+ 
+       Y[i][0] = clamp(u_re + c_re, 255);
+       Y[i][1] = clamp(u_im + c_im, 255);
+@@ -1287,7 +1295,7 @@ static void encode_mapping_frame(V34DSPState *s)
+ 
+       put_sym(s, xp_re, xp_im);
+     }
+-    s->U0 = trellis_encoder(s, (C0 >> 1) & 1, Y);
++    (void)trellis_encoder(s, (C0 >> 1) & 1, Y);
+ 
+     /* 4D symbol count & data frame count for synchronisation */
+     if (++s->sync_count == 2*s->P) {
+@@ -3391,7 +3399,7 @@ static void trellis_decoder(V34DSPState *s, s16 yout[2][2], s16 yy[2][2],
+                 extern int *g_v0orc; extern long g_v0orn, g_v0ori;
+                 static int voff = -99; long vi;
+                 int v0h = 0;
+-                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : -1; }
++                if (voff == -99) { char *e = getenv("SIPFAX_V0OFF"); voff = e ? atoi(e) : 0; }
+                 /* SIPFAX: measured exactly - half == (conv_reg[t]&1) ^ v0[t-1] == U0[t],
+                    100.00% over 16000 noise-free symbols. The source-state parity is right;
+                    it needs the PREVIOUS symbol,s v0, hence the default offset of -1. */
+@@ -3994,7 +4002,10 @@ void baseband_decode_impl(V34DSPState *s, int si, int sq)
+             if (en) {
+                 if (g_v0lock && !g_v0_aligned) {
+                     g_v0_aligned = 1;
+-                    g_v0_realign = ((19 - (long)g_v0ph) % 20 + 20) % 20;
++                    int divisor = s->P, remainder = s->r;
++                    while (remainder) { int next = divisor % remainder; divisor = remainder; remainder = next; }
++                    int cycle = 4 * s->P / divisor;
++                    g_v0_realign = ((-(long)g_v0ph) % cycle + cycle) % cycle;
+                     if (v34_dbg) fprintf(stderr, "[v0] align: phi=%d (mod20=%d) -> drop %ld "
+                                          "4D symbols\n", g_v0ph, g_v0ph % 20, g_v0_realign);
+                 }
+@@ -7970,6 +7981,8 @@ static void dataloop_symsink(int si, int sq)
+             }
+         }
+         if (dl_sigma > 0) { a += dl_sigma*dl_gauss(); b += dl_sigma*dl_gauss(); }
++        { static long skipped = 0; const char *drop = getenv("SIPFAX_DL_DROP");
++          if (drop && skipped++ < atol(drop)) return; }
+         baseband_decode_pub(g_rx_state, (int)lrint(a), (int)lrint(b));
+     }
+ }

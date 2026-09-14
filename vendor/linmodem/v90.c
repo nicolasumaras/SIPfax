@@ -750,26 +750,70 @@ static void v90_receive_CP(V90EncodeState *s)
 
 void V90_init(struct V90State *s, int calling)
 {
+    const char *lapm=getenv("SIPFAX_V90_V42");
     s->calling = calling;
-    s->fpos = 0;
+    s->lapm_requested=!calling && lapm && !strcmp(lapm,"1");
+    s->lapm.enabled=s->lapm.initialized=0;
+    s->fpos = 0;s->serial_word=0;s->serial_remaining=0;
+    v90_echo_init(&s->echo);
     if (calling) {
         /* analog client: downstream decoder */
         memset(&s->dec, 0, sizeof(s->dec));
         v90_decode_init(&s->dec);
         s->n = s->dec.S + s->dec.K;
     } else {
-        /* digital server: downstream encoder. The constellation normally comes
-           from the client CP (DIL); without a live DIL exchange, derive it via a
-           local CP round-trip (placeholder for real DIL). */
-        V90DecodeState tmp;
-        memset(&tmp, 0, sizeof(tmp));
-        v90_decode_init(&tmp);
-        v90_send_CP(&tmp, 1, 0);
-        memset(&s->enc, 0, sizeof(s->enc));
-        v90_encode_init(&s->enc);
-        v90_receive_CP(&s->enc);
-        s->n = s->enc.S + s->enc.K;
+        const char *codec = getenv("SIPFAX_MODEM_CODEC");
+        int alaw = codec && (!strcasecmp(codec, "PCMA") || !strcasecmp(codec, "alaw"));
+        v90_startup_init(&s->startup, alaw);
     }
+}
+
+/* V.90 PPP serial path uses on-wire LSB-first 8N1. Legacy serial.c uses
+ * MSB-first framing, so leave other modulation modes unchanged. */
+static int v90_serial_bit(void *opaque)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    if(!s->serial_remaining) {
+        int value=sm_get_bit(&sm->tx_fifo);if(value<0)return 1;
+        v90_echo_tx(&s->echo,(unsigned)value,s->startup.samples);
+        s->serial_word=((unsigned)value<<1)|(1u<<9);s->serial_remaining=10;
+    }
+    unsigned bit=s->serial_word&1;s->serial_word>>=1;--s->serial_remaining;return bit;
+}
+static void v90_ppp_frame(void *opaque,const uint8_t *frame,unsigned length)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    int was_armed=s->echo.armed,was_fired=s->echo.fired;
+    v90_echo_rx(&s->echo,frame,length,s->startup.samples);
+    if(!was_armed && s->echo.armed)fprintf(stderr,"[v90data] PPP echo health monitoring armed\n");
+    else if(was_fired && !s->echo.fired)fprintf(stderr,"[v90data] PPP echo replies resumed after recovery\n");
+    unsigned needed=2;
+    for(unsigned j=0;j<length;++j)needed+=(frame[j]<0x20 || frame[j]==0x7d || frame[j]==0x7e)?2:1;
+    if(needed>SM_FIFO_SIZE-(unsigned)sm_size(&sm->rx_fifo)) {
+        fprintf(stderr,"[v90data] receive FIFO full; discard complete PPP frame\n");return;
+    }
+    sm_put_bit(&sm->rx_fifo,0x7e);
+    for(unsigned j=0;j<length;++j) {
+        unsigned b=frame[j];
+        if(b<0x20 || b==0x7d || b==0x7e){sm_put_bit(&sm->rx_fifo,0x7d);b^=0x20;}
+        sm_put_bit(&sm->rx_fifo,b);
+    }
+    sm_put_bit(&sm->rx_fifo,0x7e);
+}
+
+static int v90_lapm_get(void *opaque,uint8_t *data,int maximum)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;int n=0;
+    while(n<maximum){int value=sm_get_bit(&sm->tx_fifo);if(value<0)break;data[n++]=(uint8_t)value;}
+    return n;
+}
+
+static int v90_lapm_put(void *opaque,const uint8_t *data,int length)
+{
+    V90State *s=opaque;struct sm_state *sm=s->opaque;
+    int room=SM_FIFO_SIZE-sm_size(&sm->rx_fifo);if(length>room)length=room;
+    for(int i=0;i<length;i++)sm_put_bit(&sm->rx_fifo,data[i]);
+    return length;
 }
 
 int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
@@ -789,16 +833,37 @@ int V90_process(struct V90State *s, s16 *output, s16 *input, int nb_samples)
             output[i] = 0;
         }
     } else {
-        /* server: stream the downstream PCM; upstream receive TODO */
-        for (i = 0; i < nb_samples; i++) {
-            if (s->fpos == 0) {
-                for (j = 0; j < s->n; j++)
-                    data[j] = s->get_bit ? (s->get_bit(s->opaque) & 1) : 0;
-                v90_encode_mapping_frame(&s->enc, s->framebuf, data);
+        if(s->lapm_requested && s->lapm.initialized)v90_lapm_link_drain(&s->lapm);
+        /* LAPM carries PPP as framed DTE octets, so the raw asynchronous PPP
+           decoder is intentionally disconnected. A live LAPM link is the
+           equivalent startup evidence for suppressing the initial-data
+           recovery timer. */
+        if(s->lapm_requested && s->lapm.initialized && s->lapm.connected)
+            s->startup.have_upstream_data=1;
+        if(!s->startup.phase4_active || s->startup.phase4.stage!=4 || !s->startup.phase4.rx_e_logged)
+            v90_echo_pause(&s->echo);
+        else if(v90_echo_due(&s->echo,s->startup.samples))
+            v90_startup_data_retrain(&s->startup);
+        if(s->startup.phase4_active) {
+            V90Phase4 *p=&s->startup.phase4;
+            if(s->lapm_requested){
+                unsigned bits=p->encoder.k+p->encoder.s;
+                int rate=bits?(int)(bits*8000/6):49333;
+                if(!s->lapm.initialized)
+                    v90_lapm_link_init(&s->lapm,rate,s,v90_lapm_get,v90_lapm_put);
+                else s->lapm.protocol.tx_bit_rate=rate;
+                p->v42_decline_enabled=0;
+                p->get_data_bit=v90_lapm_link_tx_bit;p->data_opaque=&s->lapm;
+                p->upstream.receive_frame=NULL;p->upstream.opaque=NULL;
+                p->upstream.receive_bit=v90_lapm_link_candidate_bit;
+                p->upstream.bit_opaque=&s->lapm;
+            }else{
+                p->get_data_bit=v90_serial_bit;p->data_opaque=s;
+                p->upstream.receive_frame=v90_ppp_frame;p->upstream.opaque=s;
             }
-            output[i] = s->framebuf[s->fpos++];
-            if (s->fpos == 6) s->fpos = 0;
         }
+        v90_startup_process(&s->startup, output, input, nb_samples);
+        if(s->lapm_requested && s->lapm.initialized)v90_lapm_link_drain(&s->lapm);
     }
     return 0;
 }

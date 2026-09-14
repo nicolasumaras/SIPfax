@@ -1,0 +1,114 @@
+{
+  "description": "Offline replay of opt-in causal ODP prediction with a 48 mapping-frame horizon; not hardware qualification.",
+  "runs": [
+    {
+      "enabled": false,
+      "cases": [
+        {
+          "case": "v90-preemph-config",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-preemph2-first",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-odp-pre2",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-odp-soak",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-odp-auto",
+          "frames": 20,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    },
+    {
+      "enabled": true,
+      "cases": [
+        {
+          "case": "v90-preemph-config",
+          "frames": 2,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-preemph2-first",
+          "frames": 2,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "frames": 2,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-odp-pre2",
+          "frames": 19,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-odp-soak",
+          "frames": 20,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-odp-auto",
+          "frames": 20,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    }
+  ],
+  "validation": [
+    "3000 and 3200 baud independent waveform tests passed with immediate PPP and 4500 ms idle after ODP",
+    "Independent predicted-label checks and CT105 ASan/UBSan passed",
+    "Native build passed"
+  ],
+  "limitations": [
+    "One failed recording remains unrecovered",
+    "Sustained downstream errors are not addressed by this change"
+  ]
+}

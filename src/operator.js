@@ -6,12 +6,13 @@ import { dirname, join } from 'node:path';
 const ADMIN_HTML_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'admin.html');
 
 export class OperatorHttpServer {
-  constructor({ host = '127.0.0.1', port = 8080, diagnostics, freepbx, config = null }) {
+  constructor({ host = '127.0.0.1', port = 8080, diagnostics, freepbx, config = null, onPppEvent = null }) {
     this.host = host;
     this.port = port;
     this.diagnostics = diagnostics;
     this.freepbx = freepbx;
     this.config = config;
+    this.onPppEvent = onPppEvent;
     this.pppEvents = [];
     this.server = http.createServer((request, response) => {
       this.handleRequest(request, response);
@@ -159,6 +160,10 @@ export class OperatorHttpServer {
   acceptPppEvent(request, response) {
     readJsonBody(request, 8192)
       .then((event) => {
+        if (this.onPppEvent && !this.onPppEvent(event, request.headers['x-sipfax-notify-token'])) {
+          sendJson(response, 403, { error: 'invalid PPP lifecycle event' });
+          return;
+        }
         this.pppEvents.push({ ...event, receivedAt: new Date().toISOString() });
         this.pppEvents = this.pppEvents.slice(-20);
         sendJson(response, 202, { accepted: true });

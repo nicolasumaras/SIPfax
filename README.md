@@ -14,6 +14,108 @@ The first supported baseline follows the LKMA-168 decision:
 - spandsp soft-modem worker on the SIPfax VM; no physical modem is required on
   the server
 
+## Experimental V.90 backend
+
+The native C backend in `vendor/linmodem` answers Windows XP hardware modems
+through a Cisco ATA187 and FreePBX and provides authenticated PPP internet access.
+CT105 runs native `70614d7` with V.42/LAPM enabled, causal ODP training, index-2
+pre-emphasis for 3000 symbols/s and normal symbol-rate negotiation. Its binary
+SHA-256 and retained source/rollback artifacts are documented in
+[deployment provenance](research/v90/deployment-provenance.md).
+Physical calls have authenticated PPP and passed internet probes at a reported
+49,296 bit/s; see [hardware acceptance](research/v90/v42-hardware-acceptance.json).
+Repeated-call reliability, sustained LAPM traffic, fallback and concurrent-call
+qualification remain release gates.
+
+The receiver implements 3000-symbol/s upstream profiles from 4.8 to 28.8 kbit/s
+and 3200-symbol/s profiles through 31.2 kbit/s. Earlier pre-LAPM qualification
+included three consecutive 3000/28.8 calls that
+started without fallback. Sustained calls at both 3000/28.8 and 3200/28.8 passed
+all 129 transfer checks at 49.333 kbit/s downstream, without application retries.
+They recorded eight and thirteen CRC errors respectively, with no alignment
+errors. Sustained quality remains under development; the optional 31.2 kbit/s
+profile and maximum downstream rates remain unqualified.
+
+Startup now retries one 2.4 kbit/s rate step lower if B1 is detected but no valid
+LCP Configure packet arrives within ten seconds plus two round-trip delays. It preserves the
+reduced ceiling through retraining, stops at 4.8 kbit/s, and does not apply after
+LCP startup has been recognized on the call. FCS matches alone do not disable recovery. One hardware call successfully recovered from
+3000/28.8 to 3000/26.4 on the same call. A sustained recovery call also passed 129 transfer checks; a post-deployment call
+verified recovery with normal symbol-rate negotiation.
+See [receiver qualification](research/v90/upstream-rates.md) and the
+[live development record](research/v90-live-status.md) for evidence and remaining
+work. These results do not imply full V.90 conformance or concurrent-call support.
+
+The native backend passively monitors PPP echo traffic. After a matching reply
+has demonstrated peer support, repeated unanswered requests can trigger one
+full retrain before PPP times out. It waits at least 40 seconds from the first
+unanswered request and 10 seconds from the second counted request. Training
+pauses this observer; another recovery requires a matching reply to rearm it.
+This recovery mechanism does not diagnose or eliminate the underlying impairment.
+
+Build on Linux with GCC and make:
+
+```bash
+make -C vendor/linmodem CFLAGS='-O2 -Wall -g -D_GNU_SOURCE -fcommon'
+```
+
+For a newly created configuration, set `SIPFAX_MODEM_ENGINE=linmodem`.
+For an existing configuration, set `modem.engine` to `linmodem`,
+`modem.modulation` to `v90`, and `modem.command` to `null` to select its launcher.
+The default launcher is `/opt/sipfax/bin/sipfax-linmodem`;
+`SIPFAX_LINMODEM_BINARY` can override that location. An explicit stored
+`modem.command` still takes precedence, including existing capture wrappers.
+The launcher uses the built `vendor/linmodem/lm` alongside the repository;
+it does not enable private audio capture. The normal SIPfax PPP configuration,
+G.711 codec negotiation and per-call backend lifecycle still apply.
+
+Hardware qualification uses these service environment settings:
+
+| Variable | Default | Current test setting |
+| --- | --- | --- |
+| `SIPFAX_V90_V42` | off | `1` enables native V.42/LAPM |
+| `SIPFAX_V90_MAX_BPS` | `56000` | `49334` downstream ceiling |
+| `SIPFAX_V90_INITIAL_TRN2D_MS` | `255` | `1500` initial final-training interval |
+| `SIPFAX_V90_RENEG_TRN2D_MS` | `255` | `1500` rate-renegotiation training interval |
+| `SIPFAX_V90_UPSTREAM_RATE` | `4800` | `28800` initial upstream ceiling |
+| `SIPFAX_V90_UPSTREAM_SYMBOL_RATE` | both supported rates | unset in deployment; `3000` or `3200` restricts qualification offers |
+| `SIPFAX_V90_PREEMPHASIS_3000` | `0` (flat) | `2` in deployment |
+| `SIPFAX_V90_ODP_TRAINING` | off | `1` in deployment; enables detection-pattern equalizer training |
+| `SIPFAX_V90_LINE_ECHO` | off | `auto` initial echo-delay acquisition |
+| `SIPFAX_V90_SOFT_RX` | `0` | `1` soft-decision 4.8 kbit/s path |
+| `SIPFAX_RTP_PLAYOUT_MS` | `0` | `60` |
+| `SIPFAX_PPP_UPSTREAM_TCP_MSS` | disabled | `536` |
+
+The initial training setting accepts 255–2000 ms, rounded down to a complete
+six-sample frame; invalid values use the default. The independent renegotiation
+setting accepts 0–2000 ms with the same rounding; it defaults to 255 ms.
+The symbol-rate restriction accepts `3000` or `3200`; other values allow both
+implemented rates. Offers still respect the caller’s carrier capabilities.
+The 3000-symbol pre-emphasis option accepts the exact decimal strings `0` through
+`10`; invalid values select flat pre-emphasis. It affects only offered
+3000-symbol profiles and is retained through retrains. ODP training is enabled
+only by the exact value `1`; it predicts equalizer targets from validated V.42
+detection traffic and does not implement modem error correction. Automatic
+echo mode acquires an initial delay; continuous delay tracking remains unfinished.
+Service environment changes require a restart
+when no call is active. A stored `modem.command` takes precedence over its
+environment seed. The native code retains its GPL-2.0 licensing.
+
+`SIPFAX_V90_SOFT_RX=1` selects soft decisions for the legacy 4.8 kbit/s,
+3200-symbol/s path. The other implemented profiles use the streaming trellis/shell
+receiver, with B1 acquisition, carrier/equalizer fitting and adaptive symbol timing.
+Profile and waveform regressions include fractional timing, clock drift, mu-law,
+interference and delayed-E replay. Hardware qualification remains narrower than
+synthetic profile coverage.
+
+For the experimental 4.8 kbit/s upstream, `SIPFAX_PPP_UPSTREAM_TCP_MSS=536`
+optionally limits TCP segment-size advertisements sent to IPv4 PPP clients.
+This reduced a 4 KB request from 16.7 to about 10.2 seconds in controlled tests.
+It does not change advertisements sent by the client or increase smaller MSS
+values. The setting accepts 256–1460 and is disabled when unset. It requires
+the installed PPP egress helper and takes effect on new calls after restart;
+per-lease cleanup removes the rules. It does not fix modem training failures.
+
 ## Run
 
 ```bash

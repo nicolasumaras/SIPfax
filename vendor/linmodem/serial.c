@@ -82,3 +82,39 @@ void serial_put_bit(void *opaque, int bit)
     }
 }
 
+
+/* V.34 raw asynchronous mode: start, D0..D7, stop. The legacy
+   encoder above has a different bit order and remains separate. */
+int serial_8n1_get_bit(void *opaque)
+{
+    struct sm_state *s = opaque;
+    if (!s->serial_tx_cnt) {
+        int data = sm_get_bit(&s->tx_fifo);
+        if (data < 0) return 1;
+        s->serial_tx_buf = ((unsigned)(data & 255) << 1) | (1u << 9);
+        s->serial_tx_cnt = 10;
+    }
+    int bit = s->serial_tx_buf & 1;
+    s->serial_tx_buf >>= 1;
+    --s->serial_tx_cnt;
+    return bit;
+}
+
+void serial_8n1_put_bit(void *opaque, int bit)
+{
+    struct sm_state *s = opaque;
+    bit &= 1;
+    if (!s->serial_cnt) {
+        if (!bit) {
+            s->serial_buf = 0;
+            s->serial_cnt = 1;
+        }
+    } else if (s->serial_cnt <= 8) {
+        s->serial_buf |= (unsigned)bit << (s->serial_cnt - 1);
+        ++s->serial_cnt;
+    } else {
+        /* A bad stop bit invalidates the whole character. */
+        if (bit) sm_put_bit(&s->rx_fifo, s->serial_buf);
+        s->serial_cnt = 0;
+    }
+}

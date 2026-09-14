@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { callKey } from '../bin/sipfax-call-key.mjs';
 
 const DEFAULT_DNS_SERVERS = ['1.1.1.1', '9.9.9.9'];
 const DEFAULT_BLOCKED_DESTINATIONS = [
@@ -138,8 +139,13 @@ export class EgressPolicy {
     allowInternet = true,
     allowDns = true,
     allowedDestinations = ['0.0.0.0/0'],
-    blockedDestinations = DEFAULT_BLOCKED_DESTINATIONS
+    blockedDestinations = DEFAULT_BLOCKED_DESTINATIONS,
+    upstreamTcpMss = null
   } = {}) {
+    if (upstreamTcpMss !== null && (!Number.isInteger(upstreamTcpMss) || upstreamTcpMss < 256 || upstreamTcpMss > 1460)) {
+      throw new Error('upstreamTcpMss must be null or an integer between 256 and 1460');
+    }
+    this.upstreamTcpMss = upstreamTcpMss;
     this.clientCidr = clientCidr;
     this.outboundInterface = outboundInterface;
     this.operatorUrl = operatorUrl;
@@ -174,6 +180,10 @@ export class EgressPolicy {
       `iptables ${iptablesAction} FORWARD -d ${this.clientCidr} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`
     ];
 
+    if (this.upstreamTcpMss !== null) {
+      rules.push(`iptables -t mangle ${iptablesAction} POSTROUTING -d ${this.clientCidr} -p tcp --tcp-flags SYN,RST SYN -m tcpmss --mss ${this.upstreamTcpMss + 1}:65535 -j TCPMSS --set-mss ${this.upstreamTcpMss}`);
+    }
+
     for (const destination of this.blockedDestinations) {
       rules.push(`iptables ${iptablesAction} FORWARD -s ${this.clientCidr} -d ${formatCidr(destination)} -j REJECT`);
     }
@@ -189,6 +199,11 @@ export class EgressPolicy {
           `iptables ${iptablesAction} FORWARD -s ${this.clientCidr} -d ${formatCidr(destination)} -o ${this.outboundInterface} -j ACCEPT`
         );
       }
+      // Legacy clients use low ephemeral ports that some internet paths filter.
+      // Translate TCP/UDP into the high dynamic range; retain NAT for ICMP etc.
+      for (const protocol of ['tcp', 'udp']) {
+        rules.push(`iptables -t nat ${iptablesAction} POSTROUTING -s ${this.clientCidr} -o ${this.outboundInterface} -p ${protocol} -j MASQUERADE --to-ports 49152-65535`);
+      }
       rules.push(`iptables -t nat ${iptablesAction} POSTROUTING -s ${this.clientCidr} -o ${this.outboundInterface} -j MASQUERADE`);
     }
 
@@ -197,7 +212,7 @@ export class EgressPolicy {
   }
 
   firewallRulesNft({ tableSuffix = 'lease', action = 'up' } = {}) {
-    const suffix = sanitizeNftName(tableSuffix);
+    const suffix = callKey(tableSuffix);
     const filterTable = `sipfax_${suffix}`;
     const natTable = `sipfax_nat_${suffix}`;
     if (action === 'down') {
@@ -216,6 +231,11 @@ export class EgressPolicy {
       `add rule inet ${filterTable} forward ip daddr ${this.clientCidr} ct state established,related accept`
     ];
 
+    if (this.upstreamTcpMss !== null) {
+      rules.push(`add chain inet ${filterTable} upstream_mss { type filter hook postrouting priority mangle; policy accept; }`);
+      rules.push(`add rule inet ${filterTable} upstream_mss ip daddr ${this.clientCidr} tcp flags & (syn | rst) == syn tcp option maxseg size > ${this.upstreamTcpMss} tcp option maxseg size set ${this.upstreamTcpMss}`);
+    }
+
     for (const destination of this.blockedDestinations) {
       rules.push(`add rule inet ${filterTable} forward ip saddr ${this.clientCidr} ip daddr ${formatCidr(destination)} reject`);
     }
@@ -233,6 +253,9 @@ export class EgressPolicy {
       }
       rules.push(`add table ip ${natTable}`);
       rules.push(`add chain ip ${natTable} postrouting { type nat hook postrouting priority 100; policy accept; }`);
+      for (const protocol of ['tcp', 'udp']) {
+        rules.push(`add rule ip ${natTable} postrouting ip saddr ${this.clientCidr} oifname "${this.outboundInterface}" meta l4proto ${protocol} masquerade to :49152-65535`);
+      }
       rules.push(`add rule ip ${natTable} postrouting ip saddr ${this.clientCidr} oifname "${this.outboundInterface}" masquerade`);
     }
 
@@ -241,21 +264,33 @@ export class EgressPolicy {
   }
 
   leaseDescriptor({ callId, lease }) {
+    ipToInt(lease.clientAddress);
+    const scoped = new EgressPolicy({
+      clientCidr: `${lease.clientAddress}/32`,
+      outboundInterface: this.outboundInterface,
+      operatorUrl: this.operatorUrl,
+      allowInternet: this.allowInternet,
+      allowDns: this.allowDns,
+      upstreamTcpMss: this.upstreamTcpMss,
+      allowedDestinations: this.allowedDestinations.map(formatCidr),
+      blockedDestinations: this.blockedDestinations.map(formatCidr)
+    });
     return {
       version: 1,
       callId,
       lease: { ...lease },
-      clientCidr: this.clientCidr,
+      clientCidr: scoped.clientCidr,
       outboundInterface: this.outboundInterface,
       operatorUrl: this.operatorUrl,
       allowInternet: this.allowInternet,
+      upstreamTcpMss: this.upstreamTcpMss,
       nft: {
-        up: this.firewallRulesNft({ tableSuffix: callId, action: 'up' }),
-        down: this.firewallRulesNft({ tableSuffix: callId, action: 'down' })
+        up: scoped.firewallRulesNft({ tableSuffix: callId, action: 'up' }),
+        down: scoped.firewallRulesNft({ tableSuffix: callId, action: 'down' })
       },
       iptables: {
-        up: this.firewallRules({ action: 'up' }).filter((rule) => rule.startsWith('iptables ')),
-        down: this.firewallRules({ action: 'down' }).filter((rule) => rule.startsWith('iptables '))
+        up: scoped.firewallRules({ action: 'up' }).filter((rule) => rule.startsWith('iptables ')),
+        down: scoped.firewallRules({ action: 'down' }).filter((rule) => rule.startsWith('iptables '))
       }
     };
   }
@@ -266,6 +301,7 @@ export class EgressPolicy {
       outboundInterface: this.outboundInterface,
       operatorUrl: this.operatorUrl,
       allowInternet: this.allowInternet,
+      upstreamTcpMss: this.upstreamTcpMss,
       allowDns: this.allowDns,
       allowedDestinations: this.allowedDestinations.map(formatCidr),
       blockedDestinations: this.blockedDestinations.map(formatCidr)
@@ -287,9 +323,11 @@ export class PppSessionController {
     this.egressPolicy = egressPolicy;
     this.pppdSupervisor = pppdSupervisor;
     this.sessions = new Map();
+    this.terminating = new Set();
   }
 
   begin(callId) {
+    if (this.terminating.has(callId)) throw new Error('PPP call is still terminating');
     const session = {
       callId,
       state: 'awaiting-auth',
@@ -332,8 +370,17 @@ export class PppSessionController {
       return false;
     }
 
+    const exited = session.exited ?? this.pppdSupervisor?.whenExited?.(callId);
+    if (exited) this.terminating.add(callId);
     this.stopPppd(callId);
-    this.addressPool.release(callId);
+    if (exited) {
+      exited.then(() => {
+        this.addressPool.release(callId);
+        this.terminating.delete(callId);
+      });
+    } else {
+      this.addressPool.release(callId);
+    }
     this.sessions.delete(callId);
     return true;
   }
@@ -359,6 +406,7 @@ export class PppSessionController {
       }
     });
     session.egressDescriptor = session.pppd?.egressDescriptorPath ?? null;
+    session.exited = this.pppdSupervisor.whenExited?.(callId) ?? null;
     return true;
   }
 
@@ -479,11 +527,6 @@ function cidrContains(cidr, addressInt) {
 
 function formatCidr(cidr) {
   return `${intToIp(cidr.network)}/${cidr.prefixLength}`;
-}
-
-function sanitizeNftName(value) {
-  const sanitized = String(value).replace(/[^a-zA-Z0-9_]/g, '_');
-  return sanitized || 'lease';
 }
 
 function ipToInt(address) {

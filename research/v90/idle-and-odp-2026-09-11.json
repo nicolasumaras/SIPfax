@@ -1,0 +1,274 @@
+{
+  "idle_reference": {
+    "v90-efc00dc-3000": {
+      "lane": 5,
+      "bins": [
+        {
+          "symbols": [
+            7,
+            113
+          ],
+          "mse": 0.5251803653266099,
+          "correlation": 0.9996243264748249,
+          "wrong_labels": 7
+        },
+        {
+          "symbols": [
+            120,
+            240
+          ],
+          "mse": 1.084363699752596,
+          "correlation": 0.9992199775230441,
+          "wrong_labels": 40
+        },
+        {
+          "symbols": [
+            240,
+            720
+          ],
+          "mse": 707.7671481167248,
+          "correlation": 0.4636439492777476,
+          "wrong_labels": 351
+        },
+        {
+          "symbols": [
+            720,
+            1620
+          ],
+          "mse": 1211.7202431880369,
+          "correlation": 0.06066414058930323,
+          "wrong_labels": 898
+        },
+        {
+          "symbols": [
+            1620,
+            4096
+          ],
+          "mse": 1274.8929389667583,
+          "correlation": 0.01636402305085612,
+          "wrong_labels": 2474
+        }
+      ]
+    },
+    "v90-preemph2": {
+      "lane": 8,
+      "bins": [
+        {
+          "symbols": [
+            7,
+            113
+          ],
+          "mse": 0.4494361205985096,
+          "correlation": 0.9996796983330868,
+          "wrong_labels": 0
+        },
+        {
+          "symbols": [
+            120,
+            240
+          ],
+          "mse": 793.9665287488152,
+          "correlation": 0.3913101101974338,
+          "wrong_labels": 80
+        },
+        {
+          "symbols": [
+            240,
+            720
+          ],
+          "mse": 1311.3822206517332,
+          "correlation": 0.024120349811715652,
+          "wrong_labels": 479
+        },
+        {
+          "symbols": [
+            720,
+            1620
+          ],
+          "mse": 1330.3116084587064,
+          "correlation": 0.02735023232261493,
+          "wrong_labels": 899
+        },
+        {
+          "symbols": [
+            1620,
+            4096
+          ],
+          "mse": 1286.4155073109293,
+          "correlation": 0.004608024577566474,
+          "wrong_labels": 2475
+        }
+      ]
+    },
+    "v90-3000-26400": {
+      "lane": 2,
+      "bins": [
+        {
+          "symbols": [
+            7,
+            113
+          ],
+          "mse": 0.27279079932723427,
+          "correlation": 0.9996283123180657,
+          "wrong_labels": 0
+        },
+        {
+          "symbols": [
+            120,
+            240
+          ],
+          "mse": 384.3186076841301,
+          "correlation": 0.48633199222176915,
+          "wrong_labels": 67
+        },
+        {
+          "symbols": [
+            240,
+            720
+          ],
+          "mse": 750.9287291073935,
+          "correlation": 0.04476849701220193,
+          "wrong_labels": 480
+        },
+        {
+          "symbols": [
+            720,
+            1620
+          ],
+          "mse": 740.554289505884,
+          "correlation": 0.03830811965690192,
+          "wrong_labels": 900
+        },
+        {
+          "symbols": [
+            1620,
+            4096
+          ],
+          "mse": 744.9219328339432,
+          "correlation": 0.03425172678876875,
+          "wrong_labels": 2472
+        }
+      ]
+    },
+    "v90-efc00dc-auto": {
+      "lane": 0,
+      "bins": [
+        {
+          "symbols": [
+            7,
+            121
+          ],
+          "mse": 0.35713970591028954,
+          "correlation": 0.9996169380997747,
+          "wrong_labels": 1
+        },
+        {
+          "symbols": [
+            128,
+            248
+          ],
+          "mse": 0.4045201938765521,
+          "correlation": 0.999536492703649,
+          "wrong_labels": 0
+        },
+        {
+          "symbols": [
+            248,
+            728
+          ],
+          "mse": 748.9396666623616,
+          "correlation": 0.13394615403264445,
+          "wrong_labels": 408
+        },
+        {
+          "symbols": [
+            728,
+            1628
+          ],
+          "mse": 872.0242120700599,
+          "correlation": 0.02521115538173438,
+          "wrong_labels": 900
+        },
+        {
+          "symbols": [
+            1628,
+            4096
+          ],
+          "mse": 846.0200091023243,
+          "correlation": 0.007391138965348875,
+          "wrong_labels": 2462
+        }
+      ]
+    }
+  },
+  "odp_recognition": [
+    {
+      "case": "v90-efc00dc-3000",
+      "lanes": []
+    },
+    {
+      "case": "v90-preemph2-first",
+      "lanes": [
+        {
+          "lane": 7,
+          "detected_sample": 52261,
+          "b1_sample": 51736,
+          "seconds_after_b1": 0.065625
+        },
+        {
+          "lane": 8,
+          "detected_sample": 52261,
+          "b1_sample": 51736,
+          "seconds_after_b1": 0.065625
+        }
+      ]
+    },
+    {
+      "case": "v90-3000-26400-7ba92b5",
+      "lanes": [
+        {
+          "lane": 0,
+          "detected_sample": 52481,
+          "b1_sample": 51955,
+          "seconds_after_b1": 0.06575
+        },
+        {
+          "lane": 1,
+          "detected_sample": 52481,
+          "b1_sample": 51955,
+          "seconds_after_b1": 0.06575
+        },
+        {
+          "lane": 2,
+          "detected_sample": 52481,
+          "b1_sample": 51955,
+          "seconds_after_b1": 0.06575
+        },
+        {
+          "lane": 9,
+          "detected_sample": 52480,
+          "b1_sample": 51955,
+          "seconds_after_b1": 0.065625
+        }
+      ]
+    },
+    {
+      "case": "v90-efc00dc-auto",
+      "lanes": [
+        {
+          "lane": 0,
+          "detected_sample": 51828,
+          "b1_sample": 50975,
+          "seconds_after_b1": 0.106625
+        },
+        {
+          "lane": 9,
+          "detected_sample": 51828,
+          "b1_sample": 50975,
+          "seconds_after_b1": 0.106625
+        }
+      ]
+    }
+  ],
+  "scope": "Offline initial training windows. V.42 helper is not integrated into the live modem yet."
+}

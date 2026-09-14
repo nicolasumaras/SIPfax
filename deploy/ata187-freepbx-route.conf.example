@@ -1,0 +1,15 @@
+; Merge this extension into the existing [from-internal-custom] context.
+; Endpoint names and dialed number below are specific to the development lab.
+; TRYLOCK is retained for the lifetime of this caller channel.
+exten => 12345678,1,NoOp(SIPfax with ATA187 profile preparation)
+ same => n,GotoIf($["${CUT(CHANNEL,-,1)}" != "PJSIP/23416874" & "${CUT(CHANNEL,-,1)}" != "PJSIP/63416874"]?dial)
+ same => n,Set(SIPFAX_ATA_LOCK=${TRYLOCK(sipfax-ata187)})
+ same => n,GotoIf($["${SIPFAX_ATA_LOCK}" != "1"]?busy)
+ same => n,TrySystem(/usr/local/bin/sipfax-ata-prepare)
+ same => n,GotoIf($["${SYSTEMSTATUS}" != "SUCCESS"]?unavailable)
+ same => n(dial),Dial(PJSIP/sipfax,60)
+ same => n,Hangup()
+ same => n(busy),Busy(2)
+ same => n,Hangup(17)
+ same => n(unavailable),Congestion(2)
+ same => n,Hangup(41)

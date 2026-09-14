@@ -1,0 +1,603 @@
+{
+  "replay_origin": [
+    {
+      "variant": "baseline",
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first@0",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@1",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@2",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@3",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@4",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@5",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@6",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@7",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@0",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@1",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@2",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@3",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@4",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@5",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@6",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@7",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@0",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@1",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@2",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@3",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@4",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@5",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@6",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@7",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@0",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@1",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@2",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@3",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@4",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@5",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@6",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@7",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        }
+      ]
+    },
+    {
+      "variant": "slow_02",
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first@0",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@1",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@2",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@3",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@4",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@5",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@6",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-3000-7ba92b5-first@7",
+          "crc_frames": 2,
+          "lcp_configure_frames": 2
+        },
+        {
+          "case": "v90-efc00dc-3000@0",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@1",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@2",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@3",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@4",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@5",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@6",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-efc00dc-3000@7",
+          "crc_frames": 0,
+          "lcp_configure_frames": 0
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@0",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@1",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@2",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@3",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@4",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@5",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@6",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5@7",
+          "crc_frames": 17,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@0",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@1",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@2",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@3",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@4",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@5",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@6",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        },
+        {
+          "case": "v90-efc00dc-auto@7",
+          "crc_frames": 20,
+          "lcp_configure_frames": 4
+        }
+      ]
+    }
+  ],
+  "known_b1_trellis": [
+    {
+      "variant": "baseline",
+      "cases": [
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3200-7ba92b5-control",
+          "crc_frames": 17
+        },
+        {
+          "case": "v90-aa1ac2f-deployed-auto",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17
+        }
+      ]
+    },
+    {
+      "variant": "known_b1_trellis",
+      "cases": [
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3200-7ba92b5-control",
+          "crc_frames": 17
+        },
+        {
+          "case": "v90-aa1ac2f-deployed-auto",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17
+        }
+      ]
+    },
+    {
+      "variant": "known_b1_trellis_slow",
+      "cases": [
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3200-7ba92b5-control",
+          "crc_frames": 17
+        },
+        {
+          "case": "v90-aa1ac2f-deployed-auto",
+          "crc_frames": 0
+        },
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 2
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17
+        }
+      ]
+    }
+  ],
+  "echo_adaptation": [
+    {
+      "variant": 0,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        }
+      ]
+    },
+    {
+      "variant": 0.0005,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    },
+    {
+      "variant": 0.001,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    },
+    {
+      "variant": 0.002,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 15,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        }
+      ]
+    },
+    {
+      "variant": 0.005,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        }
+      ]
+    }
+  ],
+  "quantized_echo_reference": [
+    {
+      "variant": 0.0005,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    },
+    {
+      "variant": 0.001,
+      "cases": [
+        {
+          "case": "v90-3000-7ba92b5-first",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-efc00dc-3000",
+          "crc_frames": 0,
+          "initial_lcp_seen": false
+        },
+        {
+          "case": "v90-3000-26400-7ba92b5",
+          "crc_frames": 17,
+          "initial_lcp_seen": true
+        },
+        {
+          "case": "v90-efc00dc-auto",
+          "crc_frames": 20,
+          "initial_lcp_seen": true
+        }
+      ]
+    }
+  ],
+  "note": "Private recorded inputs, 15\u201332 second replay; origin offsets 0\u20137 samples. FCS counts alone do not imply valid PPP or successful hardware negotiation. Experimental variants were not deployed."
+}

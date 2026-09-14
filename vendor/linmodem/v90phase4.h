@@ -1,0 +1,33 @@
+#ifndef V90PHASE4_H
+#define V90PHASE4_H
+#include "v90training.h"
+#include "v90pcm.h"
+#include "v90upstream.h"
+typedef struct {
+    unsigned samples,stage,rbar_end,trn_start,generated,mp_length,mp_ack,mp_announced;
+    unsigned ed_frame,data_start,trn_frames;
+    int alaw,uinfo,have_cpt,have_cp,have_ack,rx_e_logged;
+    V90Training rx;
+    V90Cp cpt,cp;
+    V90Pcm encoder;
+    V90Upstream upstream;
+    unsigned data_bits;
+    /* Opt-in initial V.42 detection decline. Never evidence of PPP startup. */
+    unsigned v42_decline_enabled,v42_complete,v42_reply_started,v42_reply_bits;
+    void *data_opaque;
+    int (*get_data_bit)(void *);
+    uint8_t mp[132];
+    int16_t frame[6];
+    V90SDetect rate_detector;
+    V90Cp preceding_cp;
+    unsigned renegotiations,reneg_start,rt_start;
+    /* Preserve pre-E PCM across the delayed training detector decision. */
+    int16_t upstream_history[160];
+    unsigned upstream_history_position,upstream_history_count;
+} V90Phase4;
+void v90_phase4_init(V90Phase4 *s,int alaw,int uinfo);
+int16_t v90_phase4_next(V90Phase4 *s,int16_t input);
+void v90_phase4_init_rate(V90Phase4 *s,int alaw,int uinfo,unsigned rate);
+/* Explicit negotiated profile. Invalid profiles leave state unchanged. */
+int v90_phase4_init_profile(V90Phase4 *,int alaw,int uinfo,unsigned rate,unsigned symbol_rate,unsigned high_carrier);
+#endif

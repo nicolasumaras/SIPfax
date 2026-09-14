@@ -73,7 +73,6 @@ static void logmsg(const char *fmt, ...) {
 /* ------------------------------------------------------------------ G.711 */
 /* Classic CCITT reference conversions (public domain). */
 #define G711_BIAS 0x84
-#define G711_CLIP 8159
 
 static int16_t ulaw2linear(uint8_t u) {
     u = ~u;
@@ -83,14 +82,14 @@ static int16_t ulaw2linear(uint8_t u) {
 }
 
 static uint8_t linear2ulaw(int16_t pcm) {
-    int sign = (pcm >> 8) & 0x80;
-    if (sign) pcm = (int16_t)-pcm;
-    if (pcm > G711_CLIP) pcm = G711_CLIP;
-    int mag = pcm + G711_BIAS;
+    /* Keep magnitude in int: negating INT16_MIN must not wrap. */
+    int sign = pcm < 0 ? 0x80 : 0;
+    int mag = pcm < 0 ? -(int)pcm : (int)pcm;
+    if (mag > 32635) mag = 32635;
+    mag += G711_BIAS;
     int exp = 7;
-    for (int mask = 0x4000; exp > 0 && (mag & mask) == 0; mask >>= 1) exp--;
-    int man = (mag >> (exp + 3)) & 0x0f;
-    return (uint8_t)(~(sign | (exp << 4) | man));
+    for (int mask = 0x4000; exp > 0 && !(mag & mask); mask >>= 1) exp--;
+    return (uint8_t)~(sign | (exp << 4) | ((mag >> (exp + 3)) & 0x0f));
 }
 
 static int16_t alaw2linear(uint8_t a) {

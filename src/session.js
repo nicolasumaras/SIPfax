@@ -80,7 +80,7 @@ export class MultiSessionManager {
   startFromInvite(invite) {
     const existing = this.sessions.get(invite.callId);
     if (existing) {
-      return { accepted: true, session: existing.session, retransmit: true };
+      return { accepted: true, session: existing.session, ready: existing.ready, retransmit: true };
     }
 
     if (this.sessions.size >= this.maxSessions) {
@@ -99,23 +99,40 @@ export class MultiSessionManager {
       return { accepted: false, statusCode: 486, reason: 'Busy Here' };
     }
 
-    const modem = this.modemFactory ? this.modemFactory(invite.callId) : null;
-    const line = this.lineFactory({
-      callId: invite.callId,
-      codec: supportedCodec,
-      rtpHost: this.rtpHost,
-      rtpPort,
-      modem
+    let modem;
+    let line;
+    try {
+      modem = this.modemFactory ? this.modemFactory(invite.callId) : null;
+      line = this.lineFactory({
+        callId: invite.callId,
+        codec: supportedCodec,
+        rtpHost: this.rtpHost,
+        rtpPort,
+        modem
+      });
+    } catch (error) {
+      // No Line has started, so no socket owns this allocation yet.
+      this.rtpPortPool.release(rtpPort);
+      const cleanupFailed = cleanupError => console.error(`modem ${invite.callId} construction cleanup failed: ${cleanupError.message}`);
+      try { Promise.resolve(modem?.stop?.()).catch(cleanupFailed); }
+      catch (cleanupError) { cleanupFailed(cleanupError); }
+      console.error(`line ${invite.callId} construction failed: ${error.message}`);
+      return { accepted: false, statusCode: 500, reason: 'Server Internal Error' };
+    }
+    const ownsCall = callId => callId === invite.callId && this.sessions.get(callId)?.line === line;
+    line.on('pty-opened', ({ callId, slavePath }) => {
+      if (ownsCall(callId)) this.openPty(callId, { slavePath });
     });
-    line.on('pty-opened', ({ callId, slavePath }) => this.openPty(callId, { slavePath }));
-    line.on('pty-closed', ({ callId }) => this.closePty(callId));
+    line.on('pty-closed', ({ callId }) => {
+      if (ownsCall(callId)) this.closePty(callId);
+    });
+    line.on('backend-exit', ({ callId }) => {
+      if (ownsCall(callId) && this.sessions.get(callId).session.state !== 'terminated') {
+        this.terminate(callId);
+      }
+    });
     line.on('backend-log', ({ callId, line: msg }) => console.log(`modem[${callId}] ${String(msg).trim()}`));
     line.on('backend-error', ({ callId, error }) => console.error(`modem[${callId}] error: ${error?.message ?? error}`));
-    // RTP only flows after ACK, so this async bind completes well before media.
-    Promise.resolve(line.start()).catch((error) =>
-      console.error(`line ${invite.callId} rtp bind failed: ${error.message}`)
-    );
-
     const session = new CallSession({
       callId: invite.callId,
       fromTag: invite.fromTag,
@@ -125,8 +142,18 @@ export class MultiSessionManager {
       localRtpPort: rtpPort,
       publicHost: this.publicHost
     });
-    this.sessions.set(invite.callId, { session, line });
-    return { accepted: true, session };
+    const entry = { session, line };
+    this.sessions.set(invite.callId, entry);
+    const failed = error => {
+      console.error(`line ${invite.callId} rtp bind failed: ${error.message}`);
+      if (this.sessions.get(invite.callId) === entry) this.terminate(invite.callId);
+      return false;
+    };
+    try {
+      entry.ready = Promise.resolve(line.start()).then(
+        () => this.sessions.get(invite.callId) === entry, failed);
+    } catch (error) { entry.ready = Promise.resolve(failed(error)); }
+    return { accepted: true, session, ready: entry.ready };
   }
 
   acknowledge(callId) {
@@ -134,6 +161,7 @@ export class MultiSessionManager {
     if (!entry) {
       return false;
     }
+    if (entry.session.state === 'established') return true;
     entry.session.markEstablished(this.ppp.begin(callId));
     return true;
   }
@@ -176,10 +204,12 @@ export class MultiSessionManager {
       return false;
     }
     entry.session.markTerminated();
-    Promise.resolve(entry.line.stop()).catch(() => {});
-    if (entry.line.rtpPort != null) {
-      this.rtpPortPool?.release?.(entry.line.rtpPort);
-    }
+    const closureFailed = error => console.error(`line ${callId} close failed; RTP port retained: ${error.message}`);
+    try {
+      Promise.resolve(entry.line.stop()).then(() => {
+        if (entry.line.rtpPort != null) this.rtpPortPool?.release?.(entry.line.rtpPort);
+      }, closureFailed);
+    } catch (error) { closureFailed(error); }
     this.ppp.terminate(callId);
     this.sessions.delete(callId);
     return true;

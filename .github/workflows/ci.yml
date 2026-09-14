@@ -17,3 +17,257 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Test routing against the real kernel in an isolated namespace
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nftables iproute2
+          sudo unshare --net "$(command -v node)" tools/tests/egress-kernel.mjs
+      - name: Test V34 LAPM DTE transfer and retraining
+        run: |
+          gcc -O1 -g -std=gnu99 -fcommon -fsanitize=address,undefined -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v34-dte.c vendor/linmodem/v34dte.c vendor/linmodem/serial.c vendor/linmodem/v90lapmlink.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/{v42,hdlc,crc,bit_operations,logging,alloc,async}.c -o /tmp/v34-dte-test
+          /tmp/v34-dte-test
+      - name: Test V34 clock estimate history
+        run: |
+          gcc -O1 -g -std=gnu99 -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-clock-history.c -lm -o /tmp/v34-clock-history-test
+          /tmp/v34-clock-history-test
+      - name: Test V34 retrain response waveform
+        run: |
+          gcc -O1 -g -std=gnu99 -fsanitize=address,undefined tools/tests/v34-retrain-entry.c vendor/linmodem/v34_phase2.c vendor/linmodem/v34info1c.c -lm -o /tmp/v34-retrain-entry-test
+          /tmp/v34-retrain-entry-test
+      - name: Test V34 asynchronous wire framing
+        run: |
+          gcc -O1 -g -std=gnu99 -fcommon -fsanitize=address,undefined -Ivendor/linmodem -Ivendor/spandsp-v42/src -DHAVE_STDBOOL_H tools/tests/v34-serial.c vendor/linmodem/serial.c -o /tmp/v34-serial-test
+          /tmp/v34-serial-test
+      - name: Test reproducible source packaging
+        run: python3 -m unittest discover -s tools/tests -p test_package_source.py
+      - name: Test RTP capture audit
+        run: python3 -m unittest discover -s tools/tests -p test_audit_rtp.py
+      - name: Test PPP bulk upload receiver
+        run: python3 -m unittest discover -s tools/tests -p test_ppp_upload_fixture.py
+      - name: Test PPP upload evidence audit
+        run: python3 -m unittest discover -s tools/tests -p test_audit_ppp_upload.py
+      - name: Test redundant audio packet bridge
+        run: python3 -m unittest discover -s tools/tests -p test_sipfax_red.py
+      - name: Test ATA call preparation
+        run: python3 -m unittest discover -s tools/tests -p test_ata187_prepare.py
+
+  native-modem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3-numpy
+      - name: Build native modem
+        run: make -C vendor/linmodem
+      - name: Verify native build reproducibility across directories
+        run: python3 tools/tests/native-build-reproducibility.py vendor/linmodem/lm
+      - name: Test V34 MP field bit order
+        run: python3 tools/tests/v34-mp-fields.py vendor/linmodem/lm
+      - name: Verify V34 Figure 9 labels and branch table
+        run: python3 tools/tests/v34-fig9-table.py
+      - name: Test V34 corrected-label traceback and settled decoding
+        run: python3 tools/tests/v34-fig9-state.py vendor/linmodem/lm
+      - name: Verify V34 clockwise mapper coordinates
+        run: python3 tools/audit-v34-mapper.py vendor/linmodem/lm
+      - name: Verify V34 Table 11 current-interval ordering
+        run: python3 tools/audit-v34-table11.py vendor/linmodem/lm
+      - name: Test V34 precoded link and frame alignment
+        run: python3 tools/tests/v34-table11-link.py vendor/linmodem/lm
+      - name: Test V34 startup with specification-derived synchronization
+        run: python3 tools/tests/v34-startup-sync.py vendor/linmodem/lm
+      - name: Sanitize V34 shell mapping boundaries
+        run: python3 tools/tests/v34-shell-boundary.py
+      - name: Test V34 B1 reference initialization
+        run: python3 tools/tests/v34-b1-reference.py vendor/linmodem/lm
+      - name: Test V34 live receive role selection
+        run: python3 tools/tests/v34-peer-role.py vendor/linmodem/lm
+      - name: Test V34 generated audio receive path
+        run: python3 tools/tests/v34-generated-audio.py vendor/linmodem/lm
+      - name: Test V34 carrier readiness
+        run: python3 tools/tests/v34-readiness.py vendor/linmodem/lm
+      - name: Test V34 data sample continuity across silence
+        run: python3 tools/tests/v34-data-timeline.py vendor/linmodem/lm
+      - name: Test V34 decoder reset and traceback warmup
+        run: python3 tools/tests/v34-traceback-reset.py vendor/linmodem/lm
+      - name: Test V34 acquisition buffer handoff
+        run: python3 tools/tests/v34-acq-replay.py vendor/linmodem/lm
+      - name: Test V34 nonlinear encoder projection
+        run: python3 tools/tests/v34-nonlinear.py vendor/linmodem/lm
+      - name: Test V34 low-rate bit grouping
+        run: python3 tools/tests/v34-low-framing.py vendor/linmodem/lm
+      - name: Test V34 B1 scrambler and superframe placement
+        run: python3 tools/tests/v34-b1-framing.py vendor/linmodem/lm
+      - name: Sanitize V34 E sequence recognition
+        run: |
+          gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-e.c -o /tmp/v34-e
+          /tmp/v34-e
+      - name: Sanitize V34 S transition detector
+        run: |
+          gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-s-detect.c vendor/linmodem/v34sdetect.c -lm -o /tmp/v34-s-detect
+          /tmp/v34-s-detect
+      - name: Sanitize V34 INFO1c decoding
+        run: |
+          gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-info1c.c vendor/linmodem/v34info1c.c -lm -o /tmp/v34-info1c
+          /tmp/v34-info1c
+      - name: Sanitize V34 receive level conversion
+        run: |
+          gcc -std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v34-rx-level.c -o /tmp/v34-rx-level
+          /tmp/v34-rx-level
+      - name: Test incremental native header dependencies
+        run: python3 tools/tests/native-build-dependencies.py
+      - name: Test synthetic waveforms and committed training fixtures
+        shell: bash
+        run: |
+          set -e
+          for test in v42-detect v42-startup v8-cj v8-role-menu v90-cp v90-dil v90-training-profile v90-s-detect v90-s-profile v90-startup v90-startup-profile v90-rate-selection v90-reneg-training v90-shell v90-mapping v90-carrier-fit v90-equalizer v90-equalizer-half v90-qam32 v90-qam8 v90-qam8-wave v90-trellis v90-frame-delivery v90-rtcp v90-b1 v90-train-tx v90-pcm v90-e-recovery v90-cps v90-cps-wave v90-echo v90-line-echo v90-echo-delay linmodem-framing; do
+            /usr/bin/python3 "tools/tests/$test.py"
+          done
+      - name: Test 3200-symbol low carrier
+        run: |
+          set -e
+          for rate in 4800 7200 9600 12000 14400 16800 19200 21600 24000 26400 28800 31200; do
+            python3 tools/tests/v90-qam8-wave.py --low-carrier --"$rate" --pcmu
+          done
+          for rate in 26400 28800 31200; do
+            python3 tools/tests/v90-qam8-wave.py --low-carrier --"$rate" --pcmu --long-clock --isi --random-payloads --timing-sweep --seed 98017
+          done
+      - name: Sanitize startup profile negotiation
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-startup-profile-sanitize
+          /tmp/v90-startup-profile-sanitize
+      - name: Sanitize startup PPP downshift
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-startup-downshift.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v90train_tx.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-startup-downshift
+          /tmp/v90-startup-downshift
+      - name: Test 3000-symbol rate renegotiation
+        run: |
+          python3 tools/tests/v90-reneg-training.py --3000
+          python3 tools/tests/v90-reneg-training.py --3000 --low-carrier
+      - name: Sanitize Phase4 profile retention
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-phase4-profile-sanitize.c vendor/linmodem/v90phase4.c vendor/linmodem/v90training.c vendor/linmodem/v90pcm.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c vendor/linmodem/v90upstream.c vendor/linmodem/v90trellis.c vendor/linmodem/v90qam8.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-phase4-profile-sanitize
+          /tmp/v90-phase4-profile-sanitize
+      - name: Test training profiles through mu-law
+        run: python3 tools/tests/v90-training-profile.py --pcmu
+      - name: Sanitize training profile initialization
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-training-profile-sanitize.c vendor/linmodem/v90training.c vendor/linmodem/v90cp.c vendor/linmodem/v90dil.c -lm -o /tmp/v90-training-profile-sanitize
+          /tmp/v90-training-profile-sanitize
+      - name: Test 3000-symbol PCM profiles
+        run: |
+          set -e
+          for baud in 3000 3200; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads
+            SIPFAX_V90_ODP_TRAINING=1 python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads
+            SIPFAX_V90_ODP_TRAINING=1 python3 tools/tests/v90-qam8-wave.py --symbol-rate "$baud" --28800 --pcmu --odp-prefix --isi --random-payloads --odp-idle-ms 0
+          done
+          for rate in 4800 7200 9600 12000 14400 16800 19200 21600 24000 26400 28800; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --low-carrier
+          done
+          for rate in 26400 28800; do
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --long-clock --isi --random-payloads --timing-sweep --seed 98017
+            python3 tools/tests/v90-qam8-wave.py --symbol-rate 3000 --"$rate" --pcmu --long-clock --isi --random-payloads --timing-sweep --seed 98017 --low-carrier
+          done
+      - name: Sanitize PCM profile initialization
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-upstream-profile-sanitize.c vendor/linmodem/v90upstream.c vendor/linmodem/v90qam8.c vendor/linmodem/v90mapping.c vendor/linmodem/v90shell.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-upstream-profile-sanitize
+          /tmp/v90-upstream-profile-sanitize
+      - name: Sanitize LAPM candidate selection
+        run: |
+          echo '0439610baf6b2f0e3aa0539d489bad2f92414c1887cc00915a6057f495cc5526  vendor/spandsp-v42/src/v42.c' | sha256sum -c -
+          gcc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-maybe-uninitialized -fsanitize=address,undefined -fno-omit-frame-pointer -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v90-lapm-select.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/v42.c vendor/spandsp-v42/src/hdlc.c vendor/spandsp-v42/src/crc.c vendor/spandsp-v42/src/bit_operations.c vendor/spandsp-v42/src/logging.c vendor/spandsp-v42/src/alloc.c vendor/spandsp-v42/src/async.c -o /tmp/v90-lapm-select-sanitize
+          /tmp/v90-lapm-select-sanitize
+      - name: Sanitize LAPM runtime bridge
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-maybe-uninitialized -fsanitize=address,undefined -fno-omit-frame-pointer -D_GNU_SOURCE -DHAVE_STDBOOL_H -DHAVE_MALLOC_H -DHAVE_POSIX_MEMALIGN -Ivendor/linmodem -Ivendor/spandsp-v42/src tools/tests/v90-lapm-link.c vendor/linmodem/v90lapmlink.c vendor/linmodem/v90lapmselect.c vendor/linmodem/v42detect.c vendor/spandsp-v42/src/v42.c vendor/spandsp-v42/src/hdlc.c vendor/spandsp-v42/src/crc.c vendor/spandsp-v42/src/bit_operations.c vendor/spandsp-v42/src/logging.c vendor/spandsp-v42/src/alloc.c vendor/spandsp-v42/src/async.c -o /tmp/v90-lapm-link-sanitize
+          /tmp/v90-lapm-link-sanitize
+      - name: Test upstream clock recovery
+        run: |
+          /usr/bin/python3 tools/tests/v90_shell_reference.py
+          /usr/bin/python3 tools/tests/v90-qam8-wave.py --clock-drift
+          /usr/bin/python3 tools/tests/v90-qam8-wave.py --9600
+          /usr/bin/python3 tools/tests/v90-qam8-wave.py --9600 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --12000
+          python3 tools/tests/v90-qam8-wave.py --12000 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --12000 --isi
+          python3 tools/tests/v90-qam8-wave.py --14400
+          python3 tools/tests/v90-qam8-wave.py --14400 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --14400 --isi
+          python3 tools/tests/v90-carrier-fit.py --120
+          python3 tools/tests/v90-equalizer.py --120
+          python3 tools/tests/v90-equalizer.py --long --120
+          python3 tools/tests/v90-equalizer-half.py --120
+          python3 tools/tests/v90-qam32.py --16800
+          python3 tools/tests/v90-qam32.py --19200
+          python3 tools/tests/v90-qam32.py --21600
+          python3 tools/tests/v90-qam32.py --24000
+          python3 tools/tests/v90-qam32.py --26400
+          python3 tools/tests/v90-qam32.py --28800
+          python3 tools/tests/v90-qam32.py --31200
+          python3 tools/tests/v90-equalizer.py --long
+          python3 tools/tests/v90-qam8-wave.py --16800
+          python3 tools/tests/v90-qam8-wave.py --16800 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --16800 --isi
+          python3 tools/tests/v90-qam8-wave.py --19200
+          python3 tools/tests/v90-qam8-wave.py --19200 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --19200 --isi
+          python3 tools/tests/v90-qam8-wave.py --21600
+          python3 tools/tests/v90-qam8-wave.py --21600 --clock-drift
+          python3 tools/tests/v90-qam8-wave.py --21600 --isi
+          python3 tools/tests/v90-qam8-wave.py --21600 --clock-drift --isi
+          python3 tools/tests/v90-qam8-wave.py --21600 --long-clock --isi
+          python3 tools/tests/v90-qam8-wave.py --21600 --long-clock --isi --pcmu
+          python3 tools/tests/v90-qam8-wave.py --19200 --long-clock --isi --pcmu
+          python3 tools/tests/v90-qam8-wave.py --24000 --long-clock --isi --pcmu
+          python3 tools/tests/v90-qam8-wave.py --24000 --long-clock --isi --pcmu --random-payloads --timing-sweep
+      - name: Test experimental 26400 upstream waveform
+        run: |
+          python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep
+          for seed in 43127 62091 98017; do
+            python3 tools/tests/v90-qam8-wave.py --26400 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
+          done
+      - name: Test experimental 28800 upstream waveform
+        run: |
+          python3 tools/tests/v90-qam8-wave.py --28800 --long-clock --isi --pcmu --random-payloads --timing-sweep
+          for seed in 43127 62091 98017; do
+            python3 tools/tests/v90-qam8-wave.py --28800 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
+          done
+      - name: Test opt-in upstream erasure guard
+        run: |
+          SIPFAX_V90_ERASURE_GUARD=1 python3 tools/tests/v90-qam8-wave.py --28800 --pcmu --clock-drift
+          SIPFAX_V90_ERASURE_GUARD=1 python3 tools/tests/v90-qam8-wave.py --28800 --pcmu --clock-drift --erase-sample 4000 --erase-samples 160
+      - name: Test experimental 31200 upstream waveform
+        run: |
+          python3 tools/tests/v90-qam8-wave.py --31200 --long-clock --isi --pcmu --random-payloads --timing-sweep
+          for seed in 43127 62091 98017; do
+            python3 tools/tests/v90-qam8-wave.py --31200 --long-clock --isi --pcmu --random-payloads --timing-sweep --seed "$seed" --keep-going
+          done
+      - name: Test automatic echo bridge framing
+        run: SIPFAX_V90_LINE_ECHO=auto python3 tools/tests/linmodem-framing.py
+      - name: Sanitize echo delay acquisition
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-echo-delay-sanitize.c vendor/linmodem/v90echodelay.c vendor/linmodem/v90lineecho.c -lm -o /tmp/v90-echo-delay-sanitize
+          /tmp/v90-echo-delay-sanitize
+      - name: Sanitize line echo history
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-line-echo-sanitize.c vendor/linmodem/v90lineecho.c -lm -o /tmp/v90-line-echo-sanitize
+          /tmp/v90-line-echo-sanitize
+      - name: Sanitize upstream shell mapping
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-shell-sanitize.c vendor/linmodem/v90shell.c -o /tmp/v90-shell-sanitize
+          /tmp/v90-shell-sanitize
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-mapping-sanitize.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c vendor/linmodem/v90shell.c vendor/linmodem/v90qam8.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c -lm -o /tmp/v90-mapping-sanitize
+          /tmp/v90-mapping-sanitize
+      - name: Sanitize variable B1 equalizer lengths
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-equalizer-length-sanitize.c vendor/linmodem/v90equalizer.c -lm -o /tmp/v90-equalizer-length-sanitize
+          /tmp/v90-equalizer-length-sanitize
+      - name: Sanitize provisional feedback history
+        run: |
+          gcc -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Ivendor/linmodem tools/tests/v90-feedback-sanitize.c vendor/linmodem/v90trellis.c vendor/linmodem/v90equalizer.c vendor/linmodem/v90shell.c vendor/linmodem/v90mapping.c vendor/linmodem/v42detect.c vendor/linmodem/v90odp.c -lm -o /tmp/v90-feedback-sanitize
+          /tmp/v90-feedback-sanitize
+      - name: Test experimental soft receiver lifecycle
+        run: |
+          SIPFAX_V90_SOFT_RX=1 /usr/bin/python3 tools/tests/v90-e-recovery.py
+          SIPFAX_V90_SOFT_RX=1 /usr/bin/python3 tools/tests/v90-cps-wave.py

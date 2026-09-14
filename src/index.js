@@ -5,8 +5,8 @@ import { AddressPool, EgressPolicy, PppCredentialStore, PppSessionController, pa
 import { PppdSupervisor } from './pppd-supervisor.js';
 import { SipfaxConfig } from './config.js';
 
-export const DEFAULT_SOFTMODEM_BINARY = '/opt/sipfax/bin/sipfax-softmodem';
-export const DEFAULT_SLMODEM_BRIDGE = '/opt/sipfax/bin/sipfax-slmodem-bridge';
+import { resolveModemCommand } from './modem-command.js';
+export { DEFAULT_SOFTMODEM_BINARY, DEFAULT_SLMODEM_BRIDGE, DEFAULT_LINMODEM_BINARY } from './modem-command.js';
 
 const { config, seeded } = SipfaxConfig.load();
 if (seeded) {
@@ -27,12 +27,10 @@ function sanitizeId(value) {
 // One fresh modem backend per call. Reads config.modem at call time so engine /
 // modulation changes apply to subsequent calls. Each call gets a unique tty link.
 function createModemFactory() {
-  const softmodem = process.env.SIPFAX_SOFTMODEM_BINARY ?? DEFAULT_SOFTMODEM_BINARY;
-  const bridge = process.env.SIPFAX_SLMODEM_BRIDGE ?? DEFAULT_SLMODEM_BRIDGE;
   const args = parseList(process.env.SIPFAX_MODEM_ARGS, []);
   return (callId) => {
     const modem = config.modem;
-    const command = modem.command ?? (modem.engine === 'slmodem' ? bridge : softmodem);
+    const command = resolveModemCommand(modem);
     const env = {};
     if (modem.modulation) env.SIPFAX_MODEM_MODULATION = modem.modulation;
     if (modem.slmodemd) env.SIPFAX_SLMODEMD = modem.slmodemd;
@@ -66,6 +64,7 @@ function buildPpp() {
       operatorUrl: process.env.SIPFAX_OPERATOR_URL ?? `http://${operatorHost}:${operatorPort}`,
       allowInternet: process.env.SIPFAX_EGRESS_ENABLED !== 'false',
       allowDns: process.env.SIPFAX_EGRESS_DNS !== 'false',
+      upstreamTcpMss: process.env.SIPFAX_PPP_UPSTREAM_TCP_MSS ? Number(process.env.SIPFAX_PPP_UPSTREAM_TCP_MSS) : null,
       allowedDestinations: parseList(process.env.SIPFAX_EGRESS_ALLOW, ['0.0.0.0/0'])
     })
   });
@@ -88,6 +87,7 @@ const operator = new OperatorHttpServer({
   port: operatorPort,
   config,
   diagnostics: () => server.diagnostics(),
+  onPppEvent: (event, token) => ppp.pppdSupervisor?.acceptHookEvent(event, token) ?? false,
   freepbx: {
     serverHost: config.sip.publicHost,
     sipPort: config.sip.sipPort,

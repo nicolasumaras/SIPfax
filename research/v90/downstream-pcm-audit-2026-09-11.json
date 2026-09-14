@@ -1,0 +1,69 @@
+{
+  "scope": "Independent mu-law Sr=1 inverse mapping of generated PCM, followed by asynchronous PPP FCS checks; not an analogue receiver audit.",
+  "call": "b68ac9a4-98bd-4512-b3a8-b0197d005eab",
+  "intervals": [
+    {
+      "start": 24.0,
+      "end": 599.0,
+      "offset": 5,
+      "invalid_constellation_samples": 0,
+      "uart_bytes": 2008119,
+      "valid_frames": 2045,
+      "invalid_fcs_frames": 0,
+      "invalid_fcs_times": [],
+      "protocol_counts": {
+        "0xc021": 24,
+        "0xc223": 2,
+        "0x8021": 4,
+        "0x8057": 1,
+        "0x21": 238,
+        "0x2f": 131,
+        "0x2d": 1645
+      },
+      "out_of_range_mapping_frames": 0
+    },
+    {
+      "start": 612.0,
+      "end": 650.0,
+      "offset": 5,
+      "invalid_constellation_samples": 0,
+      "uart_bytes": 145676,
+      "valid_frames": 146,
+      "invalid_fcs_frames": 0,
+      "invalid_fcs_times": [],
+      "protocol_counts": {
+        "0x2f": 9,
+        "0x2d": 120,
+        "0x21": 16,
+        "0xc021": 1
+      },
+      "out_of_range_mapping_frames": 0
+    }
+  ],
+  "negative_control": {
+    "change": "Invert one PCM sample at 40 seconds plus two samples in a copied recording",
+    "invalid_fcs_frames": 1,
+    "require_clean_exit_code": 1
+  },
+  "limitations": [
+    "Intervals exclude training and renegotiation",
+    "Valid FCS counts do not establish that every possible frame was extracted",
+    "Exact wire match does not measure ATA DAC output"
+  ],
+  "wire_matches": [
+    {
+      "start": 24,
+      "end": 599,
+      "samples": 4600000,
+      "exact_match": true,
+      "wire_sample_offset": 192000
+    },
+    {
+      "start": 612,
+      "end": 650,
+      "samples": 304000,
+      "exact_match": true,
+      "wire_sample_offset": 4896000
+    }
+  ]
+}

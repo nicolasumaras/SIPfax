@@ -378,7 +378,15 @@ static void cm_send(V8State *s, int mod_mask)
     }
     v8_put_byte(s, V8_EXT);             /* wire 0x10: no second-ext claims, as slmodem */
     v8_put_byte(s, V8_DATA_LAPM);       /* wire 0x2A: LAPM (V.42) */
-    v8_put_byte(s, V8_DATA_NOCELULAR);  /* wire 0x0D: GSTN standard analogue */
+    if (mod_mask & V8_MOD_V90) {
+        /* V.90 section 9.1.1 requires both access and PCM availability.
+           Constants use linmodem's bit-reversed octet representation:
+           wire 8d = digital PSTN; wire 47 = digital PCM, 27 = analogue PCM. */
+        v8_put_byte(s, s->calling ? V8_DATA_NOCELULAR : 0xb1);
+        v8_put_byte(s, s->calling ? 0xe4 : 0xe2);
+    } else {
+        v8_put_byte(s, V8_DATA_NOCELULAR);
+    }
 }
 
 /* selection the modulation according to V8 priority from the bits in 'mask' */
@@ -445,6 +453,11 @@ int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
         }
     }
     int ret = 0;
+    if(!s->calling && s->state==V8_JM_SEND && !s->got_cj &&
+       v8_cj_receive(&s->cj,input,nb_samples)) {
+        s->got_cj=1;
+        fprintf(stderr,"[v8] coherent three-octet CJ acquired after %.6fs of JM\n",s->cj.found_at/8000.0);
+    }
 
     /* modulation part */
     switch (s->state) {
@@ -640,6 +653,7 @@ int V8_process(V8State *s, s16 *output, s16 *input, int nb_samples)
                        require >=400ms of JM before we accept one */
                     s->got_cj = 0;
                     s->data_zero_count = 0;
+                    v8_cj_init(&s->cj);
                     sm_set_timer(&s->v8_start_timer, 400);
                     s->state = V8_JM_SEND;
                     s->selected_mod_mask = s->modulation_mask & s->decoded_modulations;
